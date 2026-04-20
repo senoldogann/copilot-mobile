@@ -3,7 +3,11 @@
 import React from "react";
 import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
 import { useRouter } from "expo-router";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import type { ComponentProps } from "react";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
+
+type FeatherIconName = ComponentProps<typeof Feather>["name"];
 
 type Props = {
     isConnected: boolean;
@@ -69,7 +73,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
         return (
             <View style={styles.container}>
                 <View style={styles.disconnectIcon}>
-                    <Text style={styles.disconnectIconText}>⊘</Text>
+                    <Feather name="wifi-off" size={24} color={colors.textTertiary} />
                 </View>
                 <Text style={styles.title}>Connect to VS Code</Text>
                 <Text style={styles.subtitle}>
@@ -93,7 +97,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
         <View style={styles.container}>
             <View style={styles.logoContainer}>
                 <View style={styles.logo}>
-                    <Text style={styles.logoText}>✦</Text>
+                    <Ionicons name="sparkles" size={28} color={colors.copilotPurple} />
                 </View>
             </View>
             <Text style={styles.title}>GitHub Copilot</Text>
@@ -102,23 +106,23 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
             </Text>
 
             <View style={styles.suggestions}>
-                <SuggestionChip icon="▸" text="Analyze project" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
-                <SuggestionChip icon="◇" text="Fix a bug" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
-                <SuggestionChip icon="⊞" text="Write tests" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
-                <SuggestionChip icon="⊡" text="Explain code" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
+                <SuggestionChip iconName="terminal" text="Analyze project" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
+                <SuggestionChip iconName="tool" text="Fix a bug" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
+                <SuggestionChip iconName="check-square" text="Write tests" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
+                <SuggestionChip iconName="code" text="Explain code" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
             </View>
         </View>
     );
 }
 
-function SuggestionChip({ icon, text, onPress }: { icon: string; text: string; onPress?: ((text: string) => void) | undefined }) {
+function SuggestionChip({ iconName, text, onPress }: { iconName: FeatherIconName; text: string; onPress?: ((text: string) => void) | undefined }) {
     return (
         <Pressable
             style={styles.chip}
             onPress={() => onPress?.(text)}
             accessibilityLabel={text}
         >
-            <Text style={styles.chipIcon}>{icon}</Text>
+            <Feather name={iconName} size={13} color={colors.accent} />
             <Text style={styles.chipText}>{text}</Text>
         </Pressable>
     );
@@ -143,26 +147,18 @@ const styles = StyleSheet.create({
         alignItems: "center",
         marginBottom: 20,
     },
-    disconnectIconText: {
-        fontSize: 24,
-        color: colors.textTertiary,
-    },
     logoContainer: {
         marginBottom: 20,
     },
     logo: {
-        width: 56,
-        height: 56,
-        borderRadius: 28,
+        width: 64,
+        height: 64,
+        borderRadius: 32,
         backgroundColor: colors.copilotPurpleMuted,
         borderWidth: 1,
         borderColor: colors.copilotPurpleBorder,
         justifyContent: "center",
         alignItems: "center",
-    },
-    logoText: {
-        fontSize: 26,
-        color: colors.copilotPurple,
     },
     title: {
         fontSize: fontSize.xxl,
@@ -208,10 +204,6 @@ const styles = StyleSheet.create({
         paddingHorizontal: 14,
         borderWidth: 1,
         borderColor: colors.border,
-    },
-    chipIcon: {
-        fontSize: 12,
-        color: colors.accent,
     },
     chipText: {
         fontSize: fontSize.md,

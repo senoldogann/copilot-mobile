@@ -172,6 +172,18 @@ export function createMessageHandler(
                     console.log("[settings] autoApproveReads:", message.payload.autoApproveReads);
                     return;
 
+                case "session.mode.update":
+                    return sessionManager.updateSessionMode(
+                        message.payload.sessionId,
+                        message.payload.agentMode
+                    );
+
+                case "permission.level.update":
+                    return sessionManager.updatePermissionLevel(
+                        message.payload.sessionId,
+                        message.payload.permissionLevel
+                    );
+
                 case "models.request":
                     return sessionManager.listModels();
 

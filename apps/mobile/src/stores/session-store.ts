@@ -3,6 +3,9 @@
 
 import { create } from "zustand";
 import type {
+    AgentMode,
+    PermissionLevel,
+    RuntimeMode,
     SessionInfo,
     ModelInfo,
     ReasoningEffortLevel,
@@ -61,6 +64,17 @@ export type UserInputPrompt = {
     sessionId: string;
     requestId: string;
     prompt: string;
+    choices?: ReadonlyArray<string>;
+    allowFreeform?: boolean;
+};
+
+export type PlanExitPrompt = {
+    sessionId: string;
+    requestId: string;
+    summary: string;
+    planContent: string;
+    actions: ReadonlyArray<string>;
+    recommendedAction: string;
 };
 
 export type SessionStore = {
@@ -73,8 +87,9 @@ export type SessionStore = {
     // null if model does not support reasoning effort.
     reasoningEffort: ReasoningEffortLevel | null;
     autoApproveReads: boolean;
-    autoApproveAll: boolean;
-    agentMode: "agent" | "plan" | "autopilot";
+    agentMode: AgentMode;
+    permissionLevel: PermissionLevel;
+    runtimeMode: RuntimeMode;
 
     // Bridge + host combined capability state
     hostCapabilities: HostSessionCapabilities;
@@ -88,6 +103,7 @@ export type SessionStore = {
     // Permission and input prompts (modal overlay)
     permissionPrompt: PermissionPrompt | null;
     userInputPrompt: UserInputPrompt | null;
+    planExitPrompt: PlanExitPrompt | null;
 
     // Actions
     setActiveSession: (sessionId: string | null) => void;
@@ -99,8 +115,9 @@ export type SessionStore = {
     setSelectedModel: (model: string) => void;
     setReasoningEffort: (effort: ReasoningEffortLevel | null) => void;
     setAutoApproveReads: (enabled: boolean) => void;
-    setAutoApproveAll: (enabled: boolean) => void;
-    setAgentMode: (mode: "agent" | "plan" | "autopilot") => void;
+    setAgentMode: (mode: AgentMode) => void;
+    setPermissionLevel: (level: PermissionLevel) => void;
+    setRuntimeMode: (mode: RuntimeMode) => void;
     setHostCapabilities: (caps: HostSessionCapabilities) => void;
     setBridgeSettings: (settings: BridgeSettings) => void;
 
@@ -127,6 +144,7 @@ export type SessionStore = {
     setCurrentIntent: (intent: string | null) => void;
     setPermissionPrompt: (prompt: PermissionPrompt | null) => void;
     setUserInputPrompt: (prompt: UserInputPrompt | null) => void;
+    setPlanExitPrompt: (prompt: PlanExitPrompt | null) => void;
 
     replaceChatItems: (items: ReadonlyArray<ChatItem>) => void;
     clearChatItems: () => void;
@@ -219,10 +237,11 @@ export const useSessionStore = create<SessionStore>((set) => ({
     selectedModel: "",
     reasoningEffort: null,
     autoApproveReads: false,
-    autoApproveAll: false,
-    agentMode: "agent" as const,
+    agentMode: "agent",
+    permissionLevel: "default",
+    runtimeMode: "interactive",
     hostCapabilities: { elicitation: false },
-    bridgeSettings: { autoApproveReads: false, autoApproveAll: false, readApprovalsConfigurable: true },
+    bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
 
     chatItems: [],
     isAssistantTyping: false,
@@ -230,6 +249,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     permissionPrompt: null,
     userInputPrompt: null,
+    planExitPrompt: null,
 
     setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
 
@@ -283,8 +303,9 @@ export const useSessionStore = create<SessionStore>((set) => ({
     setReasoningEffort: (effort) => set({ reasoningEffort: effort }),
 
     setAutoApproveReads: (enabled) => set({ autoApproveReads: enabled }),
-    setAutoApproveAll: (enabled) => set({ autoApproveAll: enabled }),
     setAgentMode: (mode) => set({ agentMode: mode }),
+    setPermissionLevel: (level) => set({ permissionLevel: level }),
+    setRuntimeMode: (mode) => set({ runtimeMode: mode }),
 
     setHostCapabilities: (caps) => set({ hostCapabilities: caps }),
 
@@ -465,12 +486,15 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     setUserInputPrompt: (prompt) => set({ userInputPrompt: prompt }),
 
+    setPlanExitPrompt: (prompt) => set({ planExitPrompt: prompt }),
+
     replaceChatItems: (items) =>
         set({
             chatItems: [...items],
             isAssistantTyping: false,
             permissionPrompt: null,
             userInputPrompt: null,
+            planExitPrompt: null,
         }),
 
     clearChatItems: () => {
@@ -481,6 +505,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             currentIntent: null,
             permissionPrompt: null,
             userInputPrompt: null,
+            planExitPrompt: null,
         });
     },
 
@@ -494,15 +519,17 @@ export const useSessionStore = create<SessionStore>((set) => ({
             selectedModel: "",
             reasoningEffort: null,
             autoApproveReads: false,
-            autoApproveAll: false,
-            agentMode: "agent" as const,
+            agentMode: "agent",
+            permissionLevel: "default",
+            runtimeMode: "interactive",
             hostCapabilities: { elicitation: false },
-            bridgeSettings: { autoApproveReads: false, autoApproveAll: false, readApprovalsConfigurable: true },
+            bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
             chatItems: [],
             isAssistantTyping: false,
             currentIntent: null,
             permissionPrompt: null,
             userInputPrompt: null,
+            planExitPrompt: null,
         });
     },
 }));

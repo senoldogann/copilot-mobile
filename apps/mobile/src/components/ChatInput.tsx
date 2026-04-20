@@ -1,6 +1,6 @@
 // Mesaj giriş çubuğu — GitHub Copilot mobil stili model/effort seçiciler, resim ekleme, gönderim modları
 
-import React, { useState, useCallback, useRef } from "react";
+import React, { useState, useCallback } from "react";
 import {
     View,
     TextInput,
@@ -16,9 +16,9 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import { useSessionStore, deriveAvailableReasoningEfforts } from "../stores/session-store";
 import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
-import type { ModelInfo, ReasoningEffortLevel } from "@copilot-mobile/shared";
+import type { AgentMode, ModelInfo, PermissionLevel, ReasoningEffortLevel } from "@copilot-mobile/shared";
 import { Feather, Ionicons } from "@expo/vector-icons";
-import type { AgentMode } from "./Icons";
+import { updatePermissionLevel, updateSessionMode } from "../services/bridge";
 
 // --- Types ---
 
@@ -77,7 +77,7 @@ function DropdownModal({
                     <View style={dropdownStyles.header}>
                         <Text style={dropdownStyles.title}>{title}</Text>
                         <Pressable onPress={onClose} hitSlop={8}>
-                            <Text style={dropdownStyles.closeIcon}>✕</Text>
+                            <Feather name="x" size={16} color={colors.textTertiary} />
                         </Pressable>
                     </View>
                     {children}
@@ -313,10 +313,56 @@ function AttachmentChip({
     );
 }
 
-const agentModeConfig: Record<AgentMode, { label: string; desc: string; iconName: "shield" | "shield-checkmark" | "shield-half"; color: string }> = {
-    agent: { label: "Agent", desc: "Full access — reads, writes, shell", iconName: "shield", color: colors.copilotPurple },
-    plan: { label: "Plan", desc: "Plan only — no auto-execute", iconName: "shield-checkmark", color: colors.success },
-    autopilot: { label: "Autopilot", desc: "Auto-approve everything", iconName: "shield-half", color: colors.accent },
+const agentModeConfig: Record<AgentMode, {
+    label: string;
+    desc: string;
+    iconName: React.ComponentProps<typeof Feather>["name"];
+    color: string;
+}> = {
+    agent: {
+        label: "Agent",
+        desc: "Use tools and make changes in the workspace.",
+        iconName: "cpu",
+        color: colors.copilotPurple,
+    },
+    plan: {
+        label: "Plan",
+        desc: "Draft a plan first, then continue when it looks right.",
+        iconName: "list",
+        color: colors.warning,
+    },
+    ask: {
+        label: "Ask",
+        desc: "Read-only analysis for questions and explanations.",
+        iconName: "help-circle",
+        color: colors.textLink,
+    },
+};
+
+const permissionLevelConfig: Record<PermissionLevel, {
+    label: string;
+    desc: string;
+    iconName: React.ComponentProps<typeof Ionicons>["name"];
+    color: string;
+}> = {
+    default: {
+        label: "Default",
+        desc: "Prompt when approval is needed. Safe reads can auto-approve.",
+        iconName: "shield-outline",
+        color: colors.textSecondary,
+    },
+    bypass: {
+        label: "Bypass",
+        desc: "Skip approval prompts but still allow follow-up questions.",
+        iconName: "shield-checkmark-outline",
+        color: colors.success,
+    },
+    autopilot: {
+        label: "Autopilot",
+        desc: "Auto-approve actions and continue until the task is done.",
+        iconName: "flash-outline",
+        color: colors.accent,
+    },
 };
 
 // --- Main ChatInput component ---
@@ -326,11 +372,15 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const [isFocused, setIsFocused] = useState(false);
     const [images, setImages] = useState<Array<ImageAttachment>>([]);
     const [showModelPicker, setShowModelPicker] = useState(false);
+    const [showAgentPicker, setShowAgentPicker] = useState(false);
+    const [showPermissionPicker, setShowPermissionPicker] = useState(false);
     const [showEffortPicker, setShowEffortPicker] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
+    const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const agentMode = useSessionStore((s) => s.agentMode);
     const setAgentMode = useSessionStore((s) => s.setAgentMode);
-    const [showModePicker, setShowModePicker] = useState(false);
+    const permissionLevel = useSessionStore((s) => s.permissionLevel);
+    const setPermissionLevel = useSessionStore((s) => s.setPermissionLevel);
 
     const models = useSessionStore((s) => s.models);
     const selectedModel = useSessionStore((s) => s.selectedModel);
@@ -414,6 +464,28 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
         [setReasoningEffort]
     );
 
+    const handleAgentModeSelect = useCallback(
+        async (mode: AgentMode) => {
+            setAgentMode(mode);
+            setShowAgentPicker(false);
+            if (activeSessionId !== null) {
+                await updateSessionMode(activeSessionId, mode);
+            }
+        },
+        [activeSessionId, setAgentMode]
+    );
+
+    const handlePermissionLevelSelect = useCallback(
+        async (level: PermissionLevel) => {
+            setPermissionLevel(level);
+            setShowPermissionPicker(false);
+            if (activeSessionId !== null) {
+                await updatePermissionLevel(activeSessionId, level);
+            }
+        },
+        [activeSessionId, setPermissionLevel]
+    );
+
     const handleSendModeSelect = useCallback(
         (mode: SendMode) => {
             setShowSendMenu(false);
@@ -479,23 +551,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
 
             {/* Toolbar row inside the card */}
             <View style={toolbarStyles.row}>
-                {/* Mode selector */}
-                <Pressable
-                    style={toolbarStyles.modeSelectorPill}
-                    onPress={() => setShowModePicker(true)}
-                    disabled={disabled}
-                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
-                    accessibilityLabel="Mod seç"
-                >
-                    <Ionicons
-                        name={agentModeConfig[agentMode].iconName}
-                        size={13}
-                        color={agentModeConfig[agentMode].color}
-                    />
-                    <Text style={[toolbarStyles.modeText, { color: agentModeConfig[agentMode].color }]}>
-                        {agentModeConfig[agentMode].label}
-                    </Text>
-                </Pressable>
                 {/* Attach / image button */}
                 <Pressable
                     style={[
@@ -522,19 +577,62 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     <Text style={toolbarStyles.modelText} numberOfLines={1}>
                         {modelDisplayName}{effortSuffix}
                     </Text>
-                    <Text style={toolbarStyles.chevron}>⌄</Text>
+                    <Feather name="chevron-down" size={10} color={colors.textTertiary} />
                 </Pressable>
 
-                {/* Effort toggle (if supported) */}
+                {/* Agent picker */}
+                <Pressable
+                    style={toolbarStyles.selectorPill}
+                    onPress={() => setShowAgentPicker(true)}
+                    disabled={disabled}
+                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                    accessibilityLabel="Agent seç"
+                >
+                    <Feather
+                        name={agentModeConfig[agentMode].iconName}
+                        size={12}
+                        color={agentModeConfig[agentMode].color}
+                    />
+                    <Text
+                        style={[toolbarStyles.selectorPillText, { color: agentModeConfig[agentMode].color }]}
+                        numberOfLines={1}
+                    >
+                        {agentModeConfig[agentMode].label}
+                    </Text>
+                    <Feather name="chevron-down" size={10} color={colors.textTertiary} />
+                </Pressable>
+
+                {/* Permission picker */}
+                <Pressable
+                    style={toolbarStyles.selectorPill}
+                    onPress={() => setShowPermissionPicker(true)}
+                    disabled={disabled}
+                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                    accessibilityLabel="Permission seviyesi seç"
+                >
+                    <Ionicons
+                        name={permissionLevelConfig[permissionLevel].iconName}
+                        size={13}
+                        color={permissionLevelConfig[permissionLevel].color}
+                    />
+                    <Text
+                        style={[toolbarStyles.selectorPillText, { color: permissionLevelConfig[permissionLevel].color }]}
+                        numberOfLines={1}
+                    >
+                        {permissionLevelConfig[permissionLevel].label}
+                    </Text>
+                    <Feather name="chevron-down" size={10} color={colors.textTertiary} />
+                </Pressable>
+
                 {effortInfo.supported && effortInfo.listKnown && (
                     <Pressable
                         style={toolbarStyles.toolBtn}
                         onPress={() => setShowEffortPicker(true)}
                         disabled={disabled}
                         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                        accessibilityLabel="Çaba seviyesi seç"
+                        accessibilityLabel="Thinking effort seç"
                     >
-                        <Feather name="settings" size={14} color={colors.textSecondary} />
+                        <Feather name="sliders" size={14} color={colors.textSecondary} />
                     </Pressable>
                 )}
 
@@ -598,7 +696,89 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 />
             </DropdownModal>
 
-            {/* Effort picker modal */}
+            {/* Agent picker modal */}
+            <DropdownModal
+                visible={showAgentPicker}
+                onClose={() => setShowAgentPicker(false)}
+                title="Agents"
+            >
+                <View style={dropdownStyles.effortList}>
+                    {(["agent", "plan", "ask"] as const).map((mode) => {
+                        const cfg = agentModeConfig[mode];
+                        const isSelected = agentMode === mode;
+                        return (
+                            <Pressable
+                                key={mode}
+                                style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
+                                onPress={() => {
+                                    void handleAgentModeSelect(mode);
+                                }}
+                            >
+                                <View style={dropdownStyles.effortItemLeft}>
+                                    <View style={dropdownStyles.checkmarkSlot}>
+                                        {isSelected && <Feather name="check" size={13} color={cfg.color} />}
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text
+                                            style={[
+                                                dropdownStyles.effortLabel,
+                                                isSelected && { color: cfg.color, fontWeight: "700" },
+                                            ]}
+                                        >
+                                            {cfg.label}
+                                        </Text>
+                                        <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
+                                    </View>
+                                </View>
+                                <Feather name={cfg.iconName} size={18} color={cfg.color} />
+                            </Pressable>
+                        );
+                    })}
+                </View>
+            </DropdownModal>
+
+            {/* Permission picker modal */}
+            <DropdownModal
+                visible={showPermissionPicker}
+                onClose={() => setShowPermissionPicker(false)}
+                title="Permissions"
+            >
+                <View style={dropdownStyles.effortList}>
+                    {(["default", "bypass", "autopilot"] as const).map((level) => {
+                        const cfg = permissionLevelConfig[level];
+                        const isSelected = permissionLevel === level;
+                        return (
+                            <Pressable
+                                key={level}
+                                style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
+                                onPress={() => {
+                                    void handlePermissionLevelSelect(level);
+                                }}
+                            >
+                                <View style={dropdownStyles.effortItemLeft}>
+                                    <View style={dropdownStyles.checkmarkSlot}>
+                                        {isSelected && <Feather name="check" size={13} color={cfg.color} />}
+                                    </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text
+                                            style={[
+                                                dropdownStyles.effortLabel,
+                                                isSelected && { color: cfg.color, fontWeight: "700" },
+                                            ]}
+                                        >
+                                            {cfg.label}
+                                        </Text>
+                                        <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
+                                    </View>
+                                </View>
+                                <Ionicons name={cfg.iconName} size={18} color={cfg.color} />
+                            </Pressable>
+                        );
+                    })}
+                </View>
+            </DropdownModal>
+
+            {/* Thinking effort picker modal */}
             <DropdownModal
                 visible={showEffortPicker}
                 onClose={() => setShowEffortPicker(false)}
@@ -618,36 +798,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 onClose={() => setShowSendMenu(false)}
                 onSelect={handleSendModeSelect}
             />
-
-            {/* Mode picker modal */}
-            <DropdownModal
-                visible={showModePicker}
-                onClose={() => setShowModePicker(false)}
-                title="Agent Mode"
-            >
-                <View style={dropdownStyles.effortList}>
-                    {(["agent", "plan", "autopilot"] as const).map((mode) => {
-                        const cfg = agentModeConfig[mode];
-                        const isSelected = agentMode === mode;
-                        return (
-                            <Pressable
-                                key={mode}
-                                style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
-                                onPress={() => { setAgentMode(mode); setShowModePicker(false); }}
-                            >
-                                <View style={dropdownStyles.effortItemLeft}>
-                                    {isSelected && <Feather name="check" size={14} color={cfg.color} style={{ marginRight: 8 }} />}
-                                    <View>
-                                        <Text style={[dropdownStyles.effortLabel, { color: cfg.color }]}>{cfg.label}</Text>
-                                        <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
-                                    </View>
-                                </View>
-                                <Ionicons name={cfg.iconName} size={20} color={cfg.color} />
-                            </Pressable>
-                        );
-                    })}
-                </View>
-            </DropdownModal>
         </View>
     );
 }
@@ -755,6 +905,12 @@ const dropdownStyles = StyleSheet.create({
         textTransform: "uppercase",
         letterSpacing: 0.5,
     },
+    sectionDivider: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: colors.border,
+        marginTop: spacing.sm,
+        marginHorizontal: spacing.lg,
+    },
     effortList: {
         paddingBottom: spacing.sm,
     },
@@ -770,6 +926,12 @@ const dropdownStyles = StyleSheet.create({
     effortItemLeft: {
         flexDirection: "row",
         alignItems: "flex-start",
+        flex: 1,
+    },
+    checkmarkSlot: {
+        width: 22,
+        alignItems: "center",
+        marginTop: 2,
     },
     effortLabel: {
         color: colors.textPrimary,
@@ -903,20 +1065,31 @@ const toolbarStyles = StyleSheet.create({
         borderColor: colors.border,
         backgroundColor: colors.bgElevated,
         gap: 4,
-        maxWidth: 210,
-    },
-    modelIcon: {
-        color: colors.copilotPurple,
-        fontSize: fs.sm,
+        maxWidth: 180,
     },
     modelText: {
         color: colors.textSecondary,
         fontSize: fs.sm,
         fontWeight: "500",
+        flex: 1,
     },
-    chevron: {
-        color: colors.textTertiary,
-        fontSize: fs.xs,
+    selectorPill: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: spacing.sm,
+        paddingVertical: spacing.xs,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.bgElevated,
+        gap: 4,
+        maxWidth: 160,
+    },
+    selectorPillText: {
+        color: colors.textSecondary,
+        fontSize: fs.sm,
+        fontWeight: "500",
+        flex: 1,
     },
     spacer: {
         flex: 1,
@@ -936,21 +1109,6 @@ const toolbarStyles = StyleSheet.create({
     sendMenuChevron: {
         color: colors.textPrimary,
         fontSize: fs.sm,
-    },
-    modeSelectorPill: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 4,
-        paddingHorizontal: 6,
-        paddingVertical: 4,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderColor: colors.copilotPurpleBorder,
-        backgroundColor: colors.copilotPurpleMuted,
-    },
-    modeText: {
-        fontSize: 11,
-        fontWeight: "600",
     },
 });
 

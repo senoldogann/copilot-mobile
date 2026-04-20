@@ -17,6 +17,8 @@ const sessionConfigSchema = z.object({
     model: z.string().min(1),
     reasoningEffort: z.enum(["low", "medium", "high", "xhigh"]).optional(),
     streaming: z.boolean(),
+    agentMode: z.enum(["agent", "plan", "ask"]),
+    permissionLevel: z.enum(["default", "bypass", "autopilot"]),
 });
 
 const sessionContextSchema = z.object({
@@ -170,13 +172,36 @@ const hostSessionCapabilitiesSchema = z.object({
 
 const bridgeSettingsSchema = z.object({
     autoApproveReads: z.boolean(),
-    autoApproveAll: z.boolean().optional().default(false),
     readApprovalsConfigurable: z.boolean(),
 });
 
 const capabilitiesStatePayloadSchema = z.object({
     host: hostSessionCapabilitiesSchema,
     bridge: bridgeSettingsSchema,
+});
+
+const sessionStatePayloadSchema = z.object({
+    sessionId: z.string().min(1),
+    agentMode: z.enum(["agent", "plan", "ask"]),
+    permissionLevel: z.enum(["default", "bypass", "autopilot"]),
+    runtimeMode: z.enum(["interactive", "plan", "autopilot"]),
+});
+
+const userInputRequestPayloadSchema = z.object({
+    sessionId: z.string().min(1),
+    requestId: z.string().uuid(),
+    prompt: z.string().min(1),
+    choices: z.array(z.string().min(1)).readonly().optional(),
+    allowFreeform: z.boolean().optional(),
+});
+
+const planExitRequestPayloadSchema = z.object({
+    sessionId: z.string().min(1),
+    requestId: z.string().min(1),
+    summary: z.string(),
+    planContent: z.string(),
+    actions: z.array(z.string().min(1)).readonly(),
+    recommendedAction: z.string().min(1),
 });
 
 const workspaceOperationResultPayloadSchema = z.object({
@@ -303,11 +328,7 @@ const permissionRequestSchema = baseBridgeMessageSchema.extend({
 
 const userInputRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("user_input.request"),
-    payload: z.object({
-        sessionId: z.string().min(1),
-        requestId: z.string().uuid(),
-        prompt: z.string().min(1),
-    }),
+    payload: userInputRequestPayloadSchema,
 });
 
 const modelsListSchema = baseBridgeMessageSchema.extend({
@@ -344,6 +365,11 @@ const capabilitiesStateSchema = baseBridgeMessageSchema.extend({
     payload: capabilitiesStatePayloadSchema,
 });
 
+const sessionStateSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("session.state"),
+    payload: sessionStatePayloadSchema,
+});
+
 const sessionErrorSchema = baseBridgeMessageSchema.extend({
     type: z.literal("session.error"),
     payload: z.object({
@@ -367,6 +393,11 @@ const assistantIntentSchema = baseBridgeMessageSchema.extend({
         sessionId: z.string().min(1),
         intent: z.string().min(1),
     }),
+});
+
+const planExitRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("plan.exit.request"),
+    payload: planExitRequestPayloadSchema,
 });
 
 const workspaceTreeSchema = baseBridgeMessageSchema.extend({
@@ -433,9 +464,11 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     tokenRefreshSchema,
     reconnectReadySchema,
     capabilitiesStateSchema,
+    sessionStateSchema,
     sessionErrorSchema,
     sessionTitleChangedSchema,
     assistantIntentSchema,
+    planExitRequestSchema,
     workspaceTreeSchema,
     workspaceGitSummarySchema,
     workspacePullResultSchema,
@@ -498,7 +531,23 @@ const userInputRespondSchema = baseBridgeMessageSchema.extend({
 
 const settingsUpdateSchema = baseBridgeMessageSchema.extend({
     type: z.literal("settings.update"),
-    payload: z.object({ autoApproveReads: z.boolean(), autoApproveAll: z.boolean().optional() }),
+    payload: z.object({ autoApproveReads: z.boolean() }),
+});
+
+const sessionModeUpdateSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("session.mode.update"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        agentMode: z.enum(["agent", "plan", "ask"]),
+    }),
+});
+
+const permissionLevelUpdateSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("permission.level.update"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        permissionLevel: z.enum(["default", "bypass", "autopilot"]),
+    }),
 });
 
 const modelsRequestSchema = baseBridgeMessageSchema.extend({
@@ -558,6 +607,8 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     permissionRespondSchema,
     userInputRespondSchema,
     settingsUpdateSchema,
+    sessionModeUpdateSchema,
+    permissionLevelUpdateSchema,
     modelsRequestSchema,
     reconnectSchema,
     capabilitiesRequestSchema,

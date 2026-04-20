@@ -11,15 +11,26 @@ import type {
     ResumeSessionConfig,
     SessionEvent,
     ModelInfo as SDKModelInfo,
+    CustomAgentConfig,
 } from "@github/copilot-sdk";
 
 // SDK does not export ReasoningEffort type from public index; derive array element type.
 type SDKReasoningEffort = NonNullable<SDKModelInfo["supportedReasoningEfforts"]>[number];
+// Derive SessionHooks and hook input types from exported SDKSessionConfig
+type SessionHooks = NonNullable<SDKSessionConfig["hooks"]>;
+type PreToolUseHookInput = Parameters<NonNullable<SessionHooks["onPreToolUse"]>>[0];
+type SDKUserInputRequest = Parameters<NonNullable<SDKSessionConfig["onUserInputRequest"]>>[0];
 import type {
     AdaptedCopilotClient,
     AdaptedCopilotSession,
     AdaptedPermissionRequest,
+    AdaptedPlanExitRequest,
+    AdaptedSessionState,
     AdaptedToolStartDetails,
+    AdaptedUserInputRequest,
+    AgentMode,
+    PermissionLevel,
+    RuntimeMode,
     SessionConfig,
     SessionInfo,
     SessionHistoryItem,
@@ -36,6 +47,26 @@ type SessionRecord = {
     session: AdaptedCopilotSession;
     info: SessionInfo;
     unsubscribes: Array<() => void>;
+};
+
+type SessionStateRef = {
+    agentMode: AgentMode;
+    permissionLevel: PermissionLevel;
+};
+
+const ASK_AGENT_NAME = "ask";
+
+const ASK_AGENT_CONFIG: CustomAgentConfig = {
+    name: ASK_AGENT_NAME,
+    displayName: "Ask",
+    description: "Answer questions without making changes to the workspace.",
+    prompt: [
+        "You are the Ask agent.",
+        "Focus on analysis, explanation, and guidance.",
+        "Never create, edit, or delete files.",
+        "Never run shell commands that change the workspace or environment.",
+        "If the user asks for code changes, explain what should change instead of making the edit.",
+    ].join("\n"),
 };
 
 function adaptSessionContext(metadata: SessionMetadata): SessionInfo["context"] {
@@ -159,6 +190,118 @@ function normalizeModelInfo(sdkModel: SDKModelInfo): ModelInfo {
     }
 
     return base;
+}
+
+function deriveRuntimeMode(state: SessionStateRef): RuntimeMode {
+    if (state.agentMode === "plan") {
+        return "plan";
+    }
+
+    if (state.permissionLevel === "autopilot") {
+        return "autopilot";
+    }
+
+    return "interactive";
+}
+
+function isAskModeMutation(toolName: string, toolArgs: unknown): boolean {
+    const normalizedToolName = toolName.toLowerCase();
+
+    if (
+        normalizedToolName === "bash"
+        || normalizedToolName === "write_bash"
+        || normalizedToolName === "read_bash"
+        || normalizedToolName === "stop_bash"
+        || normalizedToolName === "list_bash"
+    ) {
+        return true;
+    }
+
+    if (normalizedToolName === "str_replace_editor") {
+        if (typeof toolArgs !== "object" || toolArgs === null || Array.isArray(toolArgs)) {
+            return true;
+        }
+
+        const command = (toolArgs as Record<string, unknown>)["command"];
+        return command !== "view";
+    }
+
+    return false;
+}
+
+function buildSessionHooks(stateRef: SessionStateRef): SessionHooks {
+    return {
+        onPreToolUse: (input: PreToolUseHookInput) => {
+            if (stateRef.agentMode !== "ask") {
+                return undefined;
+            }
+
+            if (!isAskModeMutation(input.toolName, input.toolArgs)) {
+                return undefined;
+            }
+
+            return {
+                permissionDecision: "deny",
+                permissionDecisionReason: "Ask agent is limited to read-only analysis.",
+            };
+        },
+    };
+}
+
+async function syncCustomAgent(
+    sdkSession: CopilotSession,
+    agentMode: AgentMode
+): Promise<void> {
+    const currentAgent = await sdkSession.rpc.agent.getCurrent();
+    const selectedAgentName = currentAgent.agent?.name ?? null;
+
+    if (agentMode === "ask") {
+        if (selectedAgentName !== ASK_AGENT_NAME) {
+            await sdkSession.rpc.agent.select({ name: ASK_AGENT_NAME });
+        }
+        return;
+    }
+
+    if (selectedAgentName !== null) {
+        await sdkSession.rpc.agent.deselect();
+    }
+}
+
+async function applySDKSessionState(
+    sdkSession: CopilotSession,
+    stateRef: SessionStateRef
+): Promise<AdaptedSessionState> {
+    await syncCustomAgent(sdkSession, stateRef.agentMode);
+    const runtimeMode = deriveRuntimeMode(stateRef);
+    const result = await sdkSession.rpc.mode.set({ mode: runtimeMode });
+
+    return {
+        agentMode: stateRef.agentMode,
+        permissionLevel: stateRef.permissionLevel,
+        runtimeMode: result.mode,
+    };
+}
+
+async function readSDKSessionState(
+    sdkSession: CopilotSession,
+    permissionLevel: PermissionLevel
+): Promise<AdaptedSessionState> {
+    const [modeResult, agentResult] = await Promise.all([
+        sdkSession.rpc.mode.get(),
+        sdkSession.rpc.agent.getCurrent(),
+    ]);
+    const agentMode: AgentMode =
+        agentResult.agent?.name === ASK_AGENT_NAME
+            ? "ask"
+            : modeResult.mode === "plan"
+                ? "plan"
+                : "agent";
+
+    return {
+        agentMode,
+        permissionLevel,
+        runtimeMode: modeResult.mode,
+    };
 }
 
 function normalizeSessionHistory(
@@ -360,7 +503,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
         handler: ((request: AdaptedPermissionRequest) => Promise<boolean>) | null;
     };
     type InputProxy = {
-        handler: ((prompt: string) => Promise<string>) | null;
+        handler: ((request: AdaptedUserInputRequest) => Promise<string>) | null;
     };
 
     // Wraps SDK CopilotSession, wires event listeners, and returns AdaptedCopilotSession
@@ -368,7 +511,8 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
         sdkSession: CopilotSession,
         config: SessionConfig,
         permissionProxy: PermissionProxy,
-        inputProxy: InputProxy
+        inputProxy: InputProxy,
+        stateRef: SessionStateRef
     ): AdaptedCopilotSession {
         const now = Date.now();
         const sessionId = sdkSession.sessionId;
@@ -441,7 +585,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             },
 
             onUserInputRequest(
-                handler: (prompt: string) => Promise<string>
+                handler: (request: AdaptedUserInputRequest) => Promise<string>
             ): void {
                 inputProxy.handler = handler;
             },
@@ -514,6 +658,26 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                 unsubscribes.push(unsub);
             },
 
+            onRuntimeModeChanged(handler: (runtimeMode: RuntimeMode) => void): void {
+                const unsub = sdkSession.on("session.mode_changed", (event) => {
+                    handler(event.data.newMode as RuntimeMode);
+                });
+                unsubscribes.push(unsub);
+            },
+
+            onPlanExitRequest(handler: (request: AdaptedPlanExitRequest) => void): void {
+                const unsub = sdkSession.on("exit_plan_mode.requested", (event) => {
+                    handler({
+                        requestId: event.data.requestId,
+                        summary: event.data.summary,
+                        planContent: event.data.planContent,
+                        actions: event.data.actions,
+                        recommendedAction: event.data.recommendedAction,
+                    });
+                });
+                unsubscribes.push(unsub);
+            },
+
             async getHistory(): Promise<ReadonlyArray<SessionHistoryItem>> {
                 const events = await sdkSession.getMessages();
                 return normalizeSessionHistory(events);
@@ -543,6 +707,17 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                     elicitation: caps?.ui?.elicitation === true,
                 };
             },
+
+            applyState(nextState: AdaptedSessionState): Promise<AdaptedSessionState> {
+                stateRef.agentMode = nextState.agentMode;
+                stateRef.permissionLevel = nextState.permissionLevel;
+                return applySDKSessionState(sdkSession, stateRef);
+            },
+
+            getState(permissionLevel: PermissionLevel): Promise<AdaptedSessionState> {
+                stateRef.permissionLevel = permissionLevel;
+                return readSDKSessionState(sdkSession, permissionLevel);
+            },
         };
 
         sessions.set(sessionId, { session: adapted, info, unsubscribes });
@@ -567,12 +742,16 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
 
     function createSDKUserInputHandler(
         inputProxy: InputProxy
-    ): (request: { question: string }, invocation: { sessionId: string }) => Promise<{ answer: string; wasFreeform: boolean }> {
+    ): (request: SDKUserInputRequest, invocation: { sessionId: string }) => Promise<{ answer: string; wasFreeform: boolean }> {
         return async (request) => {
             if (inputProxy.handler === null) {
                 return { answer: "", wasFreeform: true };
             }
-            const value = await inputProxy.handler(request.question);
+            const value = await inputProxy.handler({
+                question: request.question,
+                ...(request.choices !== undefined ? { choices: request.choices } : {}),
+                ...(request.allowFreeform !== undefined ? { allowFreeform: request.allowFreeform } : {}),
+            });
             return { answer: value, wasFreeform: true };
         };
     }
@@ -602,12 +781,19 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
 
             const permissionProxy: PermissionProxy = { handler: null };
             const inputProxy: InputProxy = { handler: null };
+            const stateRef: SessionStateRef = {
+                agentMode: config.agentMode,
+                permissionLevel: config.permissionLevel,
+            };
 
             const sdkConfig: SDKSessionConfig = {
                 model: config.model,
                 streaming: config.streaming,
                 onPermissionRequest: createSDKPermissionHandler(permissionProxy),
                 onUserInputRequest: createSDKUserInputHandler(inputProxy),
+                customAgents: [ASK_AGENT_CONFIG],
+                hooks: buildSessionHooks(stateRef),
+                ...(config.agentMode === "ask" ? { agent: ASK_AGENT_NAME } : {}),
             };
 
             // Only pass reasoning effort if model supports it.
@@ -616,7 +802,13 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             }
 
             const sdkSession = await client.createSession(sdkConfig);
-            return wrapSDKSession(sdkSession, config, permissionProxy, inputProxy);
+            const session = wrapSDKSession(sdkSession, config, permissionProxy, inputProxy, stateRef);
+            await session.applyState({
+                agentMode: config.agentMode,
+                permissionLevel: config.permissionLevel,
+                runtimeMode: deriveRuntimeMode(stateRef),
+            });
+            return session;
         },
 
         async resumeSession(sessionId: string): Promise<AdaptedCopilotSession> {
@@ -635,15 +827,23 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             const config: SessionConfig = {
                 model: MODEL_UNKNOWN,
                 streaming: true,
+                agentMode: "agent",
+                permissionLevel: "default",
+            };
+            const stateRef: SessionStateRef = {
+                agentMode: config.agentMode,
+                permissionLevel: config.permissionLevel,
             };
 
             const resumeConfig: ResumeSessionConfig = {
                 onPermissionRequest: createSDKPermissionHandler(permissionProxy),
                 onUserInputRequest: createSDKUserInputHandler(inputProxy),
+                customAgents: [ASK_AGENT_CONFIG],
+                hooks: buildSessionHooks(stateRef),
             };
 
             const sdkSession = await client.resumeSession(sessionId, resumeConfig);
-            const session = wrapSDKSession(sdkSession, config, permissionProxy, inputProxy);
+            const session = wrapSDKSession(sdkSession, config, permissionProxy, inputProxy, stateRef);
             const record = sessions.get(session.id);
 
             if (record !== undefined && metadata !== undefined) {

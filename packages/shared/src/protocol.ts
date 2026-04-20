@@ -13,11 +13,19 @@ export type BaseBridgeMessage = {
 
 export type ReasoningEffortLevel = "low" | "medium" | "high" | "xhigh";
 
+export type AgentMode = "agent" | "plan" | "ask";
+
+export type PermissionLevel = "default" | "bypass" | "autopilot";
+
+export type RuntimeMode = "interactive" | "plan" | "autopilot";
+
 export type SessionConfig = {
     model: string;
     // Some models don't support reasoning effort at all — hence optional.
     reasoningEffort?: ReasoningEffortLevel;
     streaming: boolean;
+    agentMode: AgentMode;
+    permissionLevel: PermissionLevel;
 };
 
 export type SessionMessageAttachment = {
@@ -255,13 +263,36 @@ export type HostSessionCapabilities = {
 
 export type BridgeSettings = {
     autoApproveReads: boolean;
-    autoApproveAll: boolean;
     readApprovalsConfigurable: boolean;
 };
 
 export type CapabilitiesStatePayload = {
     host: HostSessionCapabilities;
     bridge: BridgeSettings;
+};
+
+export type SessionStatePayload = {
+    sessionId: string;
+    agentMode: AgentMode;
+    permissionLevel: PermissionLevel;
+    runtimeMode: RuntimeMode;
+};
+
+export type UserInputRequestPayload = {
+    sessionId: string;
+    requestId: string;
+    prompt: string;
+    choices?: ReadonlyArray<string>;
+    allowFreeform?: boolean;
+};
+
+export type PlanExitRequestPayload = {
+    sessionId: string;
+    requestId: string;
+    summary: string;
+    planContent: string;
+    actions: ReadonlyArray<string>;
+    recommendedAction: string;
 };
 
 // --- Connection State ---
@@ -365,7 +396,7 @@ export type PermissionRequestMessage = BaseBridgeMessage & {
 
 export type UserInputRequestMessage = BaseBridgeMessage & {
     type: "user_input.request";
-    payload: { sessionId: string; requestId: string; prompt: string };
+    payload: UserInputRequestPayload;
 };
 
 export type ModelsListMessage = BaseBridgeMessage & {
@@ -398,6 +429,11 @@ export type CapabilitiesStateMessage = BaseBridgeMessage & {
     payload: CapabilitiesStatePayload;
 };
 
+export type SessionStateMessage = BaseBridgeMessage & {
+    type: "session.state";
+    payload: SessionStatePayload;
+};
+
 export type SessionErrorMessage = BaseBridgeMessage & {
     type: "session.error";
     payload: { sessionId: string; errorType: string; message: string };
@@ -411,6 +447,11 @@ export type SessionTitleChangedMessage = BaseBridgeMessage & {
 export type AssistantIntentMessage = BaseBridgeMessage & {
     type: "assistant.intent";
     payload: { sessionId: string; intent: string };
+};
+
+export type PlanExitRequestMessage = BaseBridgeMessage & {
+    type: "plan.exit.request";
+    payload: PlanExitRequestPayload;
 };
 
 export type ServerMessage =
@@ -436,9 +477,11 @@ export type ServerMessage =
     | TokenRefreshMessage
     | ReconnectReadyMessage
     | CapabilitiesStateMessage
+    | SessionStateMessage
     | SessionErrorMessage
     | SessionTitleChangedMessage
     | AssistantIntentMessage
+    | PlanExitRequestMessage
     | WorkspaceTreeMessage
     | WorkspaceGitSummaryMessage
     | WorkspacePullResultMessage
@@ -497,7 +540,23 @@ export type UserInputRespondMessage = BaseBridgeMessage & {
 
 export type SettingsUpdateMessage = BaseBridgeMessage & {
     type: "settings.update";
-    payload: { autoApproveReads: boolean; autoApproveAll?: boolean };
+    payload: { autoApproveReads: boolean };
+};
+
+export type SessionModeUpdateMessage = BaseBridgeMessage & {
+    type: "session.mode.update";
+    payload: {
+        sessionId: string;
+        agentMode: AgentMode;
+    };
+};
+
+export type PermissionLevelUpdateMessage = BaseBridgeMessage & {
+    type: "permission.level.update";
+    payload: {
+        sessionId: string;
+        permissionLevel: PermissionLevel;
+    };
 };
 
 export type ModelsRequestMessage = BaseBridgeMessage & {
@@ -526,6 +585,8 @@ export type ClientMessage =
     | PermissionRespondMessage
     | UserInputRespondMessage
     | SettingsUpdateMessage
+    | SessionModeUpdateMessage
+    | PermissionLevelUpdateMessage
     | ModelsRequestMessage
     | ReconnectMessage
     | CapabilitiesRequestMessage

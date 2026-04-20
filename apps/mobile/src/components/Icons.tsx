@@ -9,7 +9,7 @@ type IoniconsName = React.ComponentProps<typeof Ionicons>["name"];
 
 export type IconSize = "xs" | "sm" | "md" | "lg" | "xl";
 
-export type AgentMode = "agent" | "plan" | "autopilot";
+export type AgentMode = "agent" | "plan" | "ask";
 
 const SIZE_MAP: Record<IconSize, number> = {
     xs: 10,
@@ -76,14 +76,14 @@ export function ToolIcon({ toolName, size = 12, color = colors.textTertiary }: {
     return <Feather name="tool" size={size} color={color} />;
 }
 
-// Mode icons for Agent/Plan/Autopilot
+// Mode icons for Agent/Plan/Ask
 export function AgentModeIcon({ mode, size = 14, color = colors.textSecondary }: { mode: AgentMode; size?: number; color?: string }) {
     switch (mode) {
         case "agent":
-            return <Ionicons name="shield" size={size} color={color} />;
+            return <Feather name="cpu" size={size} color={color} />;
         case "plan":
-            return <Ionicons name="shield-checkmark" size={size} color={color} />;
-        case "autopilot":
-            return <Ionicons name="shield-half" size={size} color={color} />;
+            return <Feather name="list" size={size} color={color} />;
+        case "ask":
+            return <Feather name="help-circle" size={size} color={color} />;
     }
 }

@@ -2,7 +2,9 @@
 
 import React, { useState } from "react";
 import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
-import type { PermissionPrompt, UserInputPrompt } from "../stores/session-store";
+import type { PermissionPrompt, PlanExitPrompt, UserInputPrompt } from "../stores/session-store";
+import { useSessionStore } from "../stores/session-store";
+import { updatePermissionLevel, updateSessionMode } from "../services/bridge";
 import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
 
 // Permission approval dialog
@@ -93,6 +95,22 @@ export function UserInputDialog({ prompt, onRespond }: InputProps) {
                     placeholderTextColor={colors.textPlaceholder}
                     autoFocus
                 />
+                {prompt.choices !== undefined && prompt.choices.length > 0 && (
+                    <View style={styles.choiceList}>
+                        {prompt.choices.map((choice) => (
+                            <Pressable
+                                key={choice}
+                                style={styles.choiceButton}
+                                onPress={() => {
+                                    onRespond(prompt.requestId, choice);
+                                    setValue("");
+                                }}
+                            >
+                                <Text style={styles.choiceButtonText}>{choice}</Text>
+                            </Pressable>
+                        ))}
+                    </View>
+                )}
                 <Pressable
                     style={({ pressed }) => [
                         styles.approveButton,
@@ -105,6 +123,85 @@ export function UserInputDialog({ prompt, onRespond }: InputProps) {
                 >
                     <Text style={styles.approveText}>Send</Text>
                 </Pressable>
+            </View>
+        </View>
+    );
+}
+
+type PlanExitProps = {
+    prompt: PlanExitPrompt;
+};
+
+export function PlanExitDialog({ prompt }: PlanExitProps) {
+    const setAgentMode = useSessionStore((s) => s.setAgentMode);
+    const setPermissionLevel = useSessionStore((s) => s.setPermissionLevel);
+    const setPlanExitPrompt = useSessionStore((s) => s.setPlanExitPrompt);
+
+    const dismiss = () => {
+        setPlanExitPrompt(null);
+    };
+
+    const continueWithAgent = async () => {
+        setAgentMode("agent");
+        dismiss();
+        await updateSessionMode(prompt.sessionId, "agent");
+    };
+
+    const switchToAutopilot = async () => {
+        setAgentMode("agent");
+        setPermissionLevel("autopilot");
+        dismiss();
+        await updatePermissionLevel(prompt.sessionId, "autopilot");
+        await updateSessionMode(prompt.sessionId, "agent");
+    };
+
+    return (
+        <View style={styles.overlay}>
+            <View style={[styles.card, styles.planCard]}>
+                <View style={styles.cardHeader}>
+                    <Text style={styles.cardTitle}>Plan Ready</Text>
+                </View>
+                <Text style={styles.description}>{prompt.summary}</Text>
+                <View style={styles.planBlock}>
+                    <Text style={styles.planBlockTitle}>Plan</Text>
+                    <Text style={styles.planBlockText}>{prompt.planContent}</Text>
+                </View>
+                <View style={styles.actions}>
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.denyButton,
+                            pressed && styles.denyButtonPressed,
+                        ]}
+                        onPress={dismiss}
+                    >
+                        <Text style={styles.denyText}>Keep Planning</Text>
+                    </Pressable>
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.secondaryButton,
+                            pressed && styles.secondaryButtonPressed,
+                        ]}
+                        onPress={() => {
+                            void continueWithAgent();
+                        }}
+                    >
+                        <Text style={styles.secondaryButtonText}>Continue</Text>
+                    </Pressable>
+                </View>
+                {prompt.actions.includes("autopilot") && (
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.approveButton,
+                            styles.fullWidthButton,
+                            pressed && styles.approveButtonPressed,
+                        ]}
+                        onPress={() => {
+                            void switchToAutopilot();
+                        }}
+                    >
+                        <Text style={styles.approveText}>Continue in Autopilot</Text>
+                    </Pressable>
+                )}
             </View>
         </View>
     );
@@ -221,5 +318,66 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: colors.border,
         fontFamily: "monospace",
+    },
+    choiceList: {
+        gap: spacing.sm,
+        marginBottom: spacing.md,
+    },
+    choiceButton: {
+        borderRadius: borderRadius.sm,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.bg,
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+    },
+    choiceButtonText: {
+        color: colors.textPrimary,
+        fontSize: fs.base,
+        fontWeight: "500",
+    },
+    planCard: {
+        maxHeight: "78%",
+    },
+    planBlock: {
+        borderRadius: borderRadius.sm,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.bg,
+        padding: spacing.md,
+        marginBottom: spacing.lg,
+        gap: spacing.sm,
+    },
+    planBlockTitle: {
+        color: colors.textSecondary,
+        fontSize: fs.sm,
+        fontWeight: "600",
+        textTransform: "uppercase",
+        letterSpacing: 0.4,
+    },
+    planBlockText: {
+        color: colors.textPrimary,
+        fontSize: fs.sm,
+        lineHeight: 20,
+    },
+    secondaryButton: {
+        flex: 1,
+        paddingVertical: 10,
+        borderRadius: borderRadius.sm,
+        alignItems: "center",
+        backgroundColor: colors.bg,
+        borderWidth: 1,
+        borderColor: colors.borderActive,
+    },
+    secondaryButtonPressed: {
+        backgroundColor: colors.bgTertiary,
+    },
+    secondaryButtonText: {
+        color: colors.textPrimary,
+        fontSize: fs.md,
+        fontWeight: "600",
+    },
+    fullWidthButton: {
+        marginTop: spacing.sm,
     },
 });

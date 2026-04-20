@@ -191,8 +191,6 @@ function ConnectionInfo() {
 function ApprovalSettings() {
     const autoApproveReads = useSessionStore((s) => s.autoApproveReads);
     const setAutoApproveReads = useSessionStore((s) => s.setAutoApproveReads);
-    const autoApproveAll = useSessionStore((s) => s.autoApproveAll);
-    const setAutoApproveAll = useSessionStore((s) => s.setAutoApproveAll);
     const readApprovalsConfigurable = useSessionStore(
         (s) => s.bridgeSettings.readApprovalsConfigurable
     );
@@ -204,40 +202,31 @@ function ApprovalSettings() {
 
     return (
         <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Approval</Text>
+            <Text style={styles.sectionTitle}>Default Approvals</Text>
             <View style={styles.toggleCard}>
                 <View style={styles.toggleTextGroup}>
                     <Text style={styles.toggleTitle}>Auto-approve read permissions</Text>
                     <Text style={styles.toggleDescription}>
-                        Automatically approve safe requests like file reads without waiting.
+                        Applies to the Default approval level. Read-only file access is approved without interrupting the session.
                     </Text>
                 </View>
                 <Switch
                     value={autoApproveReads}
                     onValueChange={(value) => {
                         setAutoApproveReads(value);
-                        void updateSettings({ autoApproveReads: value, autoApproveAll });
+                        void updateSettings({ autoApproveReads: value });
                     }}
                     trackColor={{ false: colors.bgOverlay, true: colors.accent }}
                     thumbColor={colors.textOnAccent}
                 />
             </View>
-            <View style={[styles.toggleCard, { marginTop: 8 }]}>
+            <View style={[styles.toggleCard, { marginTop: 8, alignItems: "flex-start" }]}>
                 <View style={styles.toggleTextGroup}>
-                    <Text style={styles.toggleTitle}>Auto-approve all permissions</Text>
+                    <Text style={styles.toggleTitle}>Session permission levels</Text>
                     <Text style={styles.toggleDescription}>
-                        Automatically approve all permission requests including file writes and shell commands.
+                        Choose Default, Bypass, or Autopilot from the composer. Those levels are session controls, not global settings.
                     </Text>
                 </View>
-                <Switch
-                    value={autoApproveAll}
-                    onValueChange={(value) => {
-                        setAutoApproveAll(value);
-                        void updateSettings({ autoApproveReads, autoApproveAll: value });
-                    }}
-                    trackColor={{ false: colors.bgOverlay, true: colors.accent }}
-                    thumbColor={colors.textOnAccent}
-                />
             </View>
         </View>
     );

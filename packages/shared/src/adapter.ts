@@ -4,6 +4,9 @@
 
 import type {
     SessionConfig,
+    AgentMode,
+    PermissionLevel,
+    RuntimeMode,
     PermissionKind,
     ModelInfo,
     SessionInfo,
@@ -27,6 +30,26 @@ export type AdaptedToolStartDetails = {
     arguments?: ToolArguments;
 };
 
+export type AdaptedUserInputRequest = {
+    question: string;
+    choices?: ReadonlyArray<string>;
+    allowFreeform?: boolean;
+};
+
+export type AdaptedSessionState = {
+    agentMode: AgentMode;
+    permissionLevel: PermissionLevel;
+    runtimeMode: RuntimeMode;
+};
+
+export type AdaptedPlanExitRequest = {
+    requestId: string;
+    summary: string;
+    planContent: string;
+    actions: ReadonlyArray<string>;
+    recommendedAction: string;
+};
+
 // Session handle — represents a Copilot session
 export type AdaptedCopilotSession = {
     readonly id: string;
@@ -40,7 +63,7 @@ export type AdaptedCopilotSession = {
         handler: (request: AdaptedPermissionRequest) => Promise<boolean>
     ): void;
     onUserInputRequest(
-        handler: (prompt: string) => Promise<string>
+        handler: (request: AdaptedUserInputRequest) => Promise<string>
     ): void;
     onToolStart(
         handler: (
@@ -56,6 +79,8 @@ export type AdaptedCopilotSession = {
     onSessionError(handler: (errorType: string, message: string) => void): void;
     onTitleChanged(handler: (title: string) => void): void;
     onIntent(handler: (intent: string) => void): void;
+    onRuntimeModeChanged(handler: (runtimeMode: RuntimeMode) => void): void;
+    onPlanExitRequest(handler: (request: AdaptedPlanExitRequest) => void): void;
     getHistory(): Promise<ReadonlyArray<SessionHistoryItem>>;
     // Tüm event listener'ları temizle — reconnect'te eski dinleyicileri kaldırmak için
     unsubscribeAll(): void;
@@ -63,6 +88,8 @@ export type AdaptedCopilotSession = {
     getInfo(): SessionInfo;
     // Session capabilities reported by the host. Read after create/resume.
     getCapabilities(): HostSessionCapabilities;
+    applyState(state: AdaptedSessionState): Promise<AdaptedSessionState>;
+    getState(permissionLevel: PermissionLevel): Promise<AdaptedSessionState>;
 };
 
 // Client — main interface managing the Copilot CLI connection

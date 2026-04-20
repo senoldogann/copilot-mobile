@@ -387,6 +387,10 @@ export function handleServerMessage(message: ServerMessage): void {
                 sessionId: message.payload.sessionId,
                 requestId: message.payload.requestId,
                 prompt: message.payload.prompt,
+                ...(message.payload.choices !== undefined ? { choices: message.payload.choices } : {}),
+                ...(message.payload.allowFreeform !== undefined
+                    ? { allowFreeform: message.payload.allowFreeform }
+                    : {}),
             });
             break;
         }
@@ -402,6 +406,7 @@ export function handleServerMessage(message: ServerMessage): void {
             // Hata durumunda açık dialog'ları temizle — ekranda takılı kalmasın
             sessionStore.setPermissionPrompt(null);
             sessionStore.setUserInputPrompt(null);
+            sessionStore.setPlanExitPrompt(null);
             connectionStore.setError(
                 `[${message.payload.code}] ${message.payload.message}`
             );
@@ -428,11 +433,23 @@ export function handleServerMessage(message: ServerMessage): void {
             break;
         }
 
+        case "session.state": {
+            if (!isActiveSession(message.payload.sessionId)) break;
+            sessionStore.setAgentMode(message.payload.agentMode);
+            sessionStore.setPermissionLevel(message.payload.permissionLevel);
+            sessionStore.setRuntimeMode(message.payload.runtimeMode);
+            if (message.payload.runtimeMode !== "plan") {
+                sessionStore.setPlanExitPrompt(null);
+            }
+            break;
+        }
+
         case "session.error": {
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
             sessionStore.setPermissionPrompt(null);
             sessionStore.setUserInputPrompt(null);
+            sessionStore.setPlanExitPrompt(null);
             connectionStore.setError(
                 `[${message.payload.errorType}] ${message.payload.message}`
             );
@@ -453,6 +470,19 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.intent": {
             sessionStore.setCurrentIntent(message.payload.intent);
+            break;
+        }
+
+        case "plan.exit.request": {
+            if (!isActiveSession(message.payload.sessionId)) break;
+            sessionStore.setPlanExitPrompt({
+                sessionId: message.payload.sessionId,
+                requestId: message.payload.requestId,
+                summary: message.payload.summary,
+                planContent: message.payload.planContent,
+                actions: message.payload.actions,
+                recommendedAction: message.payload.recommendedAction,
+            });
             break;
         }
 

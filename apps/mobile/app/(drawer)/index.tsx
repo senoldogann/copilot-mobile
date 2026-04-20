@@ -25,7 +25,7 @@ import { ChatInput } from "../../src/components/ChatInput";
 import type { ImageAttachment, SendMode } from "../../src/components/ChatInput";
 import { EmptyChat } from "../../src/components/EmptyChat";
 import { ActivityDots } from "../../src/components/ActivityDots";
-import { PermissionDialog, UserInputDialog } from "../../src/components/Dialogs";
+import { PermissionDialog, PlanExitDialog, UserInputDialog } from "../../src/components/Dialogs";
 import { colors, spacing, fontSize, borderRadius } from "../../src/theme/colors";
 import type { SessionConfig, SessionMessageAttachment } from "@copilot-mobile/shared";
 import {
@@ -133,8 +133,11 @@ export default function ChatScreen() {
     const models = useSessionStore((s) => s.models);
     const selectedModel = useSessionStore((s) => s.selectedModel);
     const reasoningEffort = useSessionStore((s) => s.reasoningEffort);
+    const agentMode = useSessionStore((s) => s.agentMode);
+    const permissionLevel = useSessionStore((s) => s.permissionLevel);
     const permissionPrompt = useSessionStore((s) => s.permissionPrompt);
     const userInputPrompt = useSessionStore((s) => s.userInputPrompt);
+    const planExitPrompt = useSessionStore((s) => s.planExitPrompt);
 
     const connectionState = useConnectionStore((s) => s.state);
     const connectionError = useConnectionStore((s) => s.error);
@@ -306,6 +309,8 @@ export default function ChatScreen() {
                     const config: SessionConfig = {
                         model: requestedModelId,
                         streaming: true,
+                        agentMode,
+                        permissionLevel,
                     };
                     if (
                         requestedModel?.supportsReasoningEffort === true &&
@@ -322,7 +327,7 @@ export default function ChatScreen() {
 
             sendMessage(activeSessionId, content, attachments);
         },
-        [activeSessionId, models, selectedModel, reasoningEffort, isTyping]
+        [activeSessionId, models, selectedModel, reasoningEffort, isTyping, agentMode, permissionLevel]
     );
 
     // Abort message
@@ -400,6 +405,11 @@ export default function ChatScreen() {
                     <UserInputDialog
                         prompt={userInputPrompt}
                         onRespond={handleUserInputRespond}
+                    />
+                )}
+                {planExitPrompt !== null && (
+                    <PlanExitDialog
+                        prompt={planExitPrompt}
                     />
                 )}
 

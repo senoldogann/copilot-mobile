@@ -4,11 +4,18 @@ import type {
     AdaptedCopilotClient,
     AdaptedCopilotSession,
     AdaptedPermissionRequest,
+    AdaptedPlanExitRequest,
+    AdaptedSessionState,
     AdaptedToolStartDetails,
+    AdaptedUserInputRequest,
+    AgentMode,
+    PermissionLevel,
+    RuntimeMode,
     SessionConfig,
     ServerMessage,
     HostSessionCapabilities,
     CapabilitiesStatePayload,
+    PlanExitRequestPayload,
     SessionMessageAttachment,
     SessionHistoryItem,
     SessionInfo,
@@ -35,6 +42,12 @@ type PendingInput = {
     timer: ReturnType<typeof setTimeout>;
 };
 
+type SessionBehaviorState = {
+    agentMode: AgentMode;
+    permissionLevel: PermissionLevel;
+    runtimeMode: RuntimeMode;
+};
+
 export function createSessionManager(
     copilotClient: AdaptedCopilotClient,
     send: SendFn
@@ -42,8 +55,8 @@ export function createSessionManager(
     const activeSessions = new Map<string, AdaptedCopilotSession>();
     const pendingPermissions = new Map<string, PendingPermission>();
     const pendingInputs = new Map<string, PendingInput>();
+    const sessionStates = new Map<string, SessionBehaviorState>();
     let autoApproveReads = false;
-    let autoApproveAll = false;
     // Latest observed host session capabilities — merged per session.
     // Currently holds the value for the single active session model.
     let lastHostCapabilities: HostSessionCapabilities = { elicitation: false };
@@ -77,7 +90,6 @@ export function createSessionManager(
             host: { ...lastHostCapabilities },
             bridge: {
                 autoApproveReads,
-                autoApproveAll,
                 readApprovalsConfigurable: true,
             },
         };
@@ -89,6 +101,36 @@ export function createSessionManager(
             type: "capabilities.state",
             payload: buildCapabilitiesPayload(),
         });
+    }
+
+    function getSessionState(sessionId: string): SessionBehaviorState | undefined {
+        return sessionStates.get(sessionId);
+    }
+
+    function emitSessionState(sessionId: string): void {
+        const state = getSessionState(sessionId);
+        if (state === undefined) {
+            return;
+        }
+
+        send({
+            ...makeBase(),
+            type: "session.state",
+            payload: {
+                sessionId,
+                agentMode: state.agentMode,
+                permissionLevel: state.permissionLevel,
+                runtimeMode: state.runtimeMode,
+            },
+        });
+    }
+
+    function adaptSessionState(nextState: AdaptedSessionState): SessionBehaviorState {
+        return {
+            agentMode: nextState.agentMode,
+            permissionLevel: nextState.permissionLevel,
+            runtimeMode: nextState.runtimeMode,
+        };
     }
 
     function createPermissionTimeout(
@@ -173,6 +215,12 @@ export function createSessionManager(
     function wireSessionEvents(session: AdaptedCopilotSession, emit: SendFn = send): void {
         const sessionId = session.id;
         const toolNamesByRequestId = new Map<string, string>();
+        const resolveState = (): SessionBehaviorState =>
+            sessionStates.get(sessionId) ?? {
+                agentMode: "agent",
+                permissionLevel: "default",
+                runtimeMode: "interactive",
+            };
 
         session.onMessage((content: string) => {
             emit({
@@ -254,8 +302,13 @@ export function createSessionManager(
 
         session.onPermissionRequest(async (request: AdaptedPermissionRequest) => {
             const requestId = request.id;
+            const state = resolveState();
 
-            if (autoApproveAll || (autoApproveReads && request.kind === "read")) {
+            if (
+                state.permissionLevel === "bypass"
+                || state.permissionLevel === "autopilot"
+                || (autoApproveReads && request.kind === "read")
+            ) {
                 return true;
             }
 
@@ -284,13 +337,25 @@ export function createSessionManager(
             });
         });
 
-        session.onUserInputRequest(async (prompt: string) => {
+        session.onUserInputRequest(async (request: AdaptedUserInputRequest) => {
+            const state = resolveState();
+            if (state.permissionLevel === "autopilot") {
+                const fallbackAnswer = request.choices?.[0] ?? "";
+                return fallbackAnswer;
+            }
+
             const requestId = generateMessageId();
 
             const promptMessage: ServerMessage & { type: "user_input.request" } = {
                 ...makeBase(),
                 type: "user_input.request",
-                payload: { sessionId, requestId, prompt },
+                payload: {
+                    sessionId,
+                    requestId,
+                    prompt: request.question,
+                    ...(request.choices !== undefined ? { choices: request.choices } : {}),
+                    ...(request.allowFreeform !== undefined ? { allowFreeform: request.allowFreeform } : {}),
+                },
             };
 
             emit(promptMessage);
@@ -300,6 +365,32 @@ export function createSessionManager(
                 const timer = setTimeout(onTimeout, PERMISSION_TIMEOUT_MS);
 
                 pendingInputs.set(requestId, { payload: promptMessage, onTimeout, resolve, timer });
+            });
+        });
+
+        session.onRuntimeModeChanged((runtimeMode: RuntimeMode) => {
+            const previous = resolveState();
+            sessionStates.set(sessionId, {
+                ...previous,
+                runtimeMode,
+            });
+            emitSessionState(sessionId);
+        });
+
+        session.onPlanExitRequest((request: AdaptedPlanExitRequest) => {
+            const payload: PlanExitRequestPayload = {
+                sessionId,
+                requestId: request.requestId,
+                summary: request.summary,
+                planContent: request.planContent,
+                actions: request.actions,
+                recommendedAction: request.recommendedAction,
+            };
+
+            emit({
+                ...makeBase(),
+                type: "plan.exit.request",
+                payload,
             });
         });
 
@@ -354,6 +445,15 @@ export function createSessionManager(
             try {
                 const session = await copilotClient.createSession(config);
                 activeSessions.set(session.id, session);
+                sessionStates.set(session.id, {
+                    agentMode: config.agentMode,
+                    permissionLevel: config.permissionLevel,
+                    runtimeMode: config.permissionLevel === "autopilot"
+                        ? "autopilot"
+                        : config.agentMode === "plan"
+                            ? "plan"
+                            : "interactive",
+                });
                 wireSessionEvents(session);
 
                 lastHostCapabilities = session.getCapabilities();
@@ -365,6 +465,7 @@ export function createSessionManager(
                 });
 
                 emitCapabilitiesState();
+                emitSessionState(session.id);
             } catch (err) {
                 const message = err instanceof Error ? err.message : "Session creation failed";
                 send({
@@ -426,6 +527,10 @@ export function createSessionManager(
                 shouldDefer = false;
 
                 lastHostCapabilities = session.getCapabilities();
+                const resumedState = await session.getState(
+                    sessionStates.get(session.id)?.permissionLevel ?? "default"
+                );
+                sessionStates.set(session.id, adaptSessionState(resumedState));
 
                 send({
                     ...makeBase(),
@@ -455,6 +560,7 @@ export function createSessionManager(
                 }
 
                 emitCapabilitiesState();
+                emitSessionState(session.id);
             } catch (err) {
                 const message = err instanceof Error ? err.message : "Session resume failed";
                 send({
@@ -497,6 +603,7 @@ export function createSessionManager(
                 session.close();
                 activeSessions.delete(sessionId);
             }
+            sessionStates.delete(sessionId);
             try {
                 await copilotClient.deleteSession(sessionId);
             } catch (err) {
@@ -755,9 +862,58 @@ export function createSessionManager(
             }
         },
 
-        updateSettings(nextSettings: { autoApproveReads: boolean; autoApproveAll?: boolean }): void {
+        async updateSessionMode(sessionId: string, agentMode: AgentMode): Promise<void> {
+            const session = activeSessions.get(sessionId);
+            const currentState = sessionStates.get(sessionId);
+
+            if (session === undefined || currentState === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const nextState = await session.applyState({
+                    ...currentState,
+                    agentMode,
+                });
+                sessionStates.set(sessionId, adaptSessionState(nextState));
+                emitSessionState(sessionId);
+            } catch (error) {
+                sendWorkspaceError(
+                    "SESSION_MODE_UPDATE_FAILED",
+                    error instanceof Error ? error.message : "Session mode update failed",
+                    false
+                );
+            }
+        },
+
+        async updatePermissionLevel(sessionId: string, permissionLevel: PermissionLevel): Promise<void> {
+            const session = activeSessions.get(sessionId);
+            const currentState = sessionStates.get(sessionId);
+
+            if (session === undefined || currentState === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const nextState = await session.applyState({
+                    ...currentState,
+                    permissionLevel,
+                });
+                sessionStates.set(sessionId, adaptSessionState(nextState));
+                emitSessionState(sessionId);
+            } catch (error) {
+                sendWorkspaceError(
+                    "PERMISSION_LEVEL_UPDATE_FAILED",
+                    error instanceof Error ? error.message : "Permission level update failed",
+                    false
+                );
+            }
+        },
+
+        updateSettings(nextSettings: { autoApproveReads: boolean }): void {
             autoApproveReads = nextSettings.autoApproveReads;
-            autoApproveAll = nextSettings.autoApproveAll ?? false;
             emitCapabilitiesState();
         },
 
@@ -792,6 +948,7 @@ export function createSessionManager(
                 session.close();
             }
             activeSessions.clear();
+            sessionStates.clear();
             await copilotClient.shutdown();
         },
     };

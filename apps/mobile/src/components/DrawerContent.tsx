@@ -11,6 +11,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
+import { Feather, Ionicons } from "@expo/vector-icons";
 import type { DrawerContentComponentProps } from "@react-navigation/drawer";
 import type { SessionInfo } from "@copilot-mobile/shared";
 import { MODEL_UNKNOWN } from "@copilot-mobile/shared";
@@ -83,22 +84,43 @@ function groupByWorkspace(
     return result;
 }
 
+function getRelativeTime(ts: number): string {
+    const diff = Date.now() - ts;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return "just now";
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    if (days < 7) return `${days}d ago`;
+    return `${Math.floor(days / 7)}w ago`;
+}
+
 function formatSessionTitle(session: SessionInfo): string {
-    if (session.summary !== undefined && session.summary.trim().length > 0) {
-        return session.summary;
+    const summary = session.summary?.trim();
+    if (
+        summary !== undefined &&
+        summary.length > 0 &&
+        !summary.startsWith("You are ") &&
+        !summary.startsWith("You're ") &&
+        !summary.startsWith("You have ") &&
+        summary.length < 200
+    ) {
+        return summary.length > 55 ? summary.slice(0, 52) + "…" : summary;
     }
 
-    // Show first user message content if available (set via chat-history-store)
-    // Fallback to repository or branch name
     if (session.context?.repository !== undefined) {
-        return session.context.repository;
+        const parts = session.context.repository.replace(/\.git$/, "").split("/");
+        const repo = parts[parts.length - 1] ?? session.context.repository;
+        const branch = session.context.branch !== undefined ? ` · ${session.context.branch}` : "";
+        return repo + branch;
     }
 
     if (session.context?.branch !== undefined) {
         return session.context.branch;
     }
 
-    return "New Chat";
+    return `Session · ${getRelativeTime(session.createdAt)}`;
 }
 
 function formatSessionPreview(session: SessionInfo): string {
@@ -115,12 +137,12 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     const sessions = useSessionStore((s) => s.sessions);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const connectionState = useConnectionStore((s) => s.state);
-    const [collapsedWorkspaces, setCollapsedWorkspaces] = useState<Set<string>>(new Set());
+    const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set());
 
     const groups = useMemo(() => groupByWorkspace(sessions), [sessions]);
 
     const toggleWorkspace = (workspace: string) => {
-        setCollapsedWorkspaces((prev) => {
+        setExpandedWorkspaces((prev) => {
             const next = new Set(prev);
             if (next.has(workspace)) {
                 next.delete(workspace);
@@ -194,7 +216,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
             {/* Header */}
             <View style={styles.header}>
                 <View style={styles.headerIcon}>
-                    <Text style={styles.headerIconText}>✦</Text>
+                    <Ionicons name="sparkles" size={14} color={colors.copilotPurple} />
                 </View>
                 <Text style={styles.headerTitle}>GitHub Copilot</Text>
             </View>
@@ -208,7 +230,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 onPress={handleNewChat}
                 accessibilityLabel="Yeni oturum"
             >
-                <Text style={styles.newChatIcon}>＋</Text>
+                <Feather name="plus" size={16} color={colors.textPrimary} />
                 <Text style={styles.newChatText}>New Chat</Text>
             </Pressable>
 
@@ -226,17 +248,19 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 )}
 
                 {groups.map((group) => {
-                    const isCollapsed = collapsedWorkspaces.has(group.workspace);
+                    const isExpanded = expandedWorkspaces.has(group.workspace);
                     return (
                         <View key={group.workspace} style={styles.workspaceGroup}>
                             <Pressable
                                 style={styles.workspaceHeader}
                                 onPress={() => toggleWorkspace(group.workspace)}
                             >
-                                <Text style={styles.workspaceChevron}>
-                                    {isCollapsed ? "▸" : "▾"}
-                                </Text>
-                                <Text style={styles.workspaceIcon}>📁</Text>
+                                <Feather
+                                    name={isExpanded ? "chevron-down" : "chevron-right"}
+                                    size={12}
+                                    color={colors.textTertiary}
+                                />
+                                <Feather name="folder" size={14} color={colors.textTertiary} />
                                 <Text
                                     style={styles.workspaceName}
                                     numberOfLines={1}
@@ -247,7 +271,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                     {group.sessions.length}
                                 </Text>
                             </Pressable>
-                            {!isCollapsed &&
+                            {isExpanded &&
                                 group.sessions.map((session) => (
                                     <Pressable
                                         key={session.id}
@@ -304,7 +328,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                         props.navigation.closeDrawer();
                     }}
                 >
-                    <Text style={styles.footerItemIcon}>⚙</Text>
+                    <Feather name="settings" size={15} color={colors.textTertiary} />
                     <Text style={styles.footerItemText}>Settings</Text>
                 </Pressable>
 
@@ -354,10 +378,6 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
     },
-    headerIconText: {
-        color: colors.copilotPurple,
-        fontSize: fontSize.base,
-    },
     headerTitle: {
         fontSize: 15,
         fontWeight: "600",
@@ -378,11 +398,6 @@ const styles = StyleSheet.create({
     },
     newChatButtonPressed: {
         backgroundColor: colors.bgTertiary,
-    },
-    newChatIcon: {
-        fontSize: fontSize.lg,
-        color: colors.textPrimary,
-        fontWeight: "300",
     },
     newChatText: {
         fontSize: fontSize.md,
@@ -412,12 +427,10 @@ const styles = StyleSheet.create({
         gap: 6,
     },
     workspaceChevron: {
-        fontSize: 10,
-        color: colors.textTertiary,
         width: 12,
     },
     workspaceIcon: {
-        fontSize: fontSize.sm,
+        width: 14,
     },
     workspaceName: {
         flex: 1,
@@ -482,8 +495,8 @@ const styles = StyleSheet.create({
         backgroundColor: colors.bgElevated,
     },
     footerItemIcon: {
-        fontSize: fontSize.base,
-        color: colors.textTertiary,
+        width: 16,
+        alignItems: "center",
     },
     footerItemText: {
         fontSize: fontSize.md,

@@ -2,6 +2,8 @@
 // All bridge communication goes through this module
 
 import type {
+    AgentMode,
+    PermissionLevel,
     QRPayload,
     SessionConfig,
     ClientMessage,
@@ -33,10 +35,12 @@ function getClient(): ReturnType<typeof createWSClient> {
                         return;
                     }
 
-                    const { autoApproveAll, autoApproveReads } = sessionStore;
+                    const { permissionLevel, autoApproveReads } = sessionStore;
                     const kind = message.payload.kind;
                     const shouldAutoApprove =
-                        autoApproveAll || (autoApproveReads && kind === "read");
+                        permissionLevel === "bypass"
+                        || permissionLevel === "autopilot"
+                        || (autoApproveReads && kind === "read");
 
                     if (shouldAutoApprove) {
                         void nextClient.sendMessage("permission.respond", {
@@ -190,12 +194,39 @@ export async function respondUserInput(requestId: string, value: string): Promis
     }
 }
 
-export async function updateSettings(settings: { autoApproveReads: boolean; autoApproveAll?: boolean }): Promise<void> {
+export async function updateSettings(settings: { autoApproveReads: boolean }): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("settings.update", settings);
     } catch {
         useConnectionStore.getState().setError("Failed to update settings");
+    }
+}
+
+export async function updateSessionMode(sessionId: string, agentMode: AgentMode): Promise<void> {
+    const c = getClient();
+    try {
+        await c.sendMessage("session.mode.update", {
+            sessionId,
+            agentMode,
+        });
+    } catch {
+        useConnectionStore.getState().setError("Failed to update agent mode");
+    }
+}
+
+export async function updatePermissionLevel(
+    sessionId: string,
+    permissionLevel: PermissionLevel
+): Promise<void> {
+    const c = getClient();
+    try {
+        await c.sendMessage("permission.level.update", {
+            sessionId,
+            permissionLevel,
+        });
+    } catch {
+        useConnectionStore.getState().setError("Failed to update permission level");
     }
 }
 
