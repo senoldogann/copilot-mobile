@@ -17,6 +17,8 @@ import * as ImagePicker from "expo-image-picker";
 import { useSessionStore, deriveAvailableReasoningEfforts } from "../stores/session-store";
 import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
 import type { ModelInfo, ReasoningEffortLevel } from "@copilot-mobile/shared";
+import { Feather, Ionicons } from "@expo/vector-icons";
+import type { AgentMode } from "./Icons";
 
 // --- Types ---
 
@@ -311,6 +313,12 @@ function AttachmentChip({
     );
 }
 
+const agentModeConfig: Record<AgentMode, { label: string; desc: string; iconName: "shield" | "shield-checkmark" | "shield-half"; color: string }> = {
+    agent: { label: "Agent", desc: "Full access — reads, writes, shell", iconName: "shield", color: colors.copilotPurple },
+    plan: { label: "Plan", desc: "Plan only — no auto-execute", iconName: "shield-checkmark", color: colors.success },
+    autopilot: { label: "Autopilot", desc: "Auto-approve everything", iconName: "shield-half", color: colors.accent },
+};
+
 // --- Main ChatInput component ---
 
 export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
@@ -320,6 +328,9 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const [showModelPicker, setShowModelPicker] = useState(false);
     const [showEffortPicker, setShowEffortPicker] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
+    const agentMode = useSessionStore((s) => s.agentMode);
+    const setAgentMode = useSessionStore((s) => s.setAgentMode);
+    const [showModePicker, setShowModePicker] = useState(false);
 
     const models = useSessionStore((s) => s.models);
     const selectedModel = useSessionStore((s) => s.selectedModel);
@@ -468,6 +479,23 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
 
             {/* Toolbar row inside the card */}
             <View style={toolbarStyles.row}>
+                {/* Mode selector */}
+                <Pressable
+                    style={toolbarStyles.modeSelectorPill}
+                    onPress={() => setShowModePicker(true)}
+                    disabled={disabled}
+                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                    accessibilityLabel="Mod seç"
+                >
+                    <Ionicons
+                        name={agentModeConfig[agentMode].iconName}
+                        size={13}
+                        color={agentModeConfig[agentMode].color}
+                    />
+                    <Text style={[toolbarStyles.modeText, { color: agentModeConfig[agentMode].color }]}>
+                        {agentModeConfig[agentMode].label}
+                    </Text>
+                </Pressable>
                 {/* Attach / image button */}
                 <Pressable
                     style={[
@@ -479,7 +507,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     accessibilityLabel="Fotoğraf ekle"
                 >
-                    <Text style={toolbarStyles.attachIcon}>📎</Text>
+                    <Feather name="paperclip" size={16} color={colors.textSecondary} />
                 </Pressable>
 
                 {/* Model selector pill */}
@@ -490,7 +518,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
                     accessibilityLabel="Model seç"
                 >
-                    <Text style={toolbarStyles.modelIcon}>⬡</Text>
+                    <Feather name="cpu" size={12} color={colors.copilotPurple} />
                     <Text style={toolbarStyles.modelText} numberOfLines={1}>
                         {modelDisplayName}{effortSuffix}
                     </Text>
@@ -506,7 +534,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                         accessibilityLabel="Çaba seviyesi seç"
                     >
-                        <Text style={toolbarStyles.gearIcon}>⚙</Text>
+                        <Feather name="settings" size={14} color={colors.textSecondary} />
                     </Pressable>
                 )}
 
@@ -521,14 +549,14 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             accessibilityLabel="Mesaj gönder"
                         >
-                            <Text style={styles.sendIcon}>↑</Text>
+                            <Feather name="arrow-up" size={16} color={colors.textOnAccent} />
                         </Pressable>
                         <Pressable
                             style={toolbarStyles.sendMenuButton}
                             onPress={() => setShowSendMenu(true)}
                             hitSlop={4}
                         >
-                            <Text style={toolbarStyles.sendMenuChevron}>⌄</Text>
+                    <Feather name="chevron-down" size={12} color={colors.textPrimary} />
                         </Pressable>
                     </View>
                 ) : isTyping ? (
@@ -547,11 +575,11 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         accessibilityLabel="Mesaj gönder"
                     >
-                        <Text style={styles.sendIcon}>↑</Text>
+                        <Feather name="arrow-up" size={16} color={colors.textOnAccent} />
                     </Pressable>
                 ) : (
                     <View style={[styles.sendButton, styles.sendButtonDisabled]}>
-                        <Text style={[styles.sendIcon, styles.sendIconDisabled]}>↑</Text>
+                        <Feather name="arrow-up" size={16} color={colors.textTertiary} />
                     </View>
                 )}
             </View>
@@ -590,6 +618,36 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 onClose={() => setShowSendMenu(false)}
                 onSelect={handleSendModeSelect}
             />
+
+            {/* Mode picker modal */}
+            <DropdownModal
+                visible={showModePicker}
+                onClose={() => setShowModePicker(false)}
+                title="Agent Mode"
+            >
+                <View style={dropdownStyles.effortList}>
+                    {(["agent", "plan", "autopilot"] as const).map((mode) => {
+                        const cfg = agentModeConfig[mode];
+                        const isSelected = agentMode === mode;
+                        return (
+                            <Pressable
+                                key={mode}
+                                style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
+                                onPress={() => { setAgentMode(mode); setShowModePicker(false); }}
+                            >
+                                <View style={dropdownStyles.effortItemLeft}>
+                                    {isSelected && <Feather name="check" size={14} color={cfg.color} style={{ marginRight: 8 }} />}
+                                    <View>
+                                        <Text style={[dropdownStyles.effortLabel, { color: cfg.color }]}>{cfg.label}</Text>
+                                        <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
+                                    </View>
+                                </View>
+                                <Ionicons name={cfg.iconName} size={20} color={cfg.color} />
+                            </Pressable>
+                        );
+                    })}
+                </View>
+            </DropdownModal>
         </View>
     );
 }
@@ -879,6 +937,21 @@ const toolbarStyles = StyleSheet.create({
         color: colors.textPrimary,
         fontSize: fs.sm,
     },
+    modeSelectorPill: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+        paddingHorizontal: 6,
+        paddingVertical: 4,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: colors.copilotPurpleBorder,
+        backgroundColor: colors.copilotPurpleMuted,
+    },
+    modeText: {
+        fontSize: 11,
+        fontWeight: "600",
+    },
 });
 
 // --- Ana giriş stilleri ---
@@ -927,15 +1000,6 @@ const styles = StyleSheet.create({
     },
     sendButtonDisabled: {
         backgroundColor: colors.bgElevated,
-    },
-    sendIcon: {
-        color: colors.textOnAccent,
-        fontSize: fs.lg,
-        fontWeight: "700",
-        marginTop: -1,
-    },
-    sendIconDisabled: {
-        color: colors.textTertiary,
     },
     abortButton: {
         width: 30,

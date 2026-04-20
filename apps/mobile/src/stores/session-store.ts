@@ -73,6 +73,8 @@ export type SessionStore = {
     // null if model does not support reasoning effort.
     reasoningEffort: ReasoningEffortLevel | null;
     autoApproveReads: boolean;
+    autoApproveAll: boolean;
+    agentMode: "agent" | "plan" | "autopilot";
 
     // Bridge + host combined capability state
     hostCapabilities: HostSessionCapabilities;
@@ -97,6 +99,8 @@ export type SessionStore = {
     setSelectedModel: (model: string) => void;
     setReasoningEffort: (effort: ReasoningEffortLevel | null) => void;
     setAutoApproveReads: (enabled: boolean) => void;
+    setAutoApproveAll: (enabled: boolean) => void;
+    setAgentMode: (mode: "agent" | "plan" | "autopilot") => void;
     setHostCapabilities: (caps: HostSessionCapabilities) => void;
     setBridgeSettings: (settings: BridgeSettings) => void;
 
@@ -104,11 +108,11 @@ export type SessionStore = {
         content: string,
         attachments?: ReadonlyArray<SessionMessageAttachment>
     ) => void;
-    appendAssistantDelta: (delta: string) => void;
+    appendAssistantDelta: (delta: string, index: number) => void;
     finalizeAssistantMessage: (content: string) => void;
     setAssistantTyping: (typing: boolean) => void;
 
-    appendThinkingDelta: (delta: string) => void;
+    appendThinkingDelta: (delta: string, index: number) => void;
     finalizeThinking: () => void;
 
     addToolStart: (
@@ -215,8 +219,10 @@ export const useSessionStore = create<SessionStore>((set) => ({
     selectedModel: "",
     reasoningEffort: null,
     autoApproveReads: false,
+    autoApproveAll: false,
+    agentMode: "agent" as const,
     hostCapabilities: { elicitation: false },
-    bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
+    bridgeSettings: { autoApproveReads: false, autoApproveAll: false, readApprovalsConfigurable: true },
 
     chatItems: [],
     isAssistantTyping: false,
@@ -277,6 +283,8 @@ export const useSessionStore = create<SessionStore>((set) => ({
     setReasoningEffort: (effort) => set({ reasoningEffort: effort }),
 
     setAutoApproveReads: (enabled) => set({ autoApproveReads: enabled }),
+    setAutoApproveAll: (enabled) => set({ autoApproveAll: enabled }),
+    setAgentMode: (mode) => set({ agentMode: mode }),
 
     setHostCapabilities: (caps) => set({ hostCapabilities: caps }),
 
@@ -297,12 +305,20 @@ export const useSessionStore = create<SessionStore>((set) => ({
         set((s) => ({ chatItems: [...s.chatItems, item] }));
     },
 
-    appendAssistantDelta: (delta) => {
+    appendAssistantDelta: (delta, _index) => {
         set((s) => {
             const items = [...s.chatItems];
             const last = items[items.length - 1];
-            if (last !== undefined && last.type === "assistant" && last.isStreaming) {
-                items[items.length - 1] = { ...last, content: last.content + delta };
+            if (
+                last !== undefined
+                && last.type === "assistant"
+                && last.isStreaming
+            ) {
+                items[items.length - 1] = {
+                    ...last,
+                    content: last.content + delta,
+                    isStreaming: true,
+                };
                 return { chatItems: items };
             }
             // Start new streaming assistant message
@@ -357,12 +373,20 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     setCurrentIntent: (intent) => set({ currentIntent: intent }),
 
-    appendThinkingDelta: (delta) => {
+    appendThinkingDelta: (delta, _index) => {
         set((s) => {
             const items = [...s.chatItems];
             const last = items[items.length - 1];
-            if (last !== undefined && last.type === "thinking" && last.isStreaming) {
-                items[items.length - 1] = { ...last, content: last.content + delta };
+            if (
+                last !== undefined
+                && last.type === "thinking"
+                && last.isStreaming
+            ) {
+                items[items.length - 1] = {
+                    ...last,
+                    content: last.content + delta,
+                    isStreaming: true,
+                };
                 return { chatItems: items };
             }
             // Start new thinking block
@@ -470,8 +494,10 @@ export const useSessionStore = create<SessionStore>((set) => ({
             selectedModel: "",
             reasoningEffort: null,
             autoApproveReads: false,
+            autoApproveAll: false,
+            agentMode: "agent" as const,
             hostCapabilities: { elicitation: false },
-            bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
+            bridgeSettings: { autoApproveReads: false, autoApproveAll: false, readApprovalsConfigurable: true },
             chatItems: [],
             isAssistantTyping: false,
             currentIntent: null,

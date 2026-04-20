@@ -12,6 +12,7 @@ import type { ConnectionState } from "./ws-client";
 import { handleServerMessage } from "./message-handler";
 import { useConnectionStore } from "../stores/connection-store";
 import { useSessionStore } from "../stores/session-store";
+import { useWorkspaceStore } from "../stores/workspace-store";
 
 let client: ReturnType<typeof createWSClient> | null = null;
 
@@ -174,10 +175,10 @@ export async function respondUserInput(requestId: string, value: string): Promis
     }
 }
 
-export async function updateSettings(autoApproveReads: boolean): Promise<void> {
+export async function updateSettings(settings: { autoApproveReads: boolean; autoApproveAll?: boolean }): Promise<void> {
     const c = getClient();
     try {
-        await c.sendMessage("settings.update", { autoApproveReads });
+        await c.sendMessage("settings.update", settings);
     } catch {
         useConnectionStore.getState().setError("Failed to update settings");
     }
@@ -231,6 +232,80 @@ export async function requestCapabilities(): Promise<void> {
         await c.sendMessage("capabilities.request", {});
     } catch {
         // Connection dropped before response; will retry on reconnect
+    }
+}
+
+// Workspace tree — requests a repository subtree for the active session
+export async function requestWorkspaceTree(
+    sessionId: string,
+    path?: string,
+    maxDepth?: number
+): Promise<void> {
+    const c = getClient();
+    const workspaceStore = useWorkspaceStore.getState();
+    workspaceStore.setTreeLoading(path ?? "__root__", true);
+    try {
+        await c.sendMessage("workspace.tree.request", {
+            sessionId,
+            ...(path !== undefined ? { path } : {}),
+            ...(maxDepth !== undefined ? { maxDepth } : {}),
+        });
+    } catch (error) {
+        workspaceStore.setTreeLoading(path ?? "__root__", false);
+        workspaceStore.setError(
+            `Failed to request workspace tree: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+}
+
+// Workspace git summary — requests changes + recent commits for the active session
+export async function requestWorkspaceGitSummary(
+    sessionId: string,
+    commitLimit?: number
+): Promise<void> {
+    const c = getClient();
+    const workspaceStore = useWorkspaceStore.getState();
+    workspaceStore.setGitLoading(true);
+    try {
+        await c.sendMessage("workspace.git.request", {
+            sessionId,
+            ...(commitLimit !== undefined ? { commitLimit } : {}),
+        });
+    } catch (error) {
+        workspaceStore.setGitLoading(false);
+        workspaceStore.setError(
+            `Failed to request workspace changes: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+}
+
+// Workspace pull — triggers repository pull if backend supports it
+export async function pullWorkspace(sessionId: string): Promise<void> {
+    const c = getClient();
+    const workspaceStore = useWorkspaceStore.getState();
+    workspaceStore.setWorkspaceOperationState("pull", true);
+    try {
+        await c.sendMessage("workspace.pull", { sessionId });
+    } catch (error) {
+        workspaceStore.setWorkspaceOperationState("pull", false);
+        workspaceStore.setError(
+            `Failed to pull workspace: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+}
+
+// Workspace push — triggers repository push if backend supports it
+export async function pushWorkspace(sessionId: string): Promise<void> {
+    const c = getClient();
+    const workspaceStore = useWorkspaceStore.getState();
+    workspaceStore.setWorkspaceOperationState("push", true);
+    try {
+        await c.sendMessage("workspace.push", { sessionId });
+    } catch (error) {
+        workspaceStore.setWorkspaceOperationState("push", false);
+        workspaceStore.setError(
+            `Failed to push workspace: ${error instanceof Error ? error.message : String(error)}`
+        );
     }
 }
 

@@ -17,6 +17,7 @@ import type { DrawerNavigationProp } from "@react-navigation/drawer";
 import type { ParamListBase } from "@react-navigation/native";
 import { useSessionStore } from "../../src/stores/session-store";
 import type { ChatItem } from "../../src/stores/session-store";
+import { WorkspacePanel } from "../../src/components/WorkspacePanel";
 import { useConnectionStore } from "../../src/stores/connection-store";
 import { useChatHistoryStore } from "../../src/stores/chat-history-store";
 import { ChatMessageItem } from "../../src/components/ChatMessageItem";
@@ -45,31 +46,53 @@ function ChatHeader() {
     const connectionState = useConnectionStore((s) => s.state);
     const isTyping = useSessionStore((s) => s.isAssistantTyping);
     const isConnected = connectionState === "authenticated";
+    const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
+    const handleCloseWorkspace = React.useCallback(() => {
+        setWorkspaceOpen(false);
+    }, []);
 
     return (
-        <View style={headerStyles.container}>
-            <Pressable
-                style={headerStyles.menuButton}
-                onPress={() => navigation.openDrawer()}
-                hitSlop={12}
-            >
-                <View style={headerStyles.menuLine} />
-                <View style={[headerStyles.menuLine, headerStyles.menuLineShort]} />
-                <View style={headerStyles.menuLine} />
-            </Pressable>
+        <>
+            <View style={headerStyles.container}>
+                <Pressable
+                    style={headerStyles.menuButton}
+                    onPress={() => navigation.openDrawer()}
+                    hitSlop={12}
+                >
+                    <View style={headerStyles.menuLine} />
+                    <View style={[headerStyles.menuLine, headerStyles.menuLineShort]} />
+                    <View style={headerStyles.menuLine} />
+                </Pressable>
 
-            <View style={headerStyles.titleContainer}>
-                <Text style={headerStyles.sparkle}>✦</Text>
-                <Text style={headerStyles.title}>Copilot</Text>
-                {isConnected && (
-                    <View style={headerStyles.statusDot} />
-                )}
+                <View style={headerStyles.titleContainer}>
+                    <Text style={headerStyles.sparkle}>✦</Text>
+                    <Text style={headerStyles.title}>Copilot</Text>
+                    {isConnected && (
+                        <View style={headerStyles.statusDot} />
+                    )}
+                </View>
+
+                <View style={headerStyles.rightContainer}>
+                    <Pressable
+                        style={({ pressed }) => [
+                            headerStyles.workspaceButton,
+                            pressed && headerStyles.workspaceButtonPressed,
+                        ]}
+                        onPress={() => setWorkspaceOpen(true)}
+                        hitSlop={10}
+                        accessibilityLabel="Open workspace panel"
+                    >
+                        <Text style={headerStyles.workspaceButtonIcon}>▦</Text>
+                    </Pressable>
+                    <ActivityDots active={isTyping} />
+                </View>
             </View>
 
-            <View style={headerStyles.rightContainer}>
-                <ActivityDots active={isTyping} />
-            </View>
-        </View>
+            <WorkspacePanel
+                visible={workspaceOpen}
+                onClose={handleCloseWorkspace}
+            />
+        </>
     );
 }
 
@@ -447,8 +470,26 @@ const headerStyles = StyleSheet.create({
         backgroundColor: colors.success,
     },
     rightContainer: {
-        width: 36,
-        alignItems: "flex-end",
+        flexDirection: "row",
+        alignItems: "center",
+        gap: spacing.sm,
+    },
+    workspaceButton: {
+        width: 34,
+        height: 34,
+        borderRadius: borderRadius.full,
+        backgroundColor: colors.bgTertiary,
+        borderWidth: 1,
+        borderColor: colors.borderMuted,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    workspaceButtonPressed: {
+        opacity: 0.85,
+    },
+    workspaceButtonIcon: {
+        fontSize: 14,
+        color: colors.textSecondary,
     },
 });
 

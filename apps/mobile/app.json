@@ -14,7 +14,11 @@
             "supportsTablet": true,
             "bundleIdentifier": "dev.senoldogan.copilot-mobile",
             "infoPlist": {
-                "NSCameraUsageDescription": "Camera is required to connect to the bridge server via QR code"
+                "NSCameraUsageDescription": "Camera is required to connect to the bridge server via QR code",
+                "NSLocalNetworkUsageDescription": "Local network access is required to connect to your Copilot Bridge running on your computer",
+                "NSAppTransportSecurity": {
+                    "NSAllowsLocalNetworking": true
+                }
             }
         },
         "android": {
@@ -22,6 +26,7 @@
                 "backgroundColor": "#1e1e1e"
             },
             "package": "dev.senoldogan.copilotmobile",
+            "usesCleartextTraffic": true,
             "permissions": [
                 "android.permission.CAMERA"
             ]

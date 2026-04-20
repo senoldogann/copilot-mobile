@@ -30,7 +30,6 @@ async function main(): Promise<void> {
     const shutdown = async () => {
         console.log("\nShutting down...");
         await wsServer.shutdown();
-        await copilotClient.shutdown();
         process.exit(0);
     };
 

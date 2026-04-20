@@ -71,3 +71,21 @@ Detected patterns:
 
 **Tech stack — Expo + Expo Router + React + React Native**: framework: Expo ~54.0.0, Expo Router ~6.0.23, React 19.1.0, React Native 0.81.5. language: JavaScript, TypeScript ^5.7.0. runtime: Node.js >=20.0.0. tool: GitHub Actions. tooling: pnpm >=9.0.0.
 
+## Recent Changes
+
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — File changed: CLAUDE.md
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+- `` **file_change** — 2 files changed
+

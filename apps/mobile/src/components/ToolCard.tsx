@@ -1,27 +1,16 @@
-// Araç yürütme kartı — kompakt tek satır terminal stili: [ikon] TipAdı  argüman...
+// Araç yürütme kartı — kompakt tek satır terminal stili ile SVG ikonlar
 
 import React, { useState } from "react";
 import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import type { ToolItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
+import { ToolIcon } from "./Icons";
 import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = {
     item: ToolItem;
 };
-
-// Araç tipine göre küçük sembol
-function getToolChar(toolName: string): string {
-    const lower = toolName.toLowerCase();
-    if (lower.includes("shell") || lower.includes("bash") || lower.includes("terminal") || lower.includes("exec")) return "$";
-    if (lower.includes("read") || lower.includes("view") || lower.includes("file")) return "○";
-    if (lower.includes("edit") || lower.includes("write") || lower.includes("create")) return "✎";
-    if (lower.includes("search") || lower.includes("grep") || lower.includes("find") || lower.includes("glob")) return "~";
-    if (lower.includes("think")) return "◎";
-    if (lower.includes("web") || lower.includes("fetch") || lower.includes("browse")) return "⊕";
-    if (lower.includes("git")) return "↑";
-    return "·";
-}
 
 // Araç tipinin kısa etiketi
 function getToolLabel(toolName: string): string {
@@ -36,7 +25,6 @@ function getToolLabel(toolName: string): string {
     if (lower.includes("think")) return "Thought";
     if (lower.includes("web") || lower.includes("fetch")) return "Fetch";
     if (lower.includes("git")) return "Git";
-    // Generic fallback: CamelCase to words, capitalize first
     return toolName
         .replace(/[_-]/g, " ")
         .replace(/([a-z])([A-Z])/g, "$1 $2")
@@ -96,7 +84,6 @@ function ToolCardComponent({ item }: Props) {
     const [showSheet, setShowSheet] = useState(false);
     const isRunning = item.status === "running";
     const isFailed = item.status === "failed";
-    const char = getToolChar(item.toolName);
     const label = getToolLabel(item.toolName);
 
     const displayArg = extractDisplayArg(item)
@@ -116,14 +103,16 @@ function ToolCardComponent({ item }: Props) {
                 onPress={() => setShowSheet(true)}
                 hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             >
-                {/* Terminal kutu ikonu */}
+                {/* SVG ikon kutusu */}
                 <View style={[styles.iconBox, isFailed && styles.iconBoxFailed]}>
                     {isRunning ? (
                         <ToolSpinner />
                     ) : (
-                        <Text style={[styles.iconChar, isFailed && styles.iconCharFailed]}>
-                            {char}
-                        </Text>
+                        <ToolIcon
+                            toolName={item.toolName}
+                            size={11}
+                            color={isFailed ? colors.error : colors.textTertiary}
+                        />
                     )}
                 </View>
 
@@ -137,13 +126,13 @@ function ToolCardComponent({ item }: Props) {
                     {displayArg}
                 </Text>
 
-                <Text style={styles.chevron}>›</Text>
+                <Feather name="chevron-right" size={12} color={colors.textTertiary} />
             </Pressable>
 
             <BottomSheet
                 visible={showSheet}
                 onClose={() => setShowSheet(false)}
-                icon={char}
+                icon="›"
                 title={label}
                 subtitle={item.status}
             >
@@ -162,7 +151,7 @@ function ToolCardComponent({ item }: Props) {
                         <DetailBlock label="Progress" value={item.progressMessage} />
                     )}
                     {item.partialOutput !== undefined && item.partialOutput.trim().length > 0 && (
-                        <DetailBlock label="Live Output" value={item.partialOutput} mono />
+                        <DetailBlock label="Output" value={item.partialOutput} mono />
                     )}
                 </View>
             </BottomSheet>
@@ -242,9 +231,9 @@ const styles = StyleSheet.create({
         minHeight: 28,
     },
     iconBox: {
-        width: 18,
-        height: 18,
-        borderRadius: 4,
+        width: 20,
+        height: 20,
+        borderRadius: 5,
         backgroundColor: colors.bgElevated,
         borderWidth: 1,
         borderColor: colors.border,
@@ -255,15 +244,6 @@ const styles = StyleSheet.create({
     iconBoxFailed: {
         borderColor: colors.errorMuted,
         backgroundColor: colors.errorMuted,
-    },
-    iconChar: {
-        fontSize: 9,
-        color: colors.textTertiary,
-        fontFamily: "monospace",
-        lineHeight: 11,
-    },
-    iconCharFailed: {
-        color: colors.error,
     },
     label: {
         fontSize: fontSize.sm,
@@ -280,11 +260,6 @@ const styles = StyleSheet.create({
         fontSize: fontSize.sm,
         color: colors.textTertiary,
         fontFamily: "monospace",
-    },
-    chevron: {
-        fontSize: fontSize.base,
-        color: colors.textTertiary,
-        flexShrink: 0,
     },
     detailContainer: {
         gap: spacing.md,

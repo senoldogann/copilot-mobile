@@ -10,13 +10,28 @@ import type {
     HostSessionCapabilities,
     CapabilitiesStatePayload,
     SessionMessageAttachment,
+    SessionHistoryItem,
+    SessionInfo,
 } from "@copilot-mobile/shared";
 import { MAX_SESSIONS, PERMISSION_TIMEOUT_MS, SDKError } from "@copilot-mobile/shared";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
+import {
+    buildWorkspaceGitSummary,
+    buildWorkspaceTree,
+    performWorkspaceGitOperation,
+} from "../utils/workspace.js";
 
 type SendFn = (message: ServerMessage) => void;
 type PendingPermission = {
+    payload: ServerMessage & { type: "permission.request" };
+    onTimeout: () => void;
     resolve: (approved: boolean) => void;
+    timer: ReturnType<typeof setTimeout>;
+};
+type PendingInput = {
+    payload: ServerMessage & { type: "user_input.request" };
+    onTimeout: () => void;
+    resolve: (value: string) => void;
     timer: ReturnType<typeof setTimeout>;
 };
 
@@ -26,8 +41,9 @@ export function createSessionManager(
 ) {
     const activeSessions = new Map<string, AdaptedCopilotSession>();
     const pendingPermissions = new Map<string, PendingPermission>();
-    const pendingInputs = new Map<string, { resolve: (value: string) => void; timer: ReturnType<typeof setTimeout> }>();
+    const pendingInputs = new Map<string, PendingInput>();
     let autoApproveReads = false;
+    let autoApproveAll = false;
     // Latest observed host session capabilities — merged per session.
     // Currently holds the value for the single active session model.
     let lastHostCapabilities: HostSessionCapabilities = { elicitation: false };
@@ -36,11 +52,32 @@ export function createSessionManager(
         return { id: generateMessageId(), timestamp: nowMs(), seq: nextSeq() };
     }
 
+    function getSessionInfo(sessionId: string): SessionInfo | undefined {
+        return activeSessions.get(sessionId)?.getInfo();
+    }
+
+    function getSessionContext(sessionId: string): SessionInfo["context"] | undefined {
+        return getSessionInfo(sessionId)?.context;
+    }
+
+    function sendWorkspaceError(code: string, message: string, retry: boolean): void {
+        send({
+            ...makeBase(),
+            type: "error",
+            payload: {
+                code,
+                message,
+                retry,
+            },
+        });
+    }
+
     function buildCapabilitiesPayload(): CapabilitiesStatePayload {
         return {
             host: { ...lastHostCapabilities },
             bridge: {
                 autoApproveReads,
+                autoApproveAll,
                 readApprovalsConfigurable: true,
             },
         };
@@ -54,12 +91,91 @@ export function createSessionManager(
         });
     }
 
-    function wireSessionEvents(session: AdaptedCopilotSession): void {
+    function createPermissionTimeout(
+        requestId: string,
+        resolve: (approved: boolean) => void
+    ): () => void {
+        return () => {
+            pendingPermissions.delete(requestId);
+            send({
+                ...makeBase(),
+                type: "error",
+                payload: {
+                    code: "PERMISSION_TIMEOUT",
+                    message: `Permission request ${requestId} timed out`,
+                    requestId,
+                    retry: false,
+                },
+            });
+            resolve(false);
+        };
+    }
+
+    function createInputTimeout(
+        requestId: string,
+        resolve: (value: string) => void
+    ): () => void {
+        return () => {
+            pendingInputs.delete(requestId);
+            send({
+                ...makeBase(),
+                type: "error",
+                payload: {
+                    code: "INPUT_TIMEOUT",
+                    message: `User input request ${requestId} timed out`,
+                    requestId,
+                    retry: false,
+                },
+            });
+            resolve("");
+        };
+    }
+
+    function replayPendingPrompts(sessionId?: string): void {
+        for (const pending of pendingPermissions.values()) {
+            if (sessionId !== undefined && pending.payload.payload.sessionId !== sessionId) {
+                continue;
+            }
+            clearTimeout(pending.timer);
+            pending.timer = setTimeout(pending.onTimeout, PERMISSION_TIMEOUT_MS);
+            send(pending.payload);
+        }
+        for (const pending of pendingInputs.values()) {
+            if (sessionId !== undefined && pending.payload.payload.sessionId !== sessionId) {
+                continue;
+            }
+            clearTimeout(pending.timer);
+            pending.timer = setTimeout(pending.onTimeout, PERMISSION_TIMEOUT_MS);
+            send(pending.payload);
+        }
+    }
+
+    function discardPendingPrompts(sessionId?: string): void {
+        for (const [requestId, pending] of pendingPermissions) {
+            if (sessionId !== undefined && pending.payload.payload.sessionId !== sessionId) {
+                continue;
+            }
+            clearTimeout(pending.timer);
+            pending.resolve(false);
+            pendingPermissions.delete(requestId);
+        }
+
+        for (const [requestId, pending] of pendingInputs) {
+            if (sessionId !== undefined && pending.payload.payload.sessionId !== sessionId) {
+                continue;
+            }
+            clearTimeout(pending.timer);
+            pending.resolve("");
+            pendingInputs.delete(requestId);
+        }
+    }
+
+    function wireSessionEvents(session: AdaptedCopilotSession, emit: SendFn = send): void {
         const sessionId = session.id;
         const toolNamesByRequestId = new Map<string, string>();
 
         session.onMessage((content: string) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "assistant.message",
                 payload: { sessionId, content },
@@ -67,7 +183,7 @@ export function createSessionManager(
         });
 
         session.onDelta((delta: string, index: number) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "assistant.message_delta",
                 payload: { sessionId, delta, index },
@@ -75,7 +191,7 @@ export function createSessionManager(
         });
 
         session.onReasoning((content: string) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "assistant.reasoning",
                 payload: { sessionId, content },
@@ -83,7 +199,7 @@ export function createSessionManager(
         });
 
         session.onReasoningDelta((delta: string, index: number) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "assistant.reasoning_delta",
                 payload: { sessionId, delta, index },
@@ -94,7 +210,7 @@ export function createSessionManager(
             const normalizedToolName = toolName.trim().length > 0 ? toolName : "tool";
             toolNamesByRequestId.set(requestId, normalizedToolName);
 
-            send({
+            emit({
                 ...makeBase(),
                 type: "tool.execution_start",
                 payload: {
@@ -107,7 +223,7 @@ export function createSessionManager(
         });
 
         session.onToolPartialResult((requestId: string, partialOutput: string) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "tool.execution_partial_result",
                 payload: { sessionId, requestId, partialOutput },
@@ -115,7 +231,7 @@ export function createSessionManager(
         });
 
         session.onToolProgress((requestId: string, progressMessage: string) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "tool.execution_progress",
                 payload: { sessionId, requestId, progressMessage },
@@ -129,7 +245,7 @@ export function createSessionManager(
 
             toolNamesByRequestId.delete(requestId);
 
-            send({
+            emit({
                 ...makeBase(),
                 type: "tool.execution_complete",
                 payload: { sessionId, toolName: normalizedToolName, requestId, success },
@@ -139,11 +255,11 @@ export function createSessionManager(
         session.onPermissionRequest(async (request: AdaptedPermissionRequest) => {
             const requestId = request.id;
 
-            if (autoApproveReads && request.kind === "read") {
+            if (autoApproveAll || (autoApproveReads && request.kind === "read")) {
                 return true;
             }
 
-            send({
+            const promptMessage: ServerMessage & { type: "permission.request" } = {
                 ...makeBase(),
                 type: "permission.request",
                 payload: {
@@ -155,60 +271,40 @@ export function createSessionManager(
                     ...(request.fileName !== undefined ? { fileName: request.fileName } : {}),
                     ...(request.commandText !== undefined ? { fullCommandText: request.commandText } : {}),
                 },
-            });
+            };
+
+            emit(promptMessage);
 
             // Wait for mobile response, with timeout
             return new Promise<boolean>((resolve) => {
-                const timer = setTimeout(() => {
-                    pendingPermissions.delete(requestId);
-                    send({
-                        ...makeBase(),
-                        type: "error",
-                        payload: {
-                            code: "PERMISSION_TIMEOUT",
-                            message: `Permission request ${requestId} timed out`,
-                            requestId,
-                            retry: false,
-                        },
-                    });
-                    resolve(false);
-                }, PERMISSION_TIMEOUT_MS);
+                const onTimeout = createPermissionTimeout(requestId, resolve);
+                const timer = setTimeout(onTimeout, PERMISSION_TIMEOUT_MS);
 
-                pendingPermissions.set(requestId, { resolve, timer });
+                pendingPermissions.set(requestId, { payload: promptMessage, onTimeout, resolve, timer });
             });
         });
 
         session.onUserInputRequest(async (prompt: string) => {
             const requestId = generateMessageId();
 
-            send({
+            const promptMessage: ServerMessage & { type: "user_input.request" } = {
                 ...makeBase(),
                 type: "user_input.request",
                 payload: { sessionId, requestId, prompt },
-            });
+            };
+
+            emit(promptMessage);
 
             return new Promise<string>((resolve) => {
-                const timer = setTimeout(() => {
-                    pendingInputs.delete(requestId);
-                    send({
-                        ...makeBase(),
-                        type: "error",
-                        payload: {
-                            code: "INPUT_TIMEOUT",
-                            message: `User input request ${requestId} timed out`,
-                            requestId,
-                            retry: false,
-                        },
-                    });
-                    resolve("");
-                }, PERMISSION_TIMEOUT_MS);
+                const onTimeout = createInputTimeout(requestId, resolve);
+                const timer = setTimeout(onTimeout, PERMISSION_TIMEOUT_MS);
 
-                pendingInputs.set(requestId, { resolve, timer });
+                pendingInputs.set(requestId, { payload: promptMessage, onTimeout, resolve, timer });
             });
         });
 
         session.onIdle(() => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "session.idle",
                 payload: { sessionId },
@@ -216,7 +312,7 @@ export function createSessionManager(
         });
 
         session.onSessionError((errorType: string, message: string) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "session.error",
                 payload: { sessionId, errorType, message },
@@ -224,7 +320,7 @@ export function createSessionManager(
         });
 
         session.onTitleChanged((title: string) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "session.title_changed",
                 payload: { sessionId, title },
@@ -232,7 +328,7 @@ export function createSessionManager(
         });
 
         session.onIntent((intent: string) => {
-            send({
+            emit({
                 ...makeBase(),
                 type: "assistant.intent",
                 payload: { sessionId, intent },
@@ -285,13 +381,49 @@ export function createSessionManager(
 
         async resumeSession(sessionId: string): Promise<void> {
             try {
+                const previousSession = activeSessions.get(sessionId);
                 const session = await copilotClient.resumeSession(sessionId);
                 activeSessions.set(session.id, session);
 
+                if (previousSession !== undefined && previousSession !== session) {
+                    previousSession.unsubscribeAll();
+                }
+
                 // Eski dinleyicileri temizle ve yeniden bağla — reconnect sonrası duplikasyonu engeller
                 session.unsubscribeAll();
-                wireSessionEvents(session);
-                const history = await session.getHistory();
+
+                const deferredMessages: Array<ServerMessage> = [];
+                let shouldDefer = true;
+                wireSessionEvents(session, (message) => {
+                    if (shouldDefer) {
+                        deferredMessages.push(message);
+                        return;
+                    }
+
+                    send(message);
+                });
+
+                let history: ReadonlyArray<SessionHistoryItem>;
+                try {
+                    history = await session.getHistory();
+                } catch (error) {
+                    shouldDefer = false;
+                    session.unsubscribeAll();
+                    wireSessionEvents(session);
+                    discardPendingPrompts(session.id);
+                    for (const deferredMessage of deferredMessages) {
+                        if (
+                            deferredMessage.type === "permission.request"
+                            || deferredMessage.type === "user_input.request"
+                        ) {
+                            continue;
+                        }
+                        send(deferredMessage);
+                    }
+                    throw error;
+                }
+
+                shouldDefer = false;
 
                 lastHostCapabilities = session.getCapabilities();
 
@@ -309,6 +441,18 @@ export function createSessionManager(
                         items: history,
                     },
                 });
+
+                replayPendingPrompts(session.id);
+
+                for (const message of deferredMessages) {
+                    if (
+                        message.type === "permission.request"
+                        || message.type === "user_input.request"
+                    ) {
+                        continue;
+                    }
+                    send(message);
+                }
 
                 emitCapabilitiesState();
             } catch (err) {
@@ -455,8 +599,165 @@ export function createSessionManager(
             }
         },
 
-        updateSettings(nextSettings: { autoApproveReads: boolean }): void {
+        getSessionInfo(sessionId: string): SessionInfo | undefined {
+            return getSessionInfo(sessionId);
+        },
+
+        getSessionContext(sessionId: string): SessionInfo["context"] | undefined {
+            return getSessionContext(sessionId);
+        },
+
+        async listWorkspaceTree(
+            sessionId: string,
+            requestedPath = ".",
+            maxDepth = 3
+        ): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const tree = await buildWorkspaceTree(context.cwd, requestedPath, maxDepth);
+                send({
+                    ...makeBase(),
+                    type: "workspace.tree",
+                    payload: {
+                        sessionId,
+                        context,
+                        rootPath: tree.rootPath,
+                        requestedPath: tree.requestedPath,
+                        tree: tree.tree,
+                        truncated: tree.truncated,
+                    },
+                });
+            } catch (error) {
+                sendWorkspaceError(
+                    "WORKSPACE_TREE_FAILED",
+                    error instanceof Error ? error.message : "Workspace tree lookup failed",
+                    false
+                );
+            }
+        },
+
+        async listWorkspaceGitSummary(
+            sessionId: string,
+            commitLimit = 10
+        ): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const summary = await buildWorkspaceGitSummary(context, commitLimit);
+                send({
+                    ...makeBase(),
+                    type: "workspace.git.summary",
+                    payload: {
+                        sessionId,
+                        context,
+                        rootPath: summary.rootPath,
+                        gitRoot: summary.gitRoot,
+                        ...(summary.repository !== undefined ? { repository: summary.repository } : {}),
+                        ...(summary.branch !== undefined ? { branch: summary.branch } : {}),
+                        uncommittedChanges: summary.uncommittedChanges,
+                        recentCommits: summary.recentCommits,
+                        truncated: summary.truncated,
+                    },
+                });
+            } catch (error) {
+                sendWorkspaceError(
+                    "WORKSPACE_GIT_FAILED",
+                    error instanceof Error ? error.message : "Workspace git summary failed",
+                    false
+                );
+            }
+        },
+
+        async pullWorkspace(sessionId: string): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const result = await performWorkspaceGitOperation(context, "pull");
+                send({
+                    ...makeBase(),
+                    type: "workspace.pull.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        operation: "pull",
+                        success: result.success,
+                        ...(result.stdout.length > 0 ? { stdout: result.stdout.trim() } : {}),
+                        ...(result.stderr.length > 0 ? { stderr: result.stderr.trim() } : {}),
+                        ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+                        ...(result.signal !== undefined ? { signal: result.signal } : {}),
+                        ...(result.message !== undefined ? { message: result.message } : {}),
+                    },
+                });
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "workspace.pull.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        operation: "pull",
+                        success: false,
+                        message: error instanceof Error ? error.message : "Workspace pull failed",
+                    },
+                });
+            }
+        },
+
+        async pushWorkspace(sessionId: string): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const result = await performWorkspaceGitOperation(context, "push");
+                send({
+                    ...makeBase(),
+                    type: "workspace.push.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        operation: "push",
+                        success: result.success,
+                        ...(result.stdout.length > 0 ? { stdout: result.stdout.trim() } : {}),
+                        ...(result.stderr.length > 0 ? { stderr: result.stderr.trim() } : {}),
+                        ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+                        ...(result.signal !== undefined ? { signal: result.signal } : {}),
+                        ...(result.message !== undefined ? { message: result.message } : {}),
+                    },
+                });
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "workspace.push.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        operation: "push",
+                        success: false,
+                        message: error instanceof Error ? error.message : "Workspace push failed",
+                    },
+                });
+            }
+        },
+
+        updateSettings(nextSettings: { autoApproveReads: boolean; autoApproveAll?: boolean }): void {
             autoApproveReads = nextSettings.autoApproveReads;
+            autoApproveAll = nextSettings.autoApproveAll ?? false;
             emitCapabilitiesState();
         },
 
@@ -464,22 +765,29 @@ export function createSessionManager(
             emitCapabilitiesState();
         },
 
+        replayPendingPrompts(sessionId?: string): void {
+            replayPendingPrompts(sessionId);
+        },
+
+        discardPendingPrompts(): void {
+            discardPendingPrompts();
+        },
+
         cleanupOnDisconnect(): void {
-            // Clear pending permission requests — deny all
-            for (const [id, pending] of pendingPermissions) {
+            // Geçici bağlantı kopmalarında pending prompt'ları koru.
+        },
+
+        async shutdown(): Promise<void> {
+            for (const pending of pendingPermissions.values()) {
                 clearTimeout(pending.timer);
                 pending.resolve(false);
             }
             pendingPermissions.clear();
-            for (const [, pending] of pendingInputs) {
+            for (const pending of pendingInputs.values()) {
                 clearTimeout(pending.timer);
                 pending.resolve("");
             }
             pendingInputs.clear();
-        },
-
-        async shutdown(): Promise<void> {
-            this.cleanupOnDisconnect();
             for (const [, session] of activeSessions) {
                 session.close();
             }

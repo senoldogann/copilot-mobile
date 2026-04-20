@@ -36,10 +36,47 @@ export type ToolArguments = Record<string, unknown>;
 
 export type SessionContext = {
     cwd: string;
-    gitRoot?: string;
-    repository?: string;
-    branch?: string;
+    gitRoot?: string | undefined;
+    repository?: string | undefined;
+    branch?: string | undefined;
 };
+
+export type WorkspaceTreeNode = {
+    name: string;
+    path: string;
+    type: "file" | "directory" | "symlink";
+    size?: number | undefined;
+    modifiedAt?: number | undefined;
+    children?: ReadonlyArray<WorkspaceTreeNode> | undefined;
+};
+
+export type GitFileChange = {
+    path: string;
+    status:
+        | "added"
+        | "modified"
+        | "deleted"
+        | "renamed"
+        | "copied"
+        | "untracked"
+        | "conflicted"
+        | "type_changed"
+        | "unknown";
+    indexStatus: string;
+    worktreeStatus: string;
+    originalPath?: string | undefined;
+};
+
+export type GitCommitSummary = {
+    hash: string;
+    shortHash: string;
+    subject: string;
+    author: string;
+    committedAt: number;
+    files: ReadonlyArray<string>;
+};
+
+export type WorkspaceOperation = "pull" | "push";
 
 export type SessionInfo = {
     id: string;
@@ -50,6 +87,79 @@ export type SessionInfo = {
     summary?: string;
     title?: string;
     context?: SessionContext;
+};
+
+export type WorkspaceTreeRequestMessage = BaseBridgeMessage & {
+    type: "workspace.tree.request";
+    payload: {
+        sessionId: string;
+        path?: string;
+        maxDepth?: number;
+    };
+};
+
+export type WorkspaceTreeMessage = BaseBridgeMessage & {
+    type: "workspace.tree";
+    payload: {
+        sessionId: string;
+        context: SessionContext;
+        rootPath: string;
+        requestedPath: string;
+        tree: WorkspaceTreeNode;
+        truncated: boolean;
+    };
+};
+
+export type WorkspaceGitSummaryRequestMessage = BaseBridgeMessage & {
+    type: "workspace.git.request";
+    payload: {
+        sessionId: string;
+        commitLimit?: number;
+    };
+};
+
+export type WorkspaceGitSummaryMessage = BaseBridgeMessage & {
+    type: "workspace.git.summary";
+    payload: {
+        sessionId: string;
+        context: SessionContext;
+        rootPath: string;
+        gitRoot: string;
+        repository?: string;
+        branch?: string;
+        uncommittedChanges: ReadonlyArray<GitFileChange>;
+        recentCommits: ReadonlyArray<GitCommitSummary>;
+        truncated: boolean;
+    };
+};
+
+export type WorkspaceOperationRequestMessage = BaseBridgeMessage & {
+    type: "workspace.pull" | "workspace.push";
+    payload: {
+        sessionId: string;
+    };
+};
+
+export type WorkspaceOperationResultPayload = {
+    sessionId: string;
+    context: SessionContext;
+    operation: WorkspaceOperation;
+    success: boolean;
+    stdout?: string | undefined;
+    stderr?: string | undefined;
+    exitCode?: number | undefined;
+    signal?: string | null | undefined;
+    message?: string | undefined;
+};
+
+export type WorkspacePullResultMessage = BaseBridgeMessage & {
+    type: "workspace.pull.result";
+    payload: WorkspaceOperationResultPayload & { operation: "pull" };
+};
+
+export type WorkspacePushResultMessage = BaseBridgeMessage & {
+    type: "workspace.push.result";
+    payload: WorkspaceOperationResultPayload & { operation: "push" };
 };
 
 export type SessionHistoryItem =
@@ -145,6 +255,7 @@ export type HostSessionCapabilities = {
 
 export type BridgeSettings = {
     autoApproveReads: boolean;
+    autoApproveAll: boolean;
     readApprovalsConfigurable: boolean;
 };
 
@@ -327,7 +438,11 @@ export type ServerMessage =
     | CapabilitiesStateMessage
     | SessionErrorMessage
     | SessionTitleChangedMessage
-    | AssistantIntentMessage;
+    | AssistantIntentMessage
+    | WorkspaceTreeMessage
+    | WorkspaceGitSummaryMessage
+    | WorkspacePullResultMessage
+    | WorkspacePushResultMessage;
 
 // --- Client → Server Messages (Discriminated Union) ---
 
@@ -382,7 +497,7 @@ export type UserInputRespondMessage = BaseBridgeMessage & {
 
 export type SettingsUpdateMessage = BaseBridgeMessage & {
     type: "settings.update";
-    payload: { autoApproveReads: boolean };
+    payload: { autoApproveReads: boolean; autoApproveAll?: boolean };
 };
 
 export type ModelsRequestMessage = BaseBridgeMessage & {
@@ -413,7 +528,10 @@ export type ClientMessage =
     | SettingsUpdateMessage
     | ModelsRequestMessage
     | ReconnectMessage
-    | CapabilitiesRequestMessage;
+    | CapabilitiesRequestMessage
+    | WorkspaceTreeRequestMessage
+    | WorkspaceGitSummaryRequestMessage
+    | WorkspaceOperationRequestMessage;
 
 // --- QR Code Content ---
 

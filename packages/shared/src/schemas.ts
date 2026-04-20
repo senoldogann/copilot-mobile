@@ -26,6 +26,43 @@ const sessionContextSchema = z.object({
     branch: z.string().min(1).optional(),
 });
 
+let workspaceTreeNodeSchema: z.ZodType<import("./protocol").WorkspaceTreeNode>;
+workspaceTreeNodeSchema = z.lazy(() => z.object({
+    name: z.string().min(1),
+    path: z.string(),
+    type: z.enum(["file", "directory", "symlink"]),
+    size: z.number().int().nonnegative().optional(),
+    modifiedAt: z.number().nonnegative().optional(),
+    children: z.array(workspaceTreeNodeSchema).readonly().optional(),
+})) as z.ZodType<import("./protocol").WorkspaceTreeNode>;
+
+const gitFileChangeSchema = z.object({
+    path: z.string().min(1),
+    status: z.enum([
+        "added",
+        "modified",
+        "deleted",
+        "renamed",
+        "copied",
+        "untracked",
+        "conflicted",
+        "type_changed",
+        "unknown",
+    ]),
+    indexStatus: z.string().min(1),
+    worktreeStatus: z.string().min(1),
+    originalPath: z.string().min(1).optional(),
+});
+
+const gitCommitSummarySchema = z.object({
+    hash: z.string().min(1),
+    shortHash: z.string().min(1),
+    subject: z.string(),
+    author: z.string().min(1),
+    committedAt: z.number().int().nonnegative(),
+    files: z.array(z.string().min(1)).readonly(),
+});
+
 const sessionInfoSchema = z.object({
     id: z.string().min(1),
     model: z.string().min(1),
@@ -133,12 +170,25 @@ const hostSessionCapabilitiesSchema = z.object({
 
 const bridgeSettingsSchema = z.object({
     autoApproveReads: z.boolean(),
+    autoApproveAll: z.boolean().optional().default(false),
     readApprovalsConfigurable: z.boolean(),
 });
 
 const capabilitiesStatePayloadSchema = z.object({
     host: hostSessionCapabilitiesSchema,
     bridge: bridgeSettingsSchema,
+});
+
+const workspaceOperationResultPayloadSchema = z.object({
+    sessionId: z.string().min(1),
+    context: sessionContextSchema,
+    operation: z.enum(["pull", "push"]),
+    success: z.boolean(),
+    stdout: z.string().optional(),
+    stderr: z.string().optional(),
+    exitCode: z.number().int().optional(),
+    signal: z.string().nullable().optional(),
+    message: z.string().optional(),
 });
 
 // --- Server → Client Message Schemas ---
@@ -319,6 +369,47 @@ const assistantIntentSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceTreeSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.tree"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        context: sessionContextSchema,
+        rootPath: z.string().min(1),
+        requestedPath: z.string(),
+        tree: workspaceTreeNodeSchema,
+        truncated: z.boolean(),
+    }),
+});
+
+const workspaceGitSummarySchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.git.summary"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        context: sessionContextSchema,
+        rootPath: z.string().min(1),
+        gitRoot: z.string().min(1),
+        repository: z.string().optional(),
+        branch: z.string().optional(),
+        uncommittedChanges: z.array(gitFileChangeSchema),
+        recentCommits: z.array(gitCommitSummarySchema),
+        truncated: z.boolean(),
+    }),
+});
+
+const workspacePullResultSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.pull.result"),
+    payload: workspaceOperationResultPayloadSchema.extend({
+        operation: z.literal("pull"),
+    }),
+});
+
+const workspacePushResultSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.push.result"),
+    payload: workspaceOperationResultPayloadSchema.extend({
+        operation: z.literal("push"),
+    }),
+});
+
 export const serverMessageSchema = z.discriminatedUnion("type", [
     pairingSuccessSchema,
     sessionCreatedSchema,
@@ -345,6 +436,10 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     sessionErrorSchema,
     sessionTitleChangedSchema,
     assistantIntentSchema,
+    workspaceTreeSchema,
+    workspaceGitSummarySchema,
+    workspacePullResultSchema,
+    workspacePushResultSchema,
 ]);
 
 // --- Client → Server Message Schemas ---
@@ -403,7 +498,7 @@ const userInputRespondSchema = baseBridgeMessageSchema.extend({
 
 const settingsUpdateSchema = baseBridgeMessageSchema.extend({
     type: z.literal("settings.update"),
-    payload: z.object({ autoApproveReads: z.boolean() }),
+    payload: z.object({ autoApproveReads: z.boolean(), autoApproveAll: z.boolean().optional() }),
 });
 
 const modelsRequestSchema = baseBridgeMessageSchema.extend({
@@ -421,6 +516,37 @@ const capabilitiesRequestSchema = baseBridgeMessageSchema.extend({
     payload: z.object({}).strict(),
 });
 
+const workspaceTreeRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.tree.request"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        path: z.string().optional(),
+        maxDepth: z.number().int().positive().optional(),
+    }),
+});
+
+const workspaceGitSummaryRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.git.request"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        commitLimit: z.number().int().positive().optional(),
+    }),
+});
+
+const workspacePullSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.pull"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+    }),
+});
+
+const workspacePushSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.push"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+    }),
+});
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
     authPairSchema,
     sessionCreateSchema,
@@ -435,6 +561,10 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     modelsRequestSchema,
     reconnectSchema,
     capabilitiesRequestSchema,
+    workspaceTreeRequestSchema,
+    workspaceGitSummaryRequestSchema,
+    workspacePullSchema,
+    workspacePushSchema,
 ]);
 
 // --- QR Payload Schema ---
@@ -470,7 +600,15 @@ export type QRPayloadSchemaType = z.infer<typeof qrPayloadSchema>;
 // Zod schema'ları ile TypeScript tipleri arasındaki yapısal uyumu doğrular.
 // exactOptionalPropertyTypes nedeniyle tam ikili uyum yerine discriminant bazlı kontrol yapılır.
 
-import type { ServerMessage, ClientMessage, QRPayload } from "./protocol";
+import type {
+    ServerMessage,
+    ClientMessage,
+    QRPayload,
+    WorkspaceTreeNode,
+    GitFileChange,
+    GitCommitSummary,
+    WorkspaceOperationResultPayload,
+} from "./protocol";
 
 type _AssertServerTypes = z.infer<typeof serverMessageSchema>["type"] extends ServerMessage["type"] ? true : never;
 type _AssertServerTypesReverse = ServerMessage["type"] extends z.infer<typeof serverMessageSchema>["type"] ? true : never;
@@ -481,3 +619,25 @@ type _AssertClientTypes = z.infer<typeof clientMessageSchema>["type"] extends Cl
 type _AssertClientTypesReverse = ClientMessage["type"] extends z.infer<typeof clientMessageSchema>["type"] ? true : never;
 const _checkClientTypes: _AssertClientTypes & _AssertClientTypesReverse = true;
 void _checkClientTypes;
+
+type _AssertWorkspaceTreeNode = z.infer<typeof workspaceTreeNodeSchema> extends WorkspaceTreeNode ? true : never;
+type _AssertWorkspaceTreeNodeReverse = WorkspaceTreeNode extends z.infer<typeof workspaceTreeNodeSchema> ? true : never;
+const _checkWorkspaceTreeNode: _AssertWorkspaceTreeNode & _AssertWorkspaceTreeNodeReverse = true;
+void _checkWorkspaceTreeNode;
+
+type _AssertGitFileChange = z.infer<typeof gitFileChangeSchema> extends GitFileChange ? true : never;
+type _AssertGitFileChangeReverse = GitFileChange extends z.infer<typeof gitFileChangeSchema> ? true : never;
+const _checkGitFileChange: _AssertGitFileChange & _AssertGitFileChangeReverse = true;
+void _checkGitFileChange;
+
+type _AssertGitCommitSummary = z.infer<typeof gitCommitSummarySchema> extends GitCommitSummary ? true : never;
+type _AssertGitCommitSummaryReverse = GitCommitSummary extends z.infer<typeof gitCommitSummarySchema> ? true : never;
+const _checkGitCommitSummary: _AssertGitCommitSummary & _AssertGitCommitSummaryReverse = true;
+void _checkGitCommitSummary;
+
+type _AssertWorkspaceOperationResult =
+    z.infer<typeof workspaceOperationResultPayloadSchema> extends WorkspaceOperationResultPayload ? true : never;
+type _AssertWorkspaceOperationResultReverse =
+    WorkspaceOperationResultPayload extends z.infer<typeof workspaceOperationResultPayloadSchema> ? true : never;
+const _checkWorkspaceOperationResult: _AssertWorkspaceOperationResult & _AssertWorkspaceOperationResultReverse = true;
+void _checkWorkspaceOperationResult;

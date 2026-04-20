@@ -191,6 +191,8 @@ function ConnectionInfo() {
 function ApprovalSettings() {
     const autoApproveReads = useSessionStore((s) => s.autoApproveReads);
     const setAutoApproveReads = useSessionStore((s) => s.setAutoApproveReads);
+    const autoApproveAll = useSessionStore((s) => s.autoApproveAll);
+    const setAutoApproveAll = useSessionStore((s) => s.setAutoApproveAll);
     const readApprovalsConfigurable = useSessionStore(
         (s) => s.bridgeSettings.readApprovalsConfigurable
     );
@@ -214,7 +216,24 @@ function ApprovalSettings() {
                     value={autoApproveReads}
                     onValueChange={(value) => {
                         setAutoApproveReads(value);
-                        void updateSettings(value);
+                        void updateSettings({ autoApproveReads: value, autoApproveAll });
+                    }}
+                    trackColor={{ false: colors.bgOverlay, true: colors.accent }}
+                    thumbColor={colors.textOnAccent}
+                />
+            </View>
+            <View style={[styles.toggleCard, { marginTop: 8 }]}>
+                <View style={styles.toggleTextGroup}>
+                    <Text style={styles.toggleTitle}>Auto-approve all permissions</Text>
+                    <Text style={styles.toggleDescription}>
+                        Automatically approve all permission requests including file writes and shell commands.
+                    </Text>
+                </View>
+                <Switch
+                    value={autoApproveAll}
+                    onValueChange={(value) => {
+                        setAutoApproveAll(value);
+                        void updateSettings({ autoApproveReads, autoApproveAll: value });
                     }}
                     trackColor={{ false: colors.bgOverlay, true: colors.accent }}
                     thumbColor={colors.textOnAccent}

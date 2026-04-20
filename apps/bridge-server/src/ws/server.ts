@@ -10,6 +10,8 @@ import { createMessageHandler } from "./handler.js";
 import { checkPairingRateLimit } from "../utils/rate-limit.js";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
 
+const AUTH_HANDSHAKE_TIMEOUT_MS = 10_000;
+
 type ActiveClient = {
     ws: WebSocket;
     handler: ReturnType<typeof createMessageHandler>;
@@ -28,31 +30,63 @@ export function createBridgeServer(copilotClient: AdaptedCopilotClient) {
     // Reconnect replay buffer — keeps last MAX_MESSAGE_BUFFER messages
     const messageBuffer: ServerMessage[] = [];
 
+    const sendToActiveClient: (message: ServerMessage) => void = (message) => {
+        if (
+            message.type !== "pairing.success"
+            && message.type !== "token.refresh"
+            && message.type !== "reconnect.ready"
+            && message.type !== "permission.request"
+            && message.type !== "user_input.request"
+        ) {
+            const alreadyBuffered = messageBuffer.some((m) => m.seq === message.seq);
+            if (!alreadyBuffered) {
+                messageBuffer.push(message);
+                if (messageBuffer.length > MAX_MESSAGE_BUFFER) {
+                    messageBuffer.shift();
+                }
+            }
+        }
+
+        if (activeClient?.ws.readyState === WebSocket.OPEN) {
+            activeClient.ws.send(JSON.stringify(message));
+        }
+    };
+
+    const sessionManager = createSessionManager(copilotClient, sendToActiveClient);
+
     function getClientIP(req: IncomingMessage): string {
         return req.socket.remoteAddress ?? "unknown";
+    }
+
+    function sendToSocket(ws: WebSocket, message: ServerMessage): void {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(message));
+        }
+    }
+
+    function promoteClient(nextClient: ActiveClient, preserveReplayBuffer: boolean): void {
+        const previousClient = activeClient;
+        activeClient = nextClient;
+        activeClient.alive = true;
+
+        if (!preserveReplayBuffer) {
+            sessionManager.discardPendingPrompts();
+            messageBuffer.length = 0;
+        }
+
+        if (previousClient !== null && previousClient.ws !== nextClient.ws) {
+            console.log("[ws] Closing existing authenticated connection");
+            previousClient.ws.close(1000, "New authenticated client connected");
+        }
     }
 
     wss.on("connection", (ws: WebSocket, req: IncomingMessage) => {
         const clientIP = getClientIP(req);
         console.log(`[ws] New connection: ${clientIP}`);
 
-        // Single client constraint — close existing connection
-        if (activeClient !== null) {
-            console.log("[ws] Closing existing connection (new client connected)");
-            activeClient.handler.cleanup();
-            activeClient.ws.close(1000, "New client connected");
-            activeClient = null;
-        }
-
         // JWT reconnect desteği
         const url = new URL(req.url ?? "/", `ws://${req.headers.host ?? "localhost"}`);
         const jwtToken = url.searchParams.get("token");
-
-        // Yeni pairing'de eski mesaj buffer'ını temizle — çapraz oturum sızmasını engelle
-        // JWT reconnect'te buffer korunur — replay mekanizması için gerekli
-        if (jwtToken === null) {
-            messageBuffer.length = 0;
-        }
 
         // Rate limit — sadece yeni pairing bağlantıları için (JWT reconnect hariç)
         if (jwtToken === null && !checkPairingRateLimit(clientIP)) {
@@ -60,37 +94,31 @@ export function createBridgeServer(copilotClient: AdaptedCopilotClient) {
             return;
         }
 
-        const send: (message: ServerMessage) => void = (message) => {
-            if (
-                message.type !== "pairing.success"
-                && message.type !== "token.refresh"
-                && message.type !== "reconnect.ready"
-                && message.type !== "permission.request"
-                && message.type !== "user_input.request"
-            ) {
-                // Tekrar eklemeyi engelle — reconnect replay'de mesaj zaten buffer'da
-                const alreadyBuffered = messageBuffer.some((m) => m.seq === message.seq);
-                if (!alreadyBuffered) {
-                    messageBuffer.push(message);
-                    if (messageBuffer.length > MAX_MESSAGE_BUFFER) {
-                        messageBuffer.shift();
-                    }
-                }
+        let handler: ReturnType<typeof createMessageHandler>;
+        let authTimeout: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+            if (!handler.isAuthenticated && ws.readyState === WebSocket.OPEN) {
+                ws.close(1008, "Authentication timeout");
             }
-            if (ws.readyState === WebSocket.OPEN) {
-                ws.send(JSON.stringify(message));
-            }
-        };
+        }, AUTH_HANDSHAKE_TIMEOUT_MS);
 
-        const sessionManager = createSessionManager(copilotClient, send);
-        const handler = createMessageHandler(sessionManager, send, messageBuffer, null);
+        handler = createMessageHandler(
+            sessionManager,
+            (message) => sendToSocket(ws, message),
+            messageBuffer,
+            null,
+            () => {
+                if (authTimeout !== null) {
+                    clearTimeout(authTimeout);
+                    authTimeout = null;
+                }
+                promoteClient({ ws, handler, alive: true }, jwtToken !== null);
+            }
+        );
 
         // Auto-auth with JWT
         if (jwtToken !== null && handler.authenticateWithJWT(jwtToken)) {
             console.log(`[ws] Reconnected with JWT: ${handler.deviceId}`);
         }
-
-        activeClient = { ws, handler, alive: true };
 
         ws.on("message", async (data: Buffer) => {
             try {
@@ -109,7 +137,7 @@ export function createBridgeServer(copilotClient: AdaptedCopilotClient) {
                         retry: false,
                     },
                 };
-                send(errorPayload);
+                sendToSocket(ws, errorPayload);
             }
         });
 
@@ -121,17 +149,23 @@ export function createBridgeServer(copilotClient: AdaptedCopilotClient) {
 
         ws.on("close", (code: number, reason: Buffer) => {
             console.log(`[ws] Connection closed: ${code} ${reason.toString("utf-8")}`);
+            if (authTimeout !== null) {
+                clearTimeout(authTimeout);
+                authTimeout = null;
+            }
             if (activeClient !== null && activeClient.ws === ws) {
-                handler.cleanup();
                 activeClient = null;
             }
         });
 
         ws.on("error", (err: Error) => {
             console.error("[ws] WebSocket error:", err.message);
+            if (authTimeout !== null) {
+                clearTimeout(authTimeout);
+                authTimeout = null;
+            }
             // Hata durumunda bağlantıyı temizle — zombi bağlantıları engelle
             if (activeClient !== null && activeClient.ws === ws) {
-                handler.cleanup();
                 activeClient = null;
             }
         });
@@ -170,7 +204,6 @@ export function createBridgeServer(copilotClient: AdaptedCopilotClient) {
             }
 
             if (activeClient !== null) {
-                activeClient.handler.cleanup();
                 activeClient.ws.close(1001, "Server shutting down");
                 activeClient = null;
             }
@@ -178,7 +211,8 @@ export function createBridgeServer(copilotClient: AdaptedCopilotClient) {
             wss.close();
 
             return new Promise((resolve) => {
-                httpServer.close(() => {
+                httpServer.close(async () => {
+                    await sessionManager.shutdown();
                     console.log("[ws] Server shut down");
                     resolve();
                 });

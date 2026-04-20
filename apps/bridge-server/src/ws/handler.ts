@@ -25,7 +25,8 @@ export function createMessageHandler(
     sessionManager: SessionManager,
     send: SendFn,
     messageBuffer: ReadonlyArray<ServerMessage> = [],
-    certFingerprint: string | null
+    certFingerprint: string | null,
+    onAuthenticated?: () => void
 ) {
     const state: ClientState = {
         authenticated: false,
@@ -178,6 +179,31 @@ export function createMessageHandler(
                     sessionManager.emitCapabilitiesState();
                     return;
 
+                case "workspace.tree.request":
+                    {
+                        const maxDepth = Math.min(message.payload.maxDepth ?? 3, 5);
+                        return sessionManager.listWorkspaceTree(
+                            message.payload.sessionId,
+                            message.payload.path,
+                            maxDepth
+                        );
+                    }
+
+                case "workspace.git.request":
+                    {
+                        const commitLimit = Math.min(message.payload.commitLimit ?? 10, 50);
+                        return sessionManager.listWorkspaceGitSummary(
+                            message.payload.sessionId,
+                            commitLimit
+                        );
+                    }
+
+                case "workspace.pull":
+                    return sessionManager.pullWorkspace(message.payload.sessionId);
+
+                case "workspace.push":
+                    return sessionManager.pushWorkspace(message.payload.sessionId);
+
                 case "reconnect": {
                     // Reconnect — replay messages after lastSeenSeq
                     const lastSeenSeq = message.payload.lastSeenSeq;
@@ -225,6 +251,8 @@ export function createMessageHandler(
                 payload: { jwt, deviceId, certFingerprint },
             });
 
+            onAuthenticated?.();
+
             // After pairing, send current bridge + host capabilities state to mobile.
             sessionManager.emitCapabilitiesState();
 
@@ -239,6 +267,7 @@ export function createMessageHandler(
                 state.deviceId = payload.deviceId;
                 state.jwt = token;
                 state.tokenIssuedAt = payload.pairedAt;
+                onAuthenticated?.();
                 return true;
             } catch {
                 return false;

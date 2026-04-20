@@ -5,6 +5,7 @@ import { useConnectionStore } from "../stores/connection-store";
 import type { ChatItem } from "../stores/session-store";
 import { useSessionStore } from "../stores/session-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
+import { useWorkspaceStore } from "../stores/workspace-store";
 
 function collectPermissionDetails(metadata: Record<string, unknown>): Array<string> {
     const details: Array<string> = [];
@@ -49,35 +50,144 @@ function mapHistoryItemToChatItem(item: SessionHistoryItem): ChatItem {
     }
 }
 
+function mapHistoryItemWithStreamingState(
+    historyItem: Extract<SessionHistoryItem, { type: "assistant" | "thinking" }>,
+    matchedItem: Extract<ChatItem, { type: "assistant" | "thinking" }> | undefined
+): ChatItem {
+    const mappedItem = mapHistoryItemToChatItem(historyItem);
+    if (mappedItem.type !== "assistant" && mappedItem.type !== "thinking") {
+        return mappedItem;
+    }
+
+    return {
+        ...mappedItem,
+        isStreaming: matchedItem?.isStreaming === true,
+    };
+}
+
 function mergeHistoryIntoExistingItems(
     currentItems: ReadonlyArray<ChatItem>,
     historyItems: ReadonlyArray<SessionHistoryItem>
 ): Array<ChatItem> {
-    const nextItems = [...currentItems];
+    const matchedIndexes = new Set<number>();
+    const mergedItems: Array<ChatItem> = [];
+
+    function areAttachmentsEquivalent(
+        left: SessionHistoryItem & { type: "user" },
+        right: Extract<ChatItem, { type: "user" }>
+    ): boolean {
+        const leftAttachments = left.attachments ?? [];
+        const rightAttachments = right.attachments ?? [];
+
+        if (leftAttachments.length !== rightAttachments.length) {
+            return false;
+        }
+
+        return leftAttachments.every((attachment, index) => {
+            const rightAttachment = rightAttachments[index];
+            return rightAttachment !== undefined
+                && attachment.mimeType === rightAttachment.mimeType
+                && attachment.displayName === rightAttachment.displayName
+                && attachment.data === rightAttachment.data;
+        });
+    }
+
+    function isExactHistoryMessageMatch(
+        historyItem: Extract<SessionHistoryItem, { type: "user" | "assistant" | "thinking" }>,
+        existingItem: Extract<ChatItem, { type: "user" | "assistant" | "thinking" }>
+    ): boolean {
+        if (existingItem.type !== historyItem.type) {
+            return false;
+        }
+
+        if (existingItem.id === historyItem.id) {
+            return true;
+        }
+
+        if (existingItem.content !== historyItem.content) {
+            return false;
+        }
+
+        if (historyItem.type === "user" && existingItem.type === "user") {
+            return areAttachmentsEquivalent(historyItem, existingItem);
+        }
+
+        return true;
+    }
+
+    function findStreamingHistoryMatchIndex(
+        historyItem: Extract<SessionHistoryItem, { type: "assistant" | "thinking" }>
+    ): number {
+        for (let index = currentItems.length - 1; index >= 0; index -= 1) {
+            if (matchedIndexes.has(index)) {
+                continue;
+            }
+
+            const item = currentItems[index];
+            if (
+                item === undefined
+                || item.type !== historyItem.type
+                || item.isStreaming !== true
+            ) {
+                continue;
+            }
+
+            if (historyItem.content.startsWith(item.content)) {
+                return index;
+            }
+        }
+
+        return -1;
+    }
 
     for (const historyItem of historyItems) {
         if (historyItem.type === "user" || historyItem.type === "assistant" || historyItem.type === "thinking") {
-            const alreadyExists = nextItems.some((item) =>
-                item.type === historyItem.type && item.content === historyItem.content
+            let existingIndex = currentItems.findIndex((item, index) =>
+                !matchedIndexes.has(index)
+                && (item.type === "user" || item.type === "assistant" || item.type === "thinking")
+                && isExactHistoryMessageMatch(historyItem, item)
             );
-            if (!alreadyExists) {
-                nextItems.push(mapHistoryItemToChatItem(historyItem));
+
+            if (
+                existingIndex === -1
+                && (historyItem.type === "assistant" || historyItem.type === "thinking")
+            ) {
+                existingIndex = findStreamingHistoryMatchIndex(historyItem);
+            }
+
+            if (existingIndex === -1) {
+                mergedItems.push(mapHistoryItemToChatItem(historyItem));
+            } else {
+                matchedIndexes.add(existingIndex);
+                const matchedItem = currentItems[existingIndex];
+                if (
+                    (historyItem.type === "assistant" || historyItem.type === "thinking")
+                    && matchedItem !== undefined
+                    && (matchedItem.type === "assistant" || matchedItem.type === "thinking")
+                ) {
+                    mergedItems.push(mapHistoryItemWithStreamingState(historyItem, matchedItem));
+                } else {
+                    mergedItems.push(mapHistoryItemToChatItem(historyItem));
+                }
             }
             continue;
         }
 
-        const existingIndex = nextItems.findIndex((item) =>
-            item.type === "tool" && item.requestId === historyItem.requestId
+        const existingIndex = currentItems.findIndex((item, index) =>
+            !matchedIndexes.has(index)
+            && item.type === "tool"
+            && item.requestId === historyItem.requestId
         );
 
         if (existingIndex === -1) {
-            nextItems.push(historyItem);
+            mergedItems.push(historyItem);
             continue;
         }
 
-        const existingItem = nextItems[existingIndex];
+        const existingItem = currentItems[existingIndex];
         if (existingItem !== undefined && existingItem.type === "tool") {
-            nextItems[existingIndex] = {
+            matchedIndexes.add(existingIndex);
+            mergedItems.push({
                 ...existingItem,
                 status: historyItem.status,
                 ...(historyItem.argumentsText !== undefined
@@ -89,11 +199,17 @@ function mergeHistoryIntoExistingItems(
                 ...(historyItem.partialOutput !== undefined
                     ? { partialOutput: historyItem.partialOutput }
                     : {}),
-            };
+            });
         }
     }
 
-    return [...nextItems].sort((left, right) => left.timestamp - right.timestamp);
+    for (const [index, item] of currentItems.entries()) {
+        if (!matchedIndexes.has(index)) {
+            mergedItems.push(item);
+        }
+    }
+
+    return mergedItems;
 }
 
 function formatToolArguments(
@@ -197,7 +313,7 @@ export function handleServerMessage(message: ServerMessage): void {
         case "assistant.message_delta": {
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.setAssistantTyping(true);
-            sessionStore.appendAssistantDelta(message.payload.delta);
+            sessionStore.appendAssistantDelta(message.payload.delta, message.payload.index);
             break;
         }
 
@@ -210,7 +326,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.reasoning_delta": {
             if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.appendThinkingDelta(message.payload.delta);
+            sessionStore.appendThinkingDelta(message.payload.delta, message.payload.index);
             break;
         }
 
@@ -337,6 +453,30 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.intent": {
             sessionStore.setCurrentIntent(message.payload.intent);
+            break;
+        }
+
+        case "workspace.tree": {
+            if (!isActiveSession(message.payload.sessionId)) break;
+            const workspaceStore = useWorkspaceStore.getState();
+            workspaceStore.setWorkspaceTree(message.payload);
+            workspaceStore.setTreeLoading(message.payload.rootPath, false);
+            workspaceStore.setTreeLoading("__root__", false);
+            break;
+        }
+
+        case "workspace.git.summary": {
+            if (!isActiveSession(message.payload.sessionId)) break;
+            const workspaceStore = useWorkspaceStore.getState();
+            workspaceStore.setWorkspaceGitSummary(message.payload);
+            break;
+        }
+
+        case "workspace.pull.result":
+        case "workspace.push.result": {
+            if (!isActiveSession(message.payload.sessionId)) break;
+            const workspaceStore = useWorkspaceStore.getState();
+            workspaceStore.setWorkspaceOperationResult(message.payload);
             break;
         }
 
