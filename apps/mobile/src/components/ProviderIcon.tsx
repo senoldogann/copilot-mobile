@@ -468,3 +468,86 @@ export function ListTreeIcon({ size = 14, color = "#a0a3a2" }: { size?: number; 
         </Svg>
     );
 }
+
+// ⊕ — circle with plus inside (Agent / Ask icon in VS Code Copilot)
+export function CirclePlusIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" fill="none">
+                <Circle cx="12" cy="12" r="9" />
+                <Path d="M12 8v8M8 12h8" />
+            </G>
+        </Svg>
+    );
+}
+
+// ≡ — three horizontal lines (Plan icon)
+export function MenuListIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" fill="none">
+                <Path d="M4 6h16M4 12h16M4 18h16" />
+            </G>
+        </Svg>
+    );
+}
+
+// ? circle — Ask mode
+export function HelpCircleIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Circle cx="12" cy="12" r="9" />
+                <Path d="M9 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3" />
+                <Circle cx="12" cy="17" r="0.5" fill={color} />
+            </G>
+        </Svg>
+    );
+}
+
+// Shield outline — Default Approvals
+export function ShieldIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M12 2L4 6v6c0 5 4 9 8 10 4-1 8-5 8-10V6l-8-4Z"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                fill="none"
+            />
+        </Svg>
+    );
+}
+
+// Shield with check — Bypass Approvals
+export function ShieldCheckIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M12 2L4 6v6c0 5 4 9 8 10 4-1 8-5 8-10V6l-8-4Z"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                fill="none"
+            />
+            <Path d="m9 12 2 2 4-4" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+    );
+}
+
+// Zap / Flash — Autopilot
+export function ZapIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M13 2L4 14h7l-1 8 9-12h-7l1-8Z"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+            />
+        </Svg>
+    );
+}

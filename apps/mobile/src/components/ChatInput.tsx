@@ -1,6 +1,6 @@
 // Mesaj giriş çubuğu — GitHub Copilot mobil stili model/effort seçiciler, resim ekleme, gönderim modları
 
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useMemo } from "react";
 import {
     View,
     TextInput,
@@ -19,7 +19,6 @@ import { useWorkspaceStore } from "../stores/workspace-store";
 import type { WorkspaceTreeNode } from "@copilot-mobile/shared";
 import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
 import type { AgentMode, ModelInfo, PermissionLevel, ReasoningEffortLevel } from "@copilot-mobile/shared";
-import { Feather, Ionicons } from "@expo/vector-icons";
 import { updatePermissionLevel, updateSessionMode } from "../services/bridge";
 import { startVoiceDictation, type DictationHandle } from "../services/voice-dictation";
 import {
@@ -32,6 +31,13 @@ import {
     CheckIcon,
     CloseIcon,
     SlidersIcon,
+    CirclePlusIcon,
+    MenuListIcon,
+    HelpCircleIcon,
+    ShieldIcon,
+    ShieldCheckIcon,
+    ZapIcon,
+    RefreshIcon,
 } from "./ProviderIcon";
 
 // --- Types ---
@@ -329,52 +335,60 @@ function AttachmentChip({
 
 const agentModeConfig: Record<AgentMode, {
     label: string;
+    pillLabel: string;
     desc: string;
-    iconName: React.ComponentProps<typeof Feather>["name"];
+    Icon: React.FC<{ size?: number; color?: string }>;
     color: string;
 }> = {
     agent: {
         label: "Agent",
+        pillLabel: "Agent",
         desc: "Use tools and make changes in the workspace.",
-        iconName: "cpu",
+        Icon: CirclePlusIcon,
         color: colors.copilotPurple,
     },
     plan: {
         label: "Plan",
+        pillLabel: "Plan",
         desc: "Draft a plan first, then continue when it looks right.",
-        iconName: "list",
+        Icon: MenuListIcon,
         color: colors.warning,
     },
     ask: {
         label: "Ask",
+        pillLabel: "Ask",
         desc: "Read-only analysis for questions and explanations.",
-        iconName: "help-circle",
+        Icon: HelpCircleIcon,
         color: colors.textLink,
     },
 };
 
 const permissionLevelConfig: Record<PermissionLevel, {
     label: string;
+    pillLabel: string;
     desc: string;
-    iconName: React.ComponentProps<typeof Ionicons>["name"];
+    Icon: React.FC<{ size?: number; color?: string }>;
     color: string;
 }> = {
     default: {
-        label: "Default",
+        label: "Default Approvals",
+        pillLabel: "Default Approvals",
         desc: "Prompt when approval is needed. Safe reads can auto-approve.",
-        iconName: "shield-outline",
+        Icon: ShieldIcon,
         color: colors.textSecondary,
     },
     bypass: {
-        label: "Bypass",
+        label: "Bypass Approvals",
+        pillLabel: "Bypass Approvals",
         desc: "Skip approval prompts but still allow follow-up questions.",
-        iconName: "shield-checkmark-outline",
+        Icon: ShieldCheckIcon,
         color: colors.success,
     },
     autopilot: {
-        label: "Autopilot",
+        label: "Autopilot (Preview)",
+        pillLabel: "Autopilot",
         desc: "Auto-approve actions and continue until the task is done.",
-        iconName: "flash-outline",
+        Icon: ZapIcon,
         color: colors.accent,
     },
 };
@@ -438,6 +452,8 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const [images, setImages] = useState<Array<ImageAttachment>>([]);
     const [showModelPicker, setShowModelPicker] = useState(false);
     const [showAgentPicker, setShowAgentPicker] = useState(false);
+    const [showPermissionPicker, setShowPermissionPicker] = useState(false);
+    const [showEffortPicker, setShowEffortPicker] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
     const [voiceHandle, setVoiceHandle] = useState<DictationHandle | null>(null);
     const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
@@ -503,6 +519,46 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
             );
         }
     }, [voiceHandle]);
+
+    // Autocomplete tokeni: @file veya /command.
+    const activeToken = useMemo<AutocompleteToken>(
+        () => detectAutocompleteToken(input, selection.start),
+        [input, selection.start]
+    );
+
+    // @files için workspace tree'den dosya yolu listesi.
+    const filePaths = useMemo<ReadonlyArray<string>>(() => {
+        const out: Array<string> = [];
+        collectFilePaths(workspaceTree, out);
+        return out;
+    }, [workspaceTree]);
+
+    // Token tipine göre filtrelenmiş öneriler.
+    const suggestions = useMemo<ReadonlyArray<{ label: string; value: string; hint?: string }>>(() => {
+        if (activeToken === null) return [];
+        const query = activeToken.query.toLowerCase();
+        if (activeToken.kind === "file") {
+            return filePaths
+                .filter((p) => p.toLowerCase().includes(query))
+                .slice(0, 8)
+                .map((p) => ({ label: p, value: `@${p} ` }));
+        }
+        return SLASH_COMMANDS
+            .filter((c) => c.command.slice(1).toLowerCase().startsWith(query))
+            .slice(0, 8)
+            .map((c) => ({ label: c.command, value: `${c.command} `, hint: c.description }));
+    }, [activeToken, filePaths]);
+
+    // Seçilen öneriyi input'a uygula: tokeni değiştirip imleci sona taşı.
+    const applySuggestion = useCallback((value: string) => {
+        if (activeToken === null) return;
+        const before = input.slice(0, activeToken.start);
+        const after = input.slice(activeToken.end);
+        const next = `${before}${value}${after}`;
+        setInput(next);
+        const nextCursor = before.length + value.length;
+        setSelection({ start: nextCursor, end: nextCursor });
+    }, [activeToken, input]);
 
     const handlePickImage = useCallback(async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -609,6 +665,25 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
             )}
 
         {/* Input card — text area + toolbar in one unified rounded container */}
+        {suggestions.length > 0 && (
+            <View style={autocompleteStyles.popover}>
+                {suggestions.map((s) => (
+                    <Pressable
+                        key={s.value}
+                        style={({ pressed }) => [
+                            autocompleteStyles.item,
+                            pressed && autocompleteStyles.itemPressed,
+                        ]}
+                        onPress={() => applySuggestion(s.value)}
+                    >
+                        <Text style={autocompleteStyles.label} numberOfLines={1}>{s.label}</Text>
+                        {s.hint !== undefined && (
+                            <Text style={autocompleteStyles.hint} numberOfLines={1}>{s.hint}</Text>
+                        )}
+                    </Pressable>
+                ))}
+            </View>
+        )}
         <View style={[
             styles.inputCard,
             isFocused && styles.inputCardFocused,
@@ -617,6 +692,8 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 style={styles.textInput}
                 value={input}
                 onChangeText={setInput}
+                selection={selection}
+                onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
                 placeholder="Message, @files, /commands"
                 placeholderTextColor={colors.textTertiary}
                 multiline
@@ -633,9 +710,9 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
             {/* Thin separator */}
             <View style={styles.inputSeparator} />
 
-            {/* Toolbar row inside the card */}
+            {/* Toolbar Row 1: attach | agent | model | sliders | spacer | send */}
             <View style={toolbarStyles.row}>
-                {/* Attach / image button */}
+                {/* Attach */}
                 <Pressable
                     style={[
                         toolbarStyles.toolBtn,
@@ -649,44 +726,57 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     <PaperclipIcon size={16} color={colors.textSecondary} />
                 </Pressable>
 
+                {/* Agent mode pill */}
+                <Pressable
+                    style={toolbarStyles.modePill}
+                    onPress={() => setShowAgentPicker(true)}
+                    disabled={disabled}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                    accessibilityLabel="Agent modu seç"
+                >
+                    {(() => {
+                        const cfg = agentModeConfig[agentMode];
+                        return (
+                            <>
+                                <cfg.Icon size={12} color={colors.textTertiary} />
+                                <Text style={toolbarStyles.modePillText} numberOfLines={1}>
+                                    {cfg.pillLabel}
+                                </Text>
+                                <ChevronDownIcon size={10} color={colors.textTertiary} />
+                            </>
+                        );
+                    })()}
+                </Pressable>
+
                 {/* Model selector pill */}
                 <Pressable
                     style={toolbarStyles.modelPill}
                     onPress={() => setShowModelPicker(true)}
                     disabled={disabled}
-                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                     accessibilityLabel="Model seç"
                 >
-                    <ProviderIcon provider={detectProvider(currentModel?.id ?? selectedModel)} size={13} color={colors.textPrimary} />
+                    <ProviderIcon provider={detectProvider(currentModel?.id ?? selectedModel)} size={13} color={colors.textSecondary} />
                     <Text style={toolbarStyles.modelText} numberOfLines={1}>
                         {modelDisplayName}{effortSuffix}
                     </Text>
-                    <ChevronDownIcon size={11} color={colors.textTertiary} />
+                    <ChevronDownIcon size={10} color={colors.textTertiary} />
                 </Pressable>
 
-                {/* Session settings: agent + permission + effort */}
-                <Pressable
-                    style={toolbarStyles.toolBtn}
-                    onPress={() => setShowAgentPicker(true)}
-                    disabled={disabled}
-                    hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                    accessibilityLabel="Session ayarları"
-                >
-                    <SlidersIcon size={16} color={colors.textSecondary} />
-                </Pressable>
+                {/* Thinking effort / settings */}
+                {effortInfo.supported && (
+                    <Pressable
+                        style={toolbarStyles.toolBtn}
+                        onPress={() => setShowEffortPicker(true)}
+                        disabled={disabled}
+                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                        accessibilityLabel="Düşünme çabası"
+                    >
+                        <SlidersIcon size={15} color={colors.textSecondary} />
+                    </Pressable>
+                )}
 
                 <View style={toolbarStyles.spacer} />
-
-                {/* Mic — sesli dikte */}
-                <Pressable
-                    style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
-                    onPress={handleToggleVoice}
-                    disabled={disabled}
-                    hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                    accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
-                >
-                    <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
-                </Pressable>
 
                 {/* Send / Abort / Queue button */}
                 {isTyping && canSend ? (
@@ -731,6 +821,44 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     </View>
                 )}
             </View>
+
+            {/* Toolbar Row 2: permission pill | spacer | mic */}
+            <View style={toolbarStyles.row2}>
+                {/* Permission level pill */}
+                <Pressable
+                    style={toolbarStyles.modePill}
+                    onPress={() => setShowPermissionPicker(true)}
+                    disabled={disabled}
+                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                    accessibilityLabel="İzin seviyesi seç"
+                >
+                    {(() => {
+                        const cfg = permissionLevelConfig[permissionLevel];
+                        return (
+                            <>
+                                <cfg.Icon size={12} color={colors.textTertiary} />
+                                <Text style={toolbarStyles.modePillText} numberOfLines={1}>
+                                    {cfg.pillLabel}
+                                </Text>
+                                <ChevronDownIcon size={10} color={colors.textTertiary} />
+                            </>
+                        );
+                    })()}
+                </Pressable>
+
+                <View style={toolbarStyles.spacer} />
+
+                {/* Mic — voice dictation */}
+                <Pressable
+                    style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
+                    onPress={handleToggleVoice}
+                    disabled={disabled}
+                    hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                    accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
+                >
+                    <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
+                </Pressable>
+            </View>
         </View>
 
             {/* Model picker modal */}
@@ -746,13 +874,12 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 />
             </DropdownModal>
 
-            {/* Combined session settings: agent + permission + effort */}
+            {/* Agent mode picker */}
             <DropdownModal
                 visible={showAgentPicker}
                 onClose={() => setShowAgentPicker(false)}
-                title="Session Settings"
+                title="Agent Mode"
             >
-                <Text style={dropdownStyles.sectionLabel}>Agent Mode</Text>
                 <View style={dropdownStyles.effortList}>
                     {(["agent", "plan", "ask"] as const).map((mode) => {
                         const cfg = agentModeConfig[mode];
@@ -761,33 +888,35 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                             <Pressable
                                 key={mode}
                                 style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
-                                onPress={() => {
-                                    void handleAgentModeSelect(mode);
-                                }}
+                                onPress={() => { void handleAgentModeSelect(mode); }}
                             >
                                 <View style={dropdownStyles.effortItemLeft}>
                                     <View style={dropdownStyles.checkmarkSlot}>
-                                        {isSelected && <Feather name="check" size={13} color={cfg.color} />}
+                                        {isSelected && <CheckIcon size={13} color={cfg.color} />}
                                     </View>
                                     <View style={{ flex: 1 }}>
-                                        <Text
-                                            style={[
-                                                dropdownStyles.effortLabel,
-                                                isSelected && { color: cfg.color, fontWeight: "700" },
-                                            ]}
-                                        >
+                                        <Text style={[
+                                            dropdownStyles.effortLabel,
+                                            isSelected && { color: cfg.color, fontWeight: "700" },
+                                        ]}>
                                             {cfg.label}
                                         </Text>
                                         <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
                                     </View>
                                 </View>
-                                <Feather name={cfg.iconName} size={18} color={isSelected ? cfg.color : colors.textTertiary} />
+                                <cfg.Icon size={18} color={isSelected ? cfg.color : colors.textTertiary} />
                             </Pressable>
                         );
                     })}
                 </View>
-                <View style={dropdownStyles.sectionDivider} />
-                <Text style={dropdownStyles.sectionLabel}>Permissions</Text>
+            </DropdownModal>
+
+            {/* Permission level picker */}
+            <DropdownModal
+                visible={showPermissionPicker}
+                onClose={() => setShowPermissionPicker(false)}
+                title="Permission Level"
+            >
                 <View style={dropdownStyles.effortList}>
                     {(["default", "bypass", "autopilot"] as const).map((level) => {
                         const cfg = permissionLevelConfig[level];
@@ -796,47 +925,47 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                             <Pressable
                                 key={level}
                                 style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
-                                onPress={() => {
-                                    void handlePermissionLevelSelect(level);
-                                }}
+                                onPress={() => { void handlePermissionLevelSelect(level); }}
                             >
                                 <View style={dropdownStyles.effortItemLeft}>
                                     <View style={dropdownStyles.checkmarkSlot}>
-                                        {isSelected && <Feather name="check" size={13} color={cfg.color} />}
+                                        {isSelected && <CheckIcon size={13} color={cfg.color} />}
                                     </View>
                                     <View style={{ flex: 1 }}>
-                                        <Text
-                                            style={[
-                                                dropdownStyles.effortLabel,
-                                                isSelected && { color: cfg.color, fontWeight: "700" },
-                                            ]}
-                                        >
+                                        <Text style={[
+                                            dropdownStyles.effortLabel,
+                                            isSelected && { color: cfg.color, fontWeight: "700" },
+                                        ]}>
                                             {cfg.label}
                                         </Text>
                                         <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
                                     </View>
                                 </View>
-                                <Ionicons name={cfg.iconName} size={18} color={isSelected ? cfg.color : colors.textTertiary} />
+                                <cfg.Icon size={18} color={isSelected ? cfg.color : colors.textTertiary} />
                             </Pressable>
                         );
                     })}
                 </View>
-                {effortInfo.supported && (
-                    <>
-                        <View style={dropdownStyles.sectionDivider} />
-                        <Text style={dropdownStyles.sectionLabel}>Thinking Effort</Text>
-                        <EffortSelectorContent
-                            options={effortInfo.options as ReasoningEffortLevel[]}
-                            current={reasoningEffort}
-                            defaultEffort={currentModel?.defaultReasoningEffort}
-                            onSelect={(level) => {
-                                setReasoningEffort(level);
-                                setShowAgentPicker(false);
-                            }}
-                        />
-                    </>
-                )}
             </DropdownModal>
+
+            {/* Thinking effort picker */}
+            {effortInfo.supported && (
+                <DropdownModal
+                    visible={showEffortPicker}
+                    onClose={() => setShowEffortPicker(false)}
+                    title="Thinking Effort"
+                >
+                    <EffortSelectorContent
+                        options={effortInfo.options as ReasoningEffortLevel[]}
+                        current={reasoningEffort}
+                        defaultEffort={currentModel?.defaultReasoningEffort}
+                        onSelect={(level) => {
+                            setReasoningEffort(level);
+                            setShowEffortPicker(false);
+                        }}
+                    />
+                </DropdownModal>
+            )}
 
             {/* Send mode menu */}
             <SendModeMenu
@@ -1089,8 +1218,15 @@ const toolbarStyles = StyleSheet.create({
     row: {
         flexDirection: "row",
         alignItems: "center",
-        minHeight: 38,
+        minHeight: 36,
         gap: 4,
+    },
+    row2: {
+        flexDirection: "row",
+        alignItems: "center",
+        minHeight: 32,
+        gap: 4,
+        marginTop: 2,
     },
     toolBtn: {
         width: 34,
@@ -1116,17 +1252,35 @@ const toolbarStyles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
+        paddingVertical: 4,
         borderRadius: borderRadius.full,
         borderWidth: 1,
         borderColor: colors.border,
         backgroundColor: "transparent",
         gap: 4,
-        maxWidth: 180,
+        maxWidth: 160,
     },
     modelText: {
         color: colors.textSecondary,
         fontSize: fs.sm,
+        fontWeight: "500",
+        flex: 1,
+    },
+    modePill: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 4,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.bgElevated,
+        gap: 4,
+        maxWidth: 170,
+    },
+    modePillText: {
+        color: colors.textTertiary,
+        fontSize: fs.xs,
         fontWeight: "500",
         flex: 1,
     },
@@ -1229,5 +1383,35 @@ const styles = StyleSheet.create({
         height: 10,
         borderRadius: 2,
         backgroundColor: colors.textOnAccent,
+    },
+});
+
+const autocompleteStyles = StyleSheet.create({
+    popover: {
+        backgroundColor: colors.bgElevated,
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: borderRadius.md,
+        marginBottom: 6,
+        overflow: "hidden",
+    },
+    item: {
+        paddingHorizontal: spacing.md,
+        paddingVertical: 10,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: colors.border,
+    },
+    itemPressed: {
+        backgroundColor: colors.bgOverlay,
+    },
+    label: {
+        fontSize: fs.sm,
+        color: colors.textPrimary,
+        fontWeight: "500",
+    },
+    hint: {
+        fontSize: fs.xs,
+        color: colors.textTertiary,
+        marginTop: 2,
     },
 });
