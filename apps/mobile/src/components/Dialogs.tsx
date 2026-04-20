@@ -1,7 +1,7 @@
 // İzin ve kullanıcı girişi diyalogları — modal overlay
 
 import React, { useState } from "react";
-import { View, Text, TextInput, Pressable, StyleSheet } from "react-native";
+import { View, Text, TextInput, Pressable, StyleSheet, ScrollView } from "react-native";
 import type { PermissionPrompt, PlanExitPrompt, UserInputPrompt } from "../stores/session-store";
 import { useSessionStore } from "../stores/session-store";
 import { updatePermissionLevel, updateSessionMode } from "../services/bridge";
@@ -14,53 +14,57 @@ type PermissionProps = {
 };
 
 export function PermissionDialog({ prompt, onRespond }: PermissionProps) {
-    const metadataDetails = prompt.details.filter((detail) => detail.trim().length > 0);
     const primaryDescription =
-        metadataDetails[0]
+        prompt.details.find((d) => d.trim().length > 0)
         ?? prompt.commandText
         ?? prompt.fileName
-        ?? (prompt.toolName !== null ? `${prompt.toolName} is requesting access` : "This operation requires permission to continue");
+        ?? (prompt.toolName !== null ? `${prompt.toolName} is requesting access` : "This operation requires permission");
+
     const secondaryDetails = [
         prompt.toolName !== null ? `Tool: ${prompt.toolName}` : null,
         prompt.fileName !== null ? `File: ${prompt.fileName}` : null,
         prompt.commandText !== null ? `Command: ${prompt.commandText}` : null,
-        ...metadataDetails.slice(1),
-    ].filter((detail): detail is string => detail !== null && detail.trim().length > 0);
+    ].filter((d): d is string => d !== null && d.trim().length > 0);
 
     return (
         <View style={styles.overlay}>
             <View style={styles.card}>
+                {/* Header — always visible */}
                 <View style={styles.cardHeader}>
                     <View style={styles.kindBadge}>
                         <Text style={styles.kindBadgeText}>{prompt.kind}</Text>
                     </View>
                     <Text style={styles.cardTitle}>Permission Request</Text>
                 </View>
-                <Text style={styles.description}>{primaryDescription}</Text>
-                {secondaryDetails.length > 0 && (
-                    <View style={styles.detailList}>
-                        {secondaryDetails.map((detail, index) => (
-                            <Text key={`${index}-${detail}`} style={styles.detailText}>
-                                {detail}
-                            </Text>
-                        ))}
-                    </View>
-                )}
+
+                {/* Scrollable content area — won't push buttons off screen */}
+                <ScrollView
+                    style={styles.scrollArea}
+                    contentContainerStyle={styles.scrollContent}
+                    showsVerticalScrollIndicator={false}
+                >
+                    <Text style={styles.description}>{primaryDescription}</Text>
+                    {secondaryDetails.length > 0 && (
+                        <View style={styles.detailList}>
+                            {secondaryDetails.map((detail, i) => (
+                                <Text key={i} style={styles.detailText} numberOfLines={3}>
+                                    {detail}
+                                </Text>
+                            ))}
+                        </View>
+                    )}
+                </ScrollView>
+
+                {/* Buttons — always pinned at bottom */}
                 <View style={styles.actions}>
                     <Pressable
-                        style={({ pressed }) => [
-                            styles.denyButton,
-                            pressed && styles.denyButtonPressed,
-                        ]}
+                        style={({ pressed }) => [styles.denyButton, pressed && styles.denyButtonPressed]}
                         onPress={() => onRespond(prompt.requestId, false)}
                     >
                         <Text style={styles.denyText}>Deny</Text>
                     </Pressable>
                     <Pressable
-                        style={({ pressed }) => [
-                            styles.approveButton,
-                            pressed && styles.approveButtonPressed,
-                        ]}
+                        style={({ pressed }) => [styles.approveButton, pressed && styles.approveButtonPressed]}
                         onPress={() => onRespond(prompt.requestId, true)}
                     >
                         <Text style={styles.approveText}>Approve</Text>
@@ -86,7 +90,22 @@ export function UserInputDialog({ prompt, onRespond }: InputProps) {
                 <View style={styles.cardHeader}>
                     <Text style={styles.cardTitle}>Input Request</Text>
                 </View>
-                <Text style={styles.description}>{prompt.prompt}</Text>
+                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+                    <Text style={styles.description}>{prompt.prompt}</Text>
+                    {prompt.choices !== undefined && prompt.choices.length > 0 && (
+                        <View style={styles.choiceList}>
+                            {prompt.choices.map((choice) => (
+                                <Pressable
+                                    key={choice}
+                                    style={styles.choiceButton}
+                                    onPress={() => { onRespond(prompt.requestId, choice); setValue(""); }}
+                                >
+                                    <Text style={styles.choiceButtonText}>{choice}</Text>
+                                </Pressable>
+                            ))}
+                        </View>
+                    )}
+                </ScrollView>
                 <TextInput
                     style={styles.inputField}
                     value={value}
@@ -95,31 +114,9 @@ export function UserInputDialog({ prompt, onRespond }: InputProps) {
                     placeholderTextColor={colors.textPlaceholder}
                     autoFocus
                 />
-                {prompt.choices !== undefined && prompt.choices.length > 0 && (
-                    <View style={styles.choiceList}>
-                        {prompt.choices.map((choice) => (
-                            <Pressable
-                                key={choice}
-                                style={styles.choiceButton}
-                                onPress={() => {
-                                    onRespond(prompt.requestId, choice);
-                                    setValue("");
-                                }}
-                            >
-                                <Text style={styles.choiceButtonText}>{choice}</Text>
-                            </Pressable>
-                        ))}
-                    </View>
-                )}
                 <Pressable
-                    style={({ pressed }) => [
-                        styles.approveButton,
-                        pressed && styles.approveButtonPressed,
-                    ]}
-                    onPress={() => {
-                        onRespond(prompt.requestId, value);
-                        setValue("");
-                    }}
+                    style={({ pressed }) => [styles.approveButton, pressed && styles.approveButtonPressed]}
+                    onPress={() => { onRespond(prompt.requestId, value); setValue(""); }}
                 >
                     <Text style={styles.approveText}>Send</Text>
                 </Pressable>
@@ -161,43 +158,31 @@ export function PlanExitDialog({ prompt }: PlanExitProps) {
                 <View style={styles.cardHeader}>
                     <Text style={styles.cardTitle}>Plan Ready</Text>
                 </View>
-                <Text style={styles.description}>{prompt.summary}</Text>
-                <View style={styles.planBlock}>
-                    <Text style={styles.planBlockTitle}>Plan</Text>
-                    <Text style={styles.planBlockText}>{prompt.planContent}</Text>
-                </View>
+                <ScrollView style={styles.scrollArea} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+                    <Text style={styles.description}>{prompt.summary}</Text>
+                    <View style={styles.planBlock}>
+                        <Text style={styles.planBlockTitle}>Plan</Text>
+                        <Text style={styles.planBlockText}>{prompt.planContent}</Text>
+                    </View>
+                </ScrollView>
                 <View style={styles.actions}>
                     <Pressable
-                        style={({ pressed }) => [
-                            styles.denyButton,
-                            pressed && styles.denyButtonPressed,
-                        ]}
+                        style={({ pressed }) => [styles.denyButton, pressed && styles.denyButtonPressed]}
                         onPress={dismiss}
                     >
                         <Text style={styles.denyText}>Keep Planning</Text>
                     </Pressable>
                     <Pressable
-                        style={({ pressed }) => [
-                            styles.secondaryButton,
-                            pressed && styles.secondaryButtonPressed,
-                        ]}
-                        onPress={() => {
-                            void continueWithAgent();
-                        }}
+                        style={({ pressed }) => [styles.secondaryButton, pressed && styles.secondaryButtonPressed]}
+                        onPress={() => { void continueWithAgent(); }}
                     >
                         <Text style={styles.secondaryButtonText}>Continue</Text>
                     </Pressable>
                 </View>
                 {prompt.actions.includes("autopilot") && (
                     <Pressable
-                        style={({ pressed }) => [
-                            styles.approveButton,
-                            styles.fullWidthButton,
-                            pressed && styles.approveButtonPressed,
-                        ]}
-                        onPress={() => {
-                            void switchToAutopilot();
-                        }}
+                        style={({ pressed }) => [styles.approveButton, styles.fullWidthButton, pressed && styles.approveButtonPressed]}
+                        onPress={() => { void switchToAutopilot(); }}
                     >
                         <Text style={styles.approveText}>Continue in Autopilot</Text>
                     </Pressable>
@@ -214,13 +199,15 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
         zIndex: 100,
+        paddingHorizontal: spacing.lg,
     },
     card: {
         backgroundColor: colors.bgSecondary,
         borderRadius: borderRadius.lg,
         padding: 20,
-        width: "88%",
+        width: "100%",
         maxWidth: 420,
+        maxHeight: "70%",
         borderWidth: 1,
         borderColor: colors.border,
         shadowColor: colors.bg,
@@ -233,7 +220,7 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         gap: spacing.sm,
-        marginBottom: spacing.md,
+        marginBottom: spacing.sm,
     },
     kindBadge: {
         paddingHorizontal: spacing.sm,
@@ -255,20 +242,25 @@ const styles = StyleSheet.create({
         fontWeight: "600",
         color: colors.textPrimary,
     },
-    description: {
-        fontSize: fs.base,
-        color: colors.textPrimary,
-        lineHeight: 21,
+    scrollArea: {
+        flexShrink: 1,
         marginBottom: spacing.md,
     },
+    scrollContent: {
+        gap: spacing.sm,
+    },
+    description: {
+        fontSize: fs.sm,
+        color: colors.textPrimary,
+        lineHeight: 20,
+    },
     detailList: {
-        gap: 6,
-        marginBottom: spacing.lg,
+        gap: 4,
     },
     detailText: {
-        fontSize: fs.sm,
+        fontSize: fs.xs,
         color: colors.textTertiary,
-        lineHeight: 17,
+        lineHeight: 16,
         fontFamily: "monospace",
     },
     actions: {
@@ -289,7 +281,7 @@ const styles = StyleSheet.create({
     },
     denyText: {
         color: colors.error,
-        fontSize: fs.md,
+        fontSize: fs.sm,
         fontWeight: "600",
     },
     approveButton: {
@@ -304,7 +296,7 @@ const styles = StyleSheet.create({
     },
     approveText: {
         color: colors.textOnAccent,
-        fontSize: fs.md,
+        fontSize: fs.sm,
         fontWeight: "600",
     },
     inputField: {
@@ -321,7 +313,6 @@ const styles = StyleSheet.create({
     },
     choiceList: {
         gap: spacing.sm,
-        marginBottom: spacing.md,
     },
     choiceButton: {
         borderRadius: borderRadius.sm,
@@ -337,7 +328,7 @@ const styles = StyleSheet.create({
         fontWeight: "500",
     },
     planCard: {
-        maxHeight: "78%",
+        // inherits maxHeight from card
     },
     planBlock: {
         borderRadius: borderRadius.sm,
@@ -345,7 +336,6 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
         backgroundColor: colors.bg,
         padding: spacing.md,
-        marginBottom: spacing.lg,
         gap: spacing.sm,
     },
     planBlockTitle: {
@@ -374,7 +364,7 @@ const styles = StyleSheet.create({
     },
     secondaryButtonText: {
         color: colors.textPrimary,
-        fontSize: fs.md,
+        fontSize: fs.sm,
         fontWeight: "600",
     },
     fullWidthButton: {
