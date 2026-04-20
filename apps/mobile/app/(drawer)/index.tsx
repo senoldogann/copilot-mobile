@@ -41,6 +41,7 @@ import {
     listModels,
     listSessions,
     requestCapabilities,
+    requestSkillsList,
     disconnect,
 } from "../../src/services/bridge";
 
@@ -236,6 +237,7 @@ export default function ChatScreen() {
             listSessions();
             listModels();
             requestCapabilities();
+            requestSkillsList();
         }
     }, [isConnected]);
 
