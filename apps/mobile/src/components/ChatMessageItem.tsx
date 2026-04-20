@@ -122,7 +122,7 @@ function parseFilePaths(text: string): ReadonlyArray<MarkdownSegment> {
 // Render inline markdown segments
 function InlineMarkdown({ segments }: { segments: ReadonlyArray<MarkdownSegment> }) {
     return (
-        <Text selectable>
+        <Text selectable style={mdStyles.inlineText}>
             {segments.map((seg, i) => {
                 switch (seg.kind) {
                     case "bold":
@@ -636,6 +636,9 @@ const viewerStyles = StyleSheet.create({
 const mdStyles = StyleSheet.create({
     container: {
         gap: 6,
+    },
+    inlineText: {
+        color: colors.textPrimary,
     },
     paragraph: {
         marginBottom: 2,

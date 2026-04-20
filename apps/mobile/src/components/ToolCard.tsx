@@ -1,4 +1,4 @@
-// Araç yürütme kartı — kompakt tek satır "👁 Read filename" + detay için bottom sheet
+// Araç yürütme kartı — kompakt tek satır terminal stili: [ikon] TipAdı  argüman...
 
 import React, { useState } from "react";
 import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
@@ -10,25 +10,60 @@ type Props = {
     item: ToolItem;
 };
 
-// Araç adına göre ikon eşleme
-function getToolIcon(toolName: string): string {
+// Araç tipine göre küçük sembol
+function getToolChar(toolName: string): string {
     const lower = toolName.toLowerCase();
-    if (lower.includes("read") || lower.includes("view") || lower.includes("file")) return "👁";
-    if (lower.includes("edit") || lower.includes("write") || lower.includes("create")) return "✏️";
-    if (lower.includes("shell") || lower.includes("bash") || lower.includes("terminal") || lower.includes("exec")) return "⚡";
-    if (lower.includes("search") || lower.includes("grep") || lower.includes("find") || lower.includes("glob")) return "🔍";
-    if (lower.includes("think")) return "🧠";
-    if (lower.includes("web") || lower.includes("fetch") || lower.includes("browse")) return "🌐";
-    if (lower.includes("git")) return "📦";
-    return "🔧";
+    if (lower.includes("shell") || lower.includes("bash") || lower.includes("terminal") || lower.includes("exec")) return "$";
+    if (lower.includes("read") || lower.includes("view") || lower.includes("file")) return "○";
+    if (lower.includes("edit") || lower.includes("write") || lower.includes("create")) return "✎";
+    if (lower.includes("search") || lower.includes("grep") || lower.includes("find") || lower.includes("glob")) return "~";
+    if (lower.includes("think")) return "◎";
+    if (lower.includes("web") || lower.includes("fetch") || lower.includes("browse")) return "⊕";
+    if (lower.includes("git")) return "↑";
+    return "·";
 }
 
-// Araç adından okunabilir etiket üret
-function formatToolLabel(toolName: string): string {
+// Araç tipinin kısa etiketi
+function getToolLabel(toolName: string): string {
+    const lower = toolName.toLowerCase();
+    if (lower.includes("shell") || lower.includes("bash") || lower.includes("exec")) return "Shell";
+    if (lower.includes("read") || lower.includes("view")) return "View";
+    if (lower.includes("edit")) return "Edit";
+    if (lower.includes("write")) return "Write";
+    if (lower.includes("create")) return "Create";
+    if (lower.includes("grep") || lower.includes("search")) return "Search";
+    if (lower.includes("glob") || lower.includes("find")) return "Find";
+    if (lower.includes("think")) return "Thought";
+    if (lower.includes("web") || lower.includes("fetch")) return "Fetch";
+    if (lower.includes("git")) return "Git";
+    // Generic fallback: CamelCase to words, capitalize first
     return toolName
         .replace(/[_-]/g, " ")
         .replace(/([a-z])([A-Z])/g, "$1 $2")
-        .replace(/^./, (char) => char.toUpperCase());
+        .replace(/^./, (c) => c.toUpperCase())
+        .split(" ")[0] ?? toolName;
+}
+
+// argumentsText'ten gösterilecek kısa metni çıkar
+function extractDisplayArg(item: ToolItem): string | null {
+    if (item.argumentsText === undefined) return null;
+    // JSON mu dene
+    try {
+        const parsed: unknown = JSON.parse(item.argumentsText);
+        if (parsed !== null && typeof parsed === "object") {
+            const obj = parsed as Record<string, unknown>;
+            for (const key of ["command", "path", "file", "query", "content", "description"]) {
+                if (typeof obj[key] === "string" && (obj[key] as string).length > 0) {
+                    return obj[key] as string;
+                }
+            }
+            const firstStr = Object.values(obj).find((v) => typeof v === "string" && (v as string).length > 0);
+            if (typeof firstStr === "string") return firstStr;
+        }
+    } catch {
+        // JSON değil, olduğu gibi göster
+    }
+    return item.argumentsText;
 }
 
 // Dönen animasyon — çalışırken
@@ -61,9 +96,11 @@ function ToolCardComponent({ item }: Props) {
     const [showSheet, setShowSheet] = useState(false);
     const isRunning = item.status === "running";
     const isFailed = item.status === "failed";
-    const icon = getToolIcon(item.toolName);
-    const label = formatToolLabel(item.toolName);
-    const subtitle = item.progressMessage
+    const char = getToolChar(item.toolName);
+    const label = getToolLabel(item.toolName);
+
+    const displayArg = extractDisplayArg(item)
+        ?? item.progressMessage
         ?? (item.partialOutput !== undefined && item.partialOutput.trim().length > 0
             ? "Streaming output…"
             : isRunning
@@ -77,39 +114,38 @@ function ToolCardComponent({ item }: Props) {
             <Pressable
                 style={styles.row}
                 onPress={() => setShowSheet(true)}
+                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
             >
-                <View style={styles.iconContainer}>
+                {/* Terminal kutu ikonu */}
+                <View style={[styles.iconBox, isFailed && styles.iconBoxFailed]}>
                     {isRunning ? (
                         <ToolSpinner />
                     ) : (
-                        <Text style={styles.icon}>{icon}</Text>
+                        <Text style={[styles.iconChar, isFailed && styles.iconCharFailed]}>
+                            {char}
+                        </Text>
                     )}
                 </View>
-                <View style={styles.textContainer}>
-                    <Text
-                        style={[styles.label, isFailed && styles.labelFailed]}
-                        numberOfLines={1}
-                    >
-                        {label}
-                    </Text>
-                    <Text style={styles.subtitle} numberOfLines={1}>
-                        {subtitle}
-                    </Text>
-                </View>
-                {isFailed && (
-                    <View style={styles.failBadge}>
-                        <Text style={styles.failBadgeText}>failed</Text>
-                    </View>
-                )}
+
+                {/* Kısa araç tipi etiketi */}
+                <Text style={[styles.label, isFailed && styles.labelFailed]} numberOfLines={1}>
+                    {label}
+                </Text>
+
+                {/* Argüman / komut metni */}
+                <Text style={styles.argText} numberOfLines={1}>
+                    {displayArg}
+                </Text>
+
                 <Text style={styles.chevron}>›</Text>
             </Pressable>
 
             <BottomSheet
                 visible={showSheet}
                 onClose={() => setShowSheet(false)}
-                icon={icon}
+                icon={char}
                 title={label}
-                subtitle={subtitle}
+                subtitle={item.status}
             >
                 <View style={styles.detailContainer}>
                     <DetailRow label="Tool" value={item.toolName} />
@@ -118,11 +154,7 @@ function ToolCardComponent({ item }: Props) {
                         value={isRunning ? "running" : isFailed ? "failed" : "completed"}
                         valueColor={isFailed ? colors.error : colors.textSecondary}
                     />
-                    <DetailRow
-                        label="Request ID"
-                        value={item.requestId}
-                        mono
-                    />
+                    <DetailRow label="Request ID" value={item.requestId} mono />
                     {item.argumentsText !== undefined && (
                         <DetailBlock label="Arguments" value={item.argumentsText} mono />
                     )}
@@ -189,10 +221,10 @@ export const ToolCard = React.memo(ToolCardComponent);
 
 const spinnerStyles = StyleSheet.create({
     ring: {
-        width: 14,
-        height: 14,
-        borderRadius: 7,
-        borderWidth: 2,
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        borderWidth: 1.5,
         borderColor: "transparent",
         borderTopColor: colors.accent,
         borderRightColor: colors.accentMuted,
@@ -203,50 +235,56 @@ const styles = StyleSheet.create({
     row: {
         flexDirection: "row",
         alignItems: "center",
-        paddingVertical: 6,
+        paddingVertical: 5,
         paddingHorizontal: spacing.lg,
         marginLeft: 40,
-        gap: spacing.sm,
+        gap: 6,
+        minHeight: 28,
     },
-    iconContainer: {
+    iconBox: {
         width: 18,
         height: 18,
+        borderRadius: 4,
+        backgroundColor: colors.bgElevated,
+        borderWidth: 1,
+        borderColor: colors.border,
         justifyContent: "center",
         alignItems: "center",
+        flexShrink: 0,
     },
-    icon: {
-        fontSize: 13,
+    iconBoxFailed: {
+        borderColor: colors.errorMuted,
+        backgroundColor: colors.errorMuted,
+    },
+    iconChar: {
+        fontSize: 9,
+        color: colors.textTertiary,
+        fontFamily: "monospace",
+        lineHeight: 11,
+    },
+    iconCharFailed: {
+        color: colors.error,
     },
     label: {
-        fontSize: fontSize.md,
+        fontSize: fontSize.sm,
         color: colors.textSecondary,
-        fontWeight: "400",
-    },
-    textContainer: {
-        flex: 1,
-        gap: 2,
-    },
-    subtitle: {
-        fontSize: fontSize.xs,
-        color: colors.textTertiary,
+        fontWeight: "500",
+        flexShrink: 0,
+        minWidth: 36,
     },
     labelFailed: {
         color: colors.error,
     },
-    failBadge: {
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 4,
-        backgroundColor: colors.errorMuted,
-    },
-    failBadgeText: {
-        fontSize: fontSize.xs,
-        color: colors.error,
-        fontWeight: "500",
+    argText: {
+        flex: 1,
+        fontSize: fontSize.sm,
+        color: colors.textTertiary,
+        fontFamily: "monospace",
     },
     chevron: {
         fontSize: fontSize.base,
         color: colors.textTertiary,
+        flexShrink: 0,
     },
     detailContainer: {
         gap: spacing.md,

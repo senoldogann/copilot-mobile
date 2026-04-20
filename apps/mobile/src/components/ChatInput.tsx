@@ -441,58 +441,56 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 </ScrollView>
             )}
 
-            {/* Input area */}
-            <View style={[
-                styles.inputRow,
-                isFocused && styles.inputRowFocused,
-            ]}>
-                <TextInput
-                    style={styles.textInput}
-                    value={input}
-                    onChangeText={setInput}
-                    placeholder="Message, @files, /commands"
-                    placeholderTextColor={colors.textTertiary}
-                    multiline
-                    maxLength={10000}
-                    returnKeyType="send"
-                    onSubmitEditing={handleDefaultSend}
-                    onFocus={() => setIsFocused(true)}
-                    onBlur={() => setIsFocused(false)}
-                    blurOnSubmit={false}
-                    editable={!disabled}
-                    accessibilityLabel="Mesaj yaz"
-                />
-            </View>
+        {/* Input card — text area + toolbar in one unified rounded container */}
+        <View style={[
+            styles.inputCard,
+            isFocused && styles.inputCardFocused,
+        ]}>
+            <TextInput
+                style={styles.textInput}
+                value={input}
+                onChangeText={setInput}
+                placeholder="Message, @files, /commands"
+                placeholderTextColor={colors.textTertiary}
+                multiline
+                maxLength={10000}
+                returnKeyType="send"
+                onSubmitEditing={handleDefaultSend}
+                onFocus={() => setIsFocused(true)}
+                onBlur={() => setIsFocused(false)}
+                blurOnSubmit={false}
+                editable={!disabled}
+                accessibilityLabel="Mesaj yaz"
+            />
 
-            {/* Toolbar row */}
+            {/* Thin separator */}
+            <View style={styles.inputSeparator} />
+
+            {/* Toolbar row inside the card */}
             <View style={toolbarStyles.row}>
-                {/* + attach button */}
+                {/* Attach / image button */}
                 <Pressable
                     style={[
-                        toolbarStyles.iconButton,
-                        !supportsVision && toolbarStyles.iconButtonDimmed,
+                        toolbarStyles.toolBtn,
+                        !supportsVision && toolbarStyles.toolBtnDimmed,
                     ]}
                     onPress={handlePickImage}
                     disabled={disabled || !supportsVision}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     accessibilityLabel="Fotoğraf ekle"
                 >
-                    <Text style={toolbarStyles.iconText}>＋</Text>
+                    <Text style={toolbarStyles.attachIcon}>📎</Text>
                 </Pressable>
 
-                {/* Mode label */}
-                <View style={toolbarStyles.modePill}>
-                    <Text style={toolbarStyles.modeIcon}>◇</Text>
-                    <Text style={toolbarStyles.modeText}>Agent</Text>
-                </View>
-
-                {/* Model + Effort selector */}
+                {/* Model selector pill */}
                 <Pressable
                     style={toolbarStyles.modelPill}
                     onPress={() => setShowModelPicker(true)}
                     disabled={disabled}
+                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
                     accessibilityLabel="Model seç"
                 >
+                    <Text style={toolbarStyles.modelIcon}>⬡</Text>
                     <Text style={toolbarStyles.modelText} numberOfLines={1}>
                         {modelDisplayName}{effortSuffix}
                     </Text>
@@ -502,13 +500,13 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 {/* Effort toggle (if supported) */}
                 {effortInfo.supported && effortInfo.listKnown && (
                     <Pressable
-                        style={toolbarStyles.iconButton}
+                        style={toolbarStyles.toolBtn}
                         onPress={() => setShowEffortPicker(true)}
                         disabled={disabled}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                         accessibilityLabel="Çaba seviyesi seç"
                     >
-                        <Text style={toolbarStyles.iconText}>⚙</Text>
+                        <Text style={toolbarStyles.gearIcon}>⚙</Text>
                     </Pressable>
                 )}
 
@@ -557,6 +555,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     </View>
                 )}
             </View>
+        </View>
 
             {/* Model picker modal */}
             <DropdownModal
@@ -816,56 +815,50 @@ const toolbarStyles = StyleSheet.create({
     row: {
         flexDirection: "row",
         alignItems: "center",
-        paddingTop: 6,
-        gap: 6,
+        minHeight: 38,
+        gap: 4,
     },
-    iconButton: {
-        width: 28,
-        height: 28,
-        borderRadius: borderRadius.sm,
+    toolBtn: {
+        width: 34,
+        height: 34,
+        borderRadius: borderRadius.md,
         justifyContent: "center",
         alignItems: "center",
     },
-    iconButtonDimmed: {
+    toolBtnDimmed: {
         opacity: 0.3,
     },
-    iconText: {
-        color: colors.textSecondary,
-        fontSize: fs.lg,
+    attachIcon: {
+        fontSize: 16,
     },
-    modePill: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
-        borderRadius: borderRadius.sm,
-        gap: 4,
-    },
-    modeIcon: {
+    gearIcon: {
         color: colors.textSecondary,
-        fontSize: fs.sm,
-    },
-    modeText: {
-        color: colors.textSecondary,
-        fontSize: fs.sm,
-        fontWeight: "500",
+        fontSize: fs.base,
     },
     modelPill: {
         flexDirection: "row",
         alignItems: "center",
         paddingHorizontal: spacing.sm,
         paddingVertical: spacing.xs,
-        borderRadius: borderRadius.sm,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.bgElevated,
         gap: 4,
-        maxWidth: 200,
+        maxWidth: 210,
+    },
+    modelIcon: {
+        color: colors.copilotPurple,
+        fontSize: fs.sm,
     },
     modelText: {
         color: colors.textSecondary,
         fontSize: fs.sm,
+        fontWeight: "500",
     },
     chevron: {
         color: colors.textTertiary,
-        fontSize: fs.sm,
+        fontSize: fs.xs,
     },
     spacer: {
         flex: 1,
@@ -877,7 +870,7 @@ const toolbarStyles = StyleSheet.create({
     },
     sendMenuButton: {
         width: 22,
-        height: 30,
+        height: 34,
         justifyContent: "center",
         alignItems: "center",
         borderRadius: borderRadius.sm,
@@ -894,30 +887,35 @@ const styles = StyleSheet.create({
     container: {
         paddingHorizontal: spacing.md,
         paddingTop: spacing.sm,
-        paddingBottom: Platform.OS === "ios" ? 8 : 10,
+        paddingBottom: Platform.OS === "ios" ? 12 : 12,
         backgroundColor: colors.bg,
     },
-    inputRow: {
-        flexDirection: "row",
-        alignItems: "flex-end",
+    inputCard: {
         backgroundColor: colors.bgSecondary,
         borderRadius: borderRadius.lg,
         borderWidth: 1,
         borderColor: colors.border,
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 6,
+        paddingHorizontal: spacing.md,
+        paddingTop: spacing.sm,
+        paddingBottom: spacing.xs,
     },
-    inputRowFocused: {
+    inputCardFocused: {
         borderColor: colors.accent,
     },
+    inputSeparator: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: colors.border,
+        marginHorizontal: -spacing.md,
+        marginTop: spacing.xs,
+        marginBottom: 0,
+    },
     textInput: {
-        flex: 1,
         fontSize: fs.base,
         color: colors.textPrimary,
         maxHeight: 120,
         minHeight: 36,
-        paddingVertical: Platform.OS === "ios" ? 8 : 6,
-        textAlignVertical: "center",
+        paddingVertical: Platform.OS === "ios" ? 6 : 4,
+        textAlignVertical: "top",
     },
     sendButton: {
         width: 30,
