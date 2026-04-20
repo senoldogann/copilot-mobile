@@ -299,6 +299,26 @@ export async function buildWorkspaceTree(
     };
 }
 
+function parseNumstat(stdout: string): Map<string, { additions: number; deletions: number }> {
+    const map = new Map<string, { additions: number; deletions: number }>();
+    for (const rawLine of stdout.split(/\r?\n/)) {
+        const line = rawLine.trim();
+        if (line.length === 0) continue;
+        const [addStr, delStr, ...rest] = line.split("\t");
+        if (addStr === undefined || delStr === undefined || rest.length === 0) continue;
+        const path = rest.join("\t");
+        if (path.length === 0) continue;
+        // Binary files show "-\t-\t" — skip counts
+        const additions = addStr === "-" ? 0 : Number.parseInt(addStr, 10);
+        const deletions = delStr === "-" ? 0 : Number.parseInt(delStr, 10);
+        if (Number.isNaN(additions) || Number.isNaN(deletions)) continue;
+        const arrowIndex = path.indexOf(" => ");
+        const finalPath = arrowIndex === -1 ? path : path.slice(arrowIndex + 4).replace(/[{}]/g, "");
+        map.set(finalPath, { additions, deletions });
+    }
+    return map;
+}
+
 export async function buildWorkspaceGitSummary(
     context: SessionContext,
     commitLimit = 10
@@ -333,6 +353,12 @@ export async function buildWorkspaceGitSummary(
         throw new Error(statusResult.stderr.trim() || statusResult.message || "Unable to read git status");
     }
 
+    // Per-file +additions/-deletions for both tracked (diff HEAD) and untracked (diff --no-index /dev/null).
+    const numstatTrackedResult = await runGit(gitRoot, ["diff", "--numstat", "HEAD"]);
+    const numstatMap = numstatTrackedResult.success
+        ? parseNumstat(numstatTrackedResult.stdout)
+        : new Map<string, { additions: number; deletions: number }>();
+
     const logResult = await runGit(gitRoot, [
         "log",
         `--max-count=${normalizedCommitLimit}`,
@@ -366,7 +392,14 @@ export async function buildWorkspaceGitSummary(
             .map((line) => line.trimEnd())
             .filter((line) => line.length > 0)
             .map(parseGitStatusLine)
-            .filter((entry): entry is GitFileChange => entry !== null),
+            .filter((entry): entry is GitFileChange => entry !== null)
+            .map((change) => {
+                const stats = numstatMap.get(change.path);
+                if (stats !== undefined) {
+                    return { ...change, additions: stats.additions, deletions: stats.deletions };
+                }
+                return change;
+            }),
         recentCommits: parseGitLog(logResult.stdout),
         truncated: false,
     };

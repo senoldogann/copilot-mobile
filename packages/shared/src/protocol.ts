@@ -73,6 +73,8 @@ export type GitFileChange = {
     indexStatus: string;
     worktreeStatus: string;
     originalPath?: string | undefined;
+    additions?: number | undefined;
+    deletions?: number | undefined;
 };
 
 export type GitCommitSummary = {

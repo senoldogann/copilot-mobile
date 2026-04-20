@@ -54,6 +54,8 @@ const gitFileChangeSchema = z.object({
     indexStatus: z.string().min(1),
     worktreeStatus: z.string().min(1),
     originalPath: z.string().min(1).optional(),
+    additions: z.number().int().nonnegative().optional(),
+    deletions: z.number().int().nonnegative().optional(),
 });
 
 const gitCommitSummarySchema = z.object({

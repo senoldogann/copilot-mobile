@@ -526,6 +526,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             createdAt: now,
             lastActiveAt: now,
             status: "active",
+            context: { cwd: process.cwd() },
         };
 
         const unsubscribes: Array<() => void> = [];

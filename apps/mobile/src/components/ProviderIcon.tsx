@@ -344,3 +344,131 @@ export function SparklesIcon({ size = 28, color = "#a371f7" }: { size?: number; 
         </Svg>
     );
 }
+
+export function ChevronRightIcon({ size = 12, color = "#595B5B" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path d="m9 6 6 6-6 6" stroke={color} strokeWidth={2.2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </Svg>
+    );
+}
+
+export function RefreshIcon({ size = 15, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M21 12a9 9 0 1 1-3-6.7L21 8" />
+                <Path d="M21 3v5h-5" />
+            </G>
+        </Svg>
+    );
+}
+
+export function ArrowDownIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path d="M12 4v16m0 0 6-6m-6 6-6-6" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none" />
+        </Svg>
+    );
+}
+
+export function BracesIcon({ size = 16, color = "#d4a015" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M8 3c-2 0-3 1-3 3v3c0 1.5-.5 2-2 2v2c1.5 0 2 .5 2 2v3c0 2 1 3 3 3" />
+                <Path d="M16 3c2 0 3 1 3 3v3c0 1.5.5 2 2 2v2c-1.5 0-2 .5-2 2v3c0 2-1 3-3 3" />
+            </G>
+        </Svg>
+    );
+}
+
+export function MarkdownIcon({ size = 16, color = "#519aba" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M3 5h18a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1Z"
+                stroke={color}
+                strokeWidth={1.6}
+                fill="none"
+            />
+            <G fill={color}>
+                <Path d="M6 16V9l2.2 3.5L10.4 9v7H8.9v-4.2l-.7 1.2h-.4l-.7-1.2V16H6Z" />
+                <Path d="M14.5 9h1.4v4.4h1.6L15.2 16l-2.3-2.6h1.6V9Z" />
+            </G>
+        </Svg>
+    );
+}
+
+export function FileTextIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9l-6-6Z" />
+                <Path d="M14 3v6h6" />
+                <Path d="M8 13h8M8 17h8M8 9h2" />
+            </G>
+        </Svg>
+    );
+}
+
+export function FolderFilledIcon({ size = 17, color = "#9ca3a1" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
+                fill={color}
+                fillOpacity={0.22}
+                stroke={color}
+                strokeWidth={1.4}
+                strokeLinejoin="round"
+            />
+        </Svg>
+    );
+}
+
+// File-type inference — returns the right icon component based on extension.
+// Used by the workspace panel so each row shows a meaningful glyph.
+export function FileTypeIcon({ name, size = 16 }: { name: string; size?: number }) {
+    const lower = name.toLowerCase();
+    const ext = lower.includes(".") ? lower.slice(lower.lastIndexOf(".") + 1) : "";
+    if (ext === "json" || ext === "jsonc") return <BracesIcon size={size} color="#d4a015" />;
+    if (ext === "md" || ext === "mdx" || ext === "markdown") return <MarkdownIcon size={size} color="#519aba" />;
+    if (ext === "ts" || ext === "tsx") return <BracesIcon size={size} color="#3178c6" />;
+    if (ext === "js" || ext === "jsx" || ext === "mjs" || ext === "cjs") return <BracesIcon size={size} color="#e2b341" />;
+    if (ext === "yaml" || ext === "yml") return <FileTextIcon size={size} color="#a0a3a2" />;
+    if (ext === "lock" || lower === "pnpm-lock.yaml" || lower === "package-lock.json") {
+        return <FileTextIcon size={size} color="#6f7170" />;
+    }
+    return <FileTextIcon size={size} color="#a0a3a2" />;
+}
+
+export function AlignLeftIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" fill="none">
+                <Path d="M3 6h18M3 12h12M3 18h18M3 24" />
+            </G>
+        </Svg>
+    );
+}
+
+export function DiffIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M12 3v4M10 5h4M12 17v4M10 19h4M4 9l4 3-4 3M20 9l-4 3 4 3" />
+            </G>
+        </Svg>
+    );
+}
+
+export function ListTreeIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M3 6h10M7 12h10M11 18h10M3 6v12h4" />
+            </G>
+        </Svg>
+    );
+}
