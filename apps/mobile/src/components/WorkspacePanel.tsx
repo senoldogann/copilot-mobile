@@ -472,8 +472,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         workspace.repository !== null
             ? `${workspace.repository} · ${branchLabel}`
             : activeContext?.repository !== undefined
-              ? `${activeContext.repository} · ${branchLabel}`
-              : `${rootLabel} · ${branchLabel}`;
+                ? `${activeContext.repository} · ${branchLabel}`
+                : `${rootLabel} · ${branchLabel}`;
 
     return (
         <>

@@ -636,8 +636,11 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
 
     const canSend = input.trim().length > 0 && !disabled;
 
-    // Model display label
-    const modelDisplayName = currentModel?.name ?? selectedModel ?? "Model";
+    // Model display label — truncate to keep pill compact
+    const modelDisplayName = (() => {
+        const name = currentModel?.name ?? selectedModel ?? "Model";
+        return name.length > 18 ? name.slice(0, 16) + "…" : name;
+    })();
     const effortSuffix = reasoningEffort !== null && effortInfo.supported
         ? ` · ${effortLabels[reasoningEffort]?.label ?? reasoningEffort}`
         : "";
@@ -664,202 +667,202 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 </ScrollView>
             )}
 
-        {/* Input card — text area + toolbar in one unified rounded container */}
-        {suggestions.length > 0 && (
-            <View style={autocompleteStyles.popover}>
-                {suggestions.map((s) => (
+            {/* Input card — text area + toolbar in one unified rounded container */}
+            {suggestions.length > 0 && (
+                <View style={autocompleteStyles.popover}>
+                    {suggestions.map((s) => (
+                        <Pressable
+                            key={s.value}
+                            style={({ pressed }) => [
+                                autocompleteStyles.item,
+                                pressed && autocompleteStyles.itemPressed,
+                            ]}
+                            onPress={() => applySuggestion(s.value)}
+                        >
+                            <Text style={autocompleteStyles.label} numberOfLines={1}>{s.label}</Text>
+                            {s.hint !== undefined && (
+                                <Text style={autocompleteStyles.hint} numberOfLines={1}>{s.hint}</Text>
+                            )}
+                        </Pressable>
+                    ))}
+                </View>
+            )}
+            <View style={[
+                styles.inputCard,
+                isFocused && styles.inputCardFocused,
+            ]}>
+                <TextInput
+                    style={styles.textInput}
+                    value={input}
+                    onChangeText={setInput}
+                    selection={selection}
+                    onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
+                    placeholder="Message, @files, /commands"
+                    placeholderTextColor={colors.textTertiary}
+                    multiline
+                    maxLength={10000}
+                    returnKeyType="send"
+                    onSubmitEditing={handleDefaultSend}
+                    onFocus={() => setIsFocused(true)}
+                    onBlur={() => setIsFocused(false)}
+                    blurOnSubmit={false}
+                    editable={!disabled}
+                    accessibilityLabel="Mesaj yaz"
+                />
+
+                {/* Thin separator */}
+                <View style={styles.inputSeparator} />
+
+                {/* Toolbar Row 1: attach | agent | model | sliders | spacer | send */}
+                <View style={toolbarStyles.row}>
+                    {/* Attach */}
                     <Pressable
-                        key={s.value}
-                        style={({ pressed }) => [
-                            autocompleteStyles.item,
-                            pressed && autocompleteStyles.itemPressed,
+                        style={[
+                            toolbarStyles.toolBtn,
+                            !supportsVision && toolbarStyles.toolBtnDimmed,
                         ]}
-                        onPress={() => applySuggestion(s.value)}
+                        onPress={handlePickImage}
+                        disabled={disabled || !supportsVision}
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityLabel="Fotoğraf ekle"
                     >
-                        <Text style={autocompleteStyles.label} numberOfLines={1}>{s.label}</Text>
-                        {s.hint !== undefined && (
-                            <Text style={autocompleteStyles.hint} numberOfLines={1}>{s.hint}</Text>
-                        )}
+                        <PaperclipIcon size={16} color={colors.textSecondary} />
                     </Pressable>
-                ))}
-            </View>
-        )}
-        <View style={[
-            styles.inputCard,
-            isFocused && styles.inputCardFocused,
-        ]}>
-            <TextInput
-                style={styles.textInput}
-                value={input}
-                onChangeText={setInput}
-                selection={selection}
-                onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
-                placeholder="Message, @files, /commands"
-                placeholderTextColor={colors.textTertiary}
-                multiline
-                maxLength={10000}
-                returnKeyType="send"
-                onSubmitEditing={handleDefaultSend}
-                onFocus={() => setIsFocused(true)}
-                onBlur={() => setIsFocused(false)}
-                blurOnSubmit={false}
-                editable={!disabled}
-                accessibilityLabel="Mesaj yaz"
-            />
 
-            {/* Thin separator */}
-            <View style={styles.inputSeparator} />
-
-            {/* Toolbar Row 1: attach | agent | model | sliders | spacer | send */}
-            <View style={toolbarStyles.row}>
-                {/* Attach */}
-                <Pressable
-                    style={[
-                        toolbarStyles.toolBtn,
-                        !supportsVision && toolbarStyles.toolBtnDimmed,
-                    ]}
-                    onPress={handlePickImage}
-                    disabled={disabled || !supportsVision}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                    accessibilityLabel="Fotoğraf ekle"
-                >
-                    <PaperclipIcon size={16} color={colors.textSecondary} />
-                </Pressable>
-
-                {/* Agent mode pill */}
-                <Pressable
-                    style={toolbarStyles.modePill}
-                    onPress={() => setShowAgentPicker(true)}
-                    disabled={disabled}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                    accessibilityLabel="Agent modu seç"
-                >
-                    {(() => {
-                        const cfg = agentModeConfig[agentMode];
-                        return (
-                            <>
-                                <cfg.Icon size={12} color={colors.textTertiary} />
-                                <Text style={toolbarStyles.modePillText} numberOfLines={1}>
-                                    {cfg.pillLabel}
-                                </Text>
-                                <ChevronDownIcon size={10} color={colors.textTertiary} />
-                            </>
-                        );
-                    })()}
-                </Pressable>
-
-                {/* Model selector pill */}
-                <Pressable
-                    style={toolbarStyles.modelPill}
-                    onPress={() => setShowModelPicker(true)}
-                    disabled={disabled}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                    accessibilityLabel="Model seç"
-                >
-                    <ProviderIcon provider={detectProvider(currentModel?.id ?? selectedModel)} size={13} color={colors.textSecondary} />
-                    <Text style={toolbarStyles.modelText} numberOfLines={1}>
-                        {modelDisplayName}{effortSuffix}
-                    </Text>
-                    <ChevronDownIcon size={10} color={colors.textTertiary} />
-                </Pressable>
-
-                {/* Thinking effort / settings */}
-                {effortInfo.supported && (
+                    {/* Agent mode pill */}
                     <Pressable
-                        style={toolbarStyles.toolBtn}
-                        onPress={() => setShowEffortPicker(true)}
+                        style={toolbarStyles.modePill}
+                        onPress={() => setShowAgentPicker(true)}
                         disabled={disabled}
-                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                        accessibilityLabel="Düşünme çabası"
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        accessibilityLabel="Agent modu seç"
                     >
-                        <SlidersIcon size={15} color={colors.textSecondary} />
+                        {(() => {
+                            const cfg = agentModeConfig[agentMode];
+                            return (
+                                <>
+                                    <cfg.Icon size={12} color={colors.textTertiary} />
+                                    <Text style={toolbarStyles.modePillText} numberOfLines={1}>
+                                        {cfg.pillLabel}
+                                    </Text>
+                                    <ChevronDownIcon size={10} color={colors.textTertiary} />
+                                </>
+                            );
+                        })()}
                     </Pressable>
-                )}
 
-                <View style={toolbarStyles.spacer} />
+                    {/* Model selector pill */}
+                    <Pressable
+                        style={toolbarStyles.modelPill}
+                        onPress={() => setShowModelPicker(true)}
+                        disabled={disabled}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        accessibilityLabel="Model seç"
+                    >
+                        <ProviderIcon provider={detectProvider(currentModel?.id ?? selectedModel)} size={13} color={colors.textSecondary} />
+                        <Text style={toolbarStyles.modelText} numberOfLines={1}>
+                            {modelDisplayName}{effortSuffix}
+                        </Text>
+                        <ChevronDownIcon size={10} color={colors.textTertiary} />
+                    </Pressable>
 
-                {/* Send / Abort / Queue button */}
-                {isTyping && canSend ? (
-                    <View style={toolbarStyles.sendGroup}>
+                    {/* Thinking effort / settings */}
+                    {effortInfo.supported && (
+                        <Pressable
+                            style={toolbarStyles.toolBtn}
+                            onPress={() => setShowEffortPicker(true)}
+                            disabled={disabled}
+                            hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                            accessibilityLabel="Düşünme çabası"
+                        >
+                            <SlidersIcon size={15} color={colors.textSecondary} />
+                        </Pressable>
+                    )}
+
+                    <View style={toolbarStyles.spacer} />
+
+                    {/* Send / Abort / Queue button */}
+                    {isTyping && canSend ? (
+                        <View style={toolbarStyles.sendGroup}>
+                            <Pressable
+                                style={styles.sendButton}
+                                onPress={handleDefaultSend}
+                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                accessibilityLabel="Mesaj gönder"
+                            >
+                                <ArrowUpIcon size={16} color={colors.textOnAccent} />
+                            </Pressable>
+                            <Pressable
+                                style={toolbarStyles.sendMenuButton}
+                                onPress={() => setShowSendMenu(true)}
+                                hitSlop={4}
+                            >
+                                <ChevronDownIcon size={12} color={colors.textPrimary} />
+                            </Pressable>
+                        </View>
+                    ) : isTyping ? (
+                        <Pressable
+                            style={styles.abortButton}
+                            onPress={onAbort}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel="İsteği durdur"
+                        >
+                            <View style={styles.abortIcon} />
+                        </Pressable>
+                    ) : canSend ? (
                         <Pressable
                             style={styles.sendButton}
-                            onPress={handleDefaultSend}
+                            onPress={() => handleSend("send")}
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             accessibilityLabel="Mesaj gönder"
                         >
                             <ArrowUpIcon size={16} color={colors.textOnAccent} />
                         </Pressable>
-                        <Pressable
-                            style={toolbarStyles.sendMenuButton}
-                            onPress={() => setShowSendMenu(true)}
-                            hitSlop={4}
-                        >
-                            <ChevronDownIcon size={12} color={colors.textPrimary} />
-                        </Pressable>
-                    </View>
-                ) : isTyping ? (
+                    ) : (
+                        <View style={[styles.sendButton, styles.sendButtonDisabled]}>
+                            <ArrowUpIcon size={16} color={colors.textTertiary} />
+                        </View>
+                    )}
+                </View>
+
+                {/* Toolbar Row 2: permission pill | spacer | mic */}
+                <View style={toolbarStyles.row2}>
+                    {/* Permission level pill */}
                     <Pressable
-                        style={styles.abortButton}
-                        onPress={onAbort}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        accessibilityLabel="İsteği durdur"
+                        style={toolbarStyles.modePill}
+                        onPress={() => setShowPermissionPicker(true)}
+                        disabled={disabled}
+                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                        accessibilityLabel="İzin seviyesi seç"
                     >
-                        <View style={styles.abortIcon} />
+                        {(() => {
+                            const cfg = permissionLevelConfig[permissionLevel];
+                            return (
+                                <>
+                                    <cfg.Icon size={12} color={colors.textTertiary} />
+                                    <Text style={toolbarStyles.modePillText} numberOfLines={1}>
+                                        {cfg.pillLabel}
+                                    </Text>
+                                    <ChevronDownIcon size={10} color={colors.textTertiary} />
+                                </>
+                            );
+                        })()}
                     </Pressable>
-                ) : canSend ? (
+
+                    <View style={toolbarStyles.spacer} />
+
+                    {/* Mic — voice dictation */}
                     <Pressable
-                        style={styles.sendButton}
-                        onPress={() => handleSend("send")}
-                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                        accessibilityLabel="Mesaj gönder"
+                        style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
+                        onPress={handleToggleVoice}
+                        disabled={disabled}
+                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                        accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
                     >
-                        <ArrowUpIcon size={16} color={colors.textOnAccent} />
+                        <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
                     </Pressable>
-                ) : (
-                    <View style={[styles.sendButton, styles.sendButtonDisabled]}>
-                        <ArrowUpIcon size={16} color={colors.textTertiary} />
-                    </View>
-                )}
+                </View>
             </View>
-
-            {/* Toolbar Row 2: permission pill | spacer | mic */}
-            <View style={toolbarStyles.row2}>
-                {/* Permission level pill */}
-                <Pressable
-                    style={toolbarStyles.modePill}
-                    onPress={() => setShowPermissionPicker(true)}
-                    disabled={disabled}
-                    hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                    accessibilityLabel="İzin seviyesi seç"
-                >
-                    {(() => {
-                        const cfg = permissionLevelConfig[permissionLevel];
-                        return (
-                            <>
-                                <cfg.Icon size={12} color={colors.textTertiary} />
-                                <Text style={toolbarStyles.modePillText} numberOfLines={1}>
-                                    {cfg.pillLabel}
-                                </Text>
-                                <ChevronDownIcon size={10} color={colors.textTertiary} />
-                            </>
-                        );
-                    })()}
-                </Pressable>
-
-                <View style={toolbarStyles.spacer} />
-
-                {/* Mic — voice dictation */}
-                <Pressable
-                    style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
-                    onPress={handleToggleVoice}
-                    disabled={disabled}
-                    hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                    accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
-                >
-                    <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
-                </Pressable>
-            </View>
-        </View>
 
             {/* Model picker modal */}
             <DropdownModal
@@ -1220,6 +1223,7 @@ const toolbarStyles = StyleSheet.create({
         alignItems: "center",
         minHeight: 36,
         gap: 4,
+        overflow: "hidden",
     },
     row2: {
         flexDirection: "row",
@@ -1227,6 +1231,7 @@ const toolbarStyles = StyleSheet.create({
         minHeight: 32,
         gap: 4,
         marginTop: 2,
+        overflow: "hidden",
     },
     toolBtn: {
         width: 34,
@@ -1258,13 +1263,14 @@ const toolbarStyles = StyleSheet.create({
         borderColor: colors.border,
         backgroundColor: "transparent",
         gap: 4,
-        maxWidth: 160,
+        flexShrink: 1,
+        minWidth: 0,
     },
     modelText: {
         color: colors.textSecondary,
         fontSize: fs.sm,
         fontWeight: "500",
-        flex: 1,
+        flexShrink: 1,
     },
     modePill: {
         flexDirection: "row",
@@ -1276,13 +1282,14 @@ const toolbarStyles = StyleSheet.create({
         borderColor: colors.border,
         backgroundColor: colors.bgElevated,
         gap: 4,
-        maxWidth: 170,
+        flexShrink: 1,
+        minWidth: 0,
     },
     modePillText: {
         color: colors.textTertiary,
         fontSize: fs.xs,
         fontWeight: "500",
-        flex: 1,
+        flexShrink: 1,
     },
     selectorPill: {
         flexDirection: "row",

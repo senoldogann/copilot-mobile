@@ -124,9 +124,9 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
 function SuggestionChip({ icon, text, onPress }: { icon: SuggestionIcon; text: string; onPress?: ((text: string) => void) | undefined }) {
     const IconCmp =
         icon === "terminal" ? TerminalIcon :
-        icon === "wrench" ? WrenchIcon :
-        icon === "check" ? CheckSquareIcon :
-        CodeIcon;
+            icon === "wrench" ? WrenchIcon :
+                icon === "check" ? CheckSquareIcon :
+                    CodeIcon;
     return (
         <Pressable
             style={styles.chip}

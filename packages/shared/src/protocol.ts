@@ -61,15 +61,15 @@ export type WorkspaceTreeNode = {
 export type GitFileChange = {
     path: string;
     status:
-        | "added"
-        | "modified"
-        | "deleted"
-        | "renamed"
-        | "copied"
-        | "untracked"
-        | "conflicted"
-        | "type_changed"
-        | "unknown";
+    | "added"
+    | "modified"
+    | "deleted"
+    | "renamed"
+    | "copied"
+    | "untracked"
+    | "conflicted"
+    | "type_changed"
+    | "unknown";
     indexStatus: string;
     worktreeStatus: string;
     originalPath?: string | undefined;
