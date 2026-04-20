@@ -392,8 +392,36 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 <EmptyState text="Loading changes…" />
             ) : !hasRepo ? (
                 <EmptyState title="No git repository" text={`${rootLabel} is not a git working tree.`} />
+            ) : changesFilter === "recent" ? (
+                workspace.recentCommits.length === 0 ? (
+                    <EmptyState text="No recent commits." />
+                ) : (
+                    <View style={styles.changesList}>
+                        {workspace.recentCommits.map((commit) => (
+                            <View key={commit.hash} style={styles.changeRow}>
+                                <View style={styles.changeIconWrap}>
+                                    <GitBranchIcon size={14} color={colors.textTertiary} />
+                                </View>
+                                <View style={styles.changeText}>
+                                    <Text style={styles.changeName} numberOfLines={1}>
+                                        {commit.subject}
+                                    </Text>
+                                    <Text style={styles.changePath} numberOfLines={1}>
+                                        {commit.shortHash} · {commit.author}
+                                    </Text>
+                                </View>
+                            </View>
+                        ))}
+                    </View>
+                )
             ) : workspace.uncommittedChanges.length === 0 ? (
                 <EmptyState title="Working tree clean" text="No uncommitted changes in this branch." />
+            ) : viewMode === "tree" ? (
+                <View style={styles.changesList}>
+                    {renderChangesAsTree(workspace.uncommittedChanges, (path) =>
+                        setViewer({ path, mode: "diff" })
+                    )}
+                </View>
             ) : (
                 <View style={styles.changesList}>
                     {workspace.uncommittedChanges.map(renderChangeRow)}
@@ -448,32 +476,94 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
               : `${rootLabel} · ${branchLabel}`;
 
     return (
-        <BottomSheet
-            visible={visible}
-            onClose={() => {
-                setCommitMenuOpen(false);
-                onClose();
-            }}
-            iconName="folder"
-            title="Workspace"
-            subtitle={headerSubtitle}
-        >
-            <View style={sheetStyles.tabBar}>
-                <TabButton
-                    label="Changes"
-                    active={workspace.tab === "changes"}
-                    onPress={() => useWorkspaceStore.getState().setTab("changes")}
-                />
-                <TabButton
-                    label="Files"
-                    active={workspace.tab === "files"}
-                    onPress={() => useWorkspaceStore.getState().setTab("files")}
-                />
-            </View>
+        <>
+            <BottomSheet
+                visible={visible}
+                onClose={() => {
+                    setCommitMenuOpen(false);
+                    onClose();
+                }}
+                iconName="folder"
+                title="Workspace"
+                subtitle={headerSubtitle}
+            >
+                <View style={sheetStyles.tabBar}>
+                    <TabButton
+                        label="Changes"
+                        active={workspace.tab === "changes"}
+                        onPress={() => useWorkspaceStore.getState().setTab("changes")}
+                    />
+                    <TabButton
+                        label="Files"
+                        active={workspace.tab === "files"}
+                        onPress={() => useWorkspaceStore.getState().setTab("files")}
+                    />
+                </View>
 
-            {workspace.tab === "changes" ? changesContent : filesContent}
-        </BottomSheet>
+                {workspace.tab === "changes" ? changesContent : filesContent}
+            </BottomSheet>
+            {viewer !== null && (
+                <FileContentViewer
+                    path={viewer.path}
+                    mode={viewer.mode}
+                    onClose={() => setViewer(null)}
+                />
+            )}
+        </>
     );
+}
+
+// Değişen dosyaları klasör ağacı olarak grupla — tree view modu için.
+function renderChangesAsTree(
+    changes: ReadonlyArray<{ path: string; status: string; additions?: number | undefined; deletions?: number | undefined }>,
+    onPick: (path: string) => void
+): React.ReactNode {
+    const grouped = new Map<string, Array<typeof changes[number]>>();
+    for (const c of changes) {
+        const dir = dirname(c.path) ?? "(root)";
+        const list = grouped.get(dir) ?? [];
+        list.push(c);
+        grouped.set(dir, list);
+    }
+    const dirs = Array.from(grouped.keys()).sort();
+    return dirs.map((dir) => (
+        <View key={dir}>
+            <View style={styles.treeDirLabel}>
+                <FolderFilledIcon size={14} color={colors.textSecondary} />
+                <Text style={styles.treeDirText} numberOfLines={1}>{dir}</Text>
+            </View>
+            {(grouped.get(dir) ?? []).map((change) => {
+                const name = basename(change.path);
+                const additions = change.additions ?? 0;
+                const deletions = change.deletions ?? 0;
+                const isUntracked = change.status === "untracked" || change.status === "added";
+                return (
+                    <Pressable
+                        key={change.path}
+                        style={({ pressed }) => [styles.changeRow, styles.changeRowIndented, pressed && styles.changeRowPressed]}
+                        onPress={() => onPick(change.path)}
+                    >
+                        <View style={styles.changeIconWrap}>
+                            <FileTypeIcon name={name} size={18} />
+                        </View>
+                        <View style={styles.changeText}>
+                            <Text style={styles.changeName} numberOfLines={1}>{name}</Text>
+                        </View>
+                        <View style={styles.changeRight}>
+                            {isUntracked ? (
+                                <View style={styles.newBadge}><Text style={styles.newBadgeText}>New</Text></View>
+                            ) : (
+                                <View style={styles.diffStats}>
+                                    <Text style={styles.diffAdd}>+{additions}</Text>
+                                    <Text style={styles.diffDel}>-{deletions}</Text>
+                                </View>
+                            )}
+                        </View>
+                    </Pressable>
+                );
+            })}
+        </View>
+    ));
 }
 
 function TabButton({
@@ -717,6 +807,24 @@ const styles = StyleSheet.create({
         gap: 10,
         paddingVertical: 10,
         paddingHorizontal: 4,
+    },
+    changeRowPressed: {
+        opacity: 0.6,
+    },
+    changeRowIndented: {
+        paddingLeft: 20,
+    },
+    treeDirLabel: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingTop: 8,
+        paddingBottom: 2,
+    },
+    treeDirText: {
+        fontSize: fontSize.xs,
+        color: colors.textSecondary,
+        fontWeight: "600",
     },
     changeIconWrap: {
         width: 22,
