@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet } from "react-native";
 import { BottomSheet } from "./BottomSheet";
+import { FileContentViewer } from "./FileContentViewer";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
 import { useShallow } from "zustand/react/shallow";
 import { useConnectionStore } from "../stores/connection-store";
@@ -81,6 +82,9 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
     const [viewMode, setViewMode] = useState<ViewMode>("paragraph");
     const [commitMenuOpen, setCommitMenuOpen] = useState<boolean>(false);
+    const [changesFilter, setChangesFilter] = useState<"uncommitted" | "recent">("uncommitted");
+    const [changesFilterMenuOpen, setChangesFilterMenuOpen] = useState<boolean>(false);
+    const [viewer, setViewer] = useState<{ path: string; mode: "file" | "diff" } | null>(null);
 
     useEffect(() => {
         if (!visible) return;
@@ -158,9 +162,14 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         const deletions = change.deletions ?? 0;
         const isUntracked = change.status === "untracked" || change.status === "added";
         const hasStats = additions > 0 || deletions > 0 || isUntracked;
+        const showStats = viewMode !== "paragraph";
 
         return (
-            <View key={change.path} style={styles.changeRow}>
+            <Pressable
+                key={change.path}
+                style={({ pressed }) => [styles.changeRow, pressed && styles.changeRowPressed]}
+                onPress={() => setViewer({ path: change.path, mode: "diff" })}
+            >
                 <View style={styles.changeIconWrap}>
                     <FileTypeIcon name={name} size={18} />
                 </View>
@@ -180,16 +189,16 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                             <Text style={styles.newBadgeText}>New</Text>
                         </View>
                     )}
-                    {hasStats && !isUntracked && (
+                    {showStats && hasStats && !isUntracked && (
                         <View style={styles.diffStats}>
                             <Text style={styles.diffAdd}>+{additions}</Text>
                             <Text style={styles.diffDel}>-{deletions}</Text>
                         </View>
                     )}
                 </View>
-            </View>
+            </Pressable>
         );
-    }, []);
+    }, [viewMode]);
 
     const renderTreeNode = useCallback(
         (node: NonNullable<typeof workspace.tree>, depth: number): React.ReactNode => {
@@ -200,16 +209,19 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 (depth === 0 && workspace.loadingTreePaths["__root__"] === true);
 
             const handlePress = () => {
-                if (!isDirectory) return;
-                const nextExpanded = !isExpanded;
-                useWorkspaceStore.getState().toggleExpanded(node.path);
-                if (
-                    nextExpanded &&
-                    node.children === undefined &&
-                    activeSessionId !== null &&
-                    isConnected
-                ) {
-                    void requestWorkspaceTree(activeSessionId, node.path, 4);
+                if (isDirectory) {
+                    const nextExpanded = !isExpanded;
+                    useWorkspaceStore.getState().toggleExpanded(node.path);
+                    if (
+                        nextExpanded &&
+                        node.children === undefined &&
+                        activeSessionId !== null &&
+                        isConnected
+                    ) {
+                        void requestWorkspaceTree(activeSessionId, node.path, 4);
+                    }
+                } else {
+                    setViewer({ path: node.path, mode: "file" });
                 }
             };
 
@@ -221,7 +233,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                             { paddingLeft: spacing.lg + depth * 16 },
                             pressed && treeStyles.rowPressed,
                         ]}
-                        onPress={isDirectory ? handlePress : undefined}
+                        onPress={handlePress}
                     >
                         <View style={treeStyles.chevronWrap}>
                             {isDirectory ? (
@@ -320,8 +332,14 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
             {/* Uncommitted segmented header */}
             <View style={styles.segmentRow}>
-                <Pressable style={styles.segmentLeft} hitSlop={4}>
-                    <Text style={styles.segmentTitle}>Uncommitted</Text>
+                <Pressable
+                    style={styles.segmentLeft}
+                    hitSlop={4}
+                    onPress={() => setChangesFilterMenuOpen((v) => !v)}
+                >
+                    <Text style={styles.segmentTitle}>
+                        {changesFilter === "uncommitted" ? "Uncommitted" : "Recent commits"}
+                    </Text>
                     <ChevronDownIcon size={12} color={colors.textSecondary} />
                 </Pressable>
                 <View style={styles.segmentRight}>
@@ -336,6 +354,24 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     </ViewModeBtn>
                 </View>
             </View>
+
+            {changesFilterMenuOpen && (
+                <View style={styles.popover}>
+                    <Pressable
+                        style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
+                        onPress={() => { setChangesFilter("uncommitted"); setChangesFilterMenuOpen(false); }}
+                    >
+                        <Text style={styles.popoverLabel}>Uncommitted</Text>
+                    </Pressable>
+                    <View style={styles.popoverSep} />
+                    <Pressable
+                        style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
+                        onPress={() => { setChangesFilter("recent"); setChangesFilterMenuOpen(false); }}
+                    >
+                        <Text style={styles.popoverLabel}>Recent commits</Text>
+                    </Pressable>
+                </View>
+            )}
 
             {workspace.operationMessage !== null && (
                 <Banner tone="success" text={workspace.operationMessage} />
