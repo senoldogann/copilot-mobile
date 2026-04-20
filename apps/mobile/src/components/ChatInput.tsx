@@ -723,7 +723,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         accessibilityLabel="Eylem menüsü"
                     >
                         <Text style={toolbarStyles.plusText}>+</Text>
-                        <ChevronDownIcon size={10} color={colors.textTertiary} />
                     </Pressable>
 
                     {/* Model selector pill */}
@@ -1214,21 +1213,16 @@ const toolbarStyles = StyleSheet.create({
         overflow: "hidden",
     },
     plusBtn: {
-        flexDirection: "row",
         alignItems: "center",
-        paddingHorizontal: 8,
-        paddingVertical: 5,
-        borderRadius: borderRadius.full,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.bgElevated,
-        gap: 3,
+        justifyContent: "center",
+        width: 32,
+        height: 32,
     },
     plusText: {
         color: colors.textSecondary,
-        fontSize: 18,
-        fontWeight: "400",
-        lineHeight: 20,
+        fontSize: 22,
+        fontWeight: "300",
+        lineHeight: 24,
         includeFontPadding: false,
     },
     toolBtn: {
