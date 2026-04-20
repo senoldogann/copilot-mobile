@@ -187,6 +187,9 @@ export function createMessageHandler(
                 case "models.request":
                     return sessionManager.listModels();
 
+                case "skills.list.request":
+                    return sessionManager.listSkills();
+
                 case "capabilities.request":
                     sessionManager.emitCapabilitiesState();
                     return;

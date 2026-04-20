@@ -445,6 +445,11 @@ export function handleServerMessage(message: ServerMessage): void {
             break;
         }
 
+        case "skills.list.response": {
+            sessionStore.setSkills(message.payload.skills);
+            break;
+        }
+
         case "session.state": {
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.setAgentMode(message.payload.agentMode);
@@ -549,6 +554,11 @@ export function handleServerMessage(message: ServerMessage): void {
                 diff,
                 ...(error !== undefined ? { error } : {}),
             });
+            break;
+        }
+
+        case "skills.list.response": {
+            useSessionStore.getState().setSkills(message.payload.skills);
             break;
         }
 

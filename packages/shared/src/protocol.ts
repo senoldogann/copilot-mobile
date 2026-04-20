@@ -295,6 +295,13 @@ export type ModelInfo = {
     contextWindowTokens?: number;
 };
 
+// --- Skill Info ---
+
+export type SkillInfo = {
+    name: string;
+    description: string;
+};
+
 // --- Host + Bridge Capability State ---
 
 export type HostSessionCapabilities = {
@@ -528,7 +535,8 @@ export type ServerMessage =
     | WorkspacePullResultMessage
     | WorkspacePushResultMessage
     | WorkspaceFileResponseMessage
-    | WorkspaceDiffResponseMessage;
+    | WorkspaceDiffResponseMessage
+    | SkillsListResponseMessage;
 
 // --- Client → Server Messages (Discriminated Union) ---
 
@@ -617,6 +625,16 @@ export type CapabilitiesRequestMessage = BaseBridgeMessage & {
     payload: Record<string, never>;
 };
 
+export type SkillsListRequestMessage = BaseBridgeMessage & {
+    type: "skills.list.request";
+    payload: Record<string, never>;
+};
+
+export type SkillsListResponseMessage = BaseBridgeMessage & {
+    type: "skills.list.response";
+    payload: { skills: ReadonlyArray<SkillInfo> };
+};
+
 export type ClientMessage =
     | AuthPairMessage
     | SessionCreateMessage
@@ -633,6 +651,7 @@ export type ClientMessage =
     | ModelsRequestMessage
     | ReconnectMessage
     | CapabilitiesRequestMessage
+    | SkillsListRequestMessage
     | WorkspaceTreeRequestMessage
     | WorkspaceGitSummaryRequestMessage
     | WorkspaceOperationRequestMessage

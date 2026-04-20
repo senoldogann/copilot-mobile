@@ -8,6 +8,7 @@ import type {
     RuntimeMode,
     SessionInfo,
     ModelInfo,
+    SkillInfo,
     ReasoningEffortLevel,
     HostSessionCapabilities,
     BridgeSettings,
@@ -83,6 +84,7 @@ export type SessionStore = {
     isSessionLoading: boolean;
     sessions: ReadonlyArray<SessionInfo>;
     models: ReadonlyArray<ModelInfo>;
+    skills: ReadonlyArray<SkillInfo>;
     selectedModel: string;
     // null if model does not support reasoning effort.
     reasoningEffort: ReasoningEffortLevel | null;
@@ -112,6 +114,7 @@ export type SessionStore = {
     upsertSession: (session: SessionInfo) => void;
     removeSession: (sessionId: string) => void;
     setModels: (models: ReadonlyArray<ModelInfo>) => void;
+    setSkills: (skills: ReadonlyArray<SkillInfo>) => void;
     setSelectedModel: (model: string) => void;
     setReasoningEffort: (effort: ReasoningEffortLevel | null) => void;
     setAutoApproveReads: (enabled: boolean) => void;
@@ -234,6 +237,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
     isSessionLoading: false,
     sessions: [],
     models: [],
+    skills: [],
     selectedModel: "",
     reasoningEffort: null,
     autoApproveReads: false,
@@ -292,6 +296,8 @@ export const useSessionStore = create<SessionStore>((set) => ({
                 reasoningEffort: nextEffort,
             };
         }),
+
+    setSkills: (skills) => set({ skills }),
 
     setSelectedModel: (model) =>
         set((state) => {
@@ -516,6 +522,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             isSessionLoading: false,
             sessions: [],
             models: [],
+            skills: [],
             selectedModel: "",
             reasoningEffort: null,
             autoApproveReads: false,

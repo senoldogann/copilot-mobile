@@ -686,6 +686,48 @@ export function createSessionManager(
             pending.resolve(value);
         },
 
+        async listSkills(): Promise<void> {
+            const os = await import("os");
+            const fs = await import("fs/promises");
+            const path = await import("path");
+            const skillsDir = path.join(os.homedir(), ".agents", "skills");
+            try {
+                const entries = await fs.readdir(skillsDir, { withFileTypes: true });
+                const skills: Array<{ name: string; description: string }> = [];
+                for (const entry of entries) {
+                    if (!entry.isDirectory()) continue;
+                    const skillMdPath = path.join(skillsDir, entry.name, "SKILL.md");
+                    let description = "";
+                    try {
+                        const content = await fs.readFile(skillMdPath, "utf-8");
+                        // İlk başlıktan sonraki ilk anlamlı satırı açıklama olarak al.
+                        const lines = content.split("\n");
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            if (trimmed.length > 0 && !trimmed.startsWith("#")) {
+                                description = trimmed.slice(0, 120);
+                                break;
+                            }
+                        }
+                    } catch {
+                        // SKILL.md yoksa boş açıklama bırak.
+                    }
+                    skills.push({ name: entry.name, description });
+                }
+                send({
+                    ...makeBase(),
+                    type: "skills.list.response",
+                    payload: { skills },
+                });
+            } catch {
+                send({
+                    ...makeBase(),
+                    type: "skills.list.response",
+                    payload: { skills: [] },
+                });
+            }
+        },
+
         async listModels(): Promise<void> {
             try {
                 const models = await copilotClient.listModels();

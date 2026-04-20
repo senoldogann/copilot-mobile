@@ -284,6 +284,16 @@ export async function requestCapabilities(): Promise<void> {
     }
 }
 
+// Request list of installed agent skills from bridge
+export async function requestSkillsList(): Promise<void> {
+    const c = getClient();
+    try {
+        await c.sendMessage("skills.list.request", {});
+    } catch {
+        // Connection dropped before response; will retry on reconnect
+    }
+}
+
 // Workspace tree — requests a repository subtree for the active session
 export async function requestWorkspaceTree(
     sessionId: string,

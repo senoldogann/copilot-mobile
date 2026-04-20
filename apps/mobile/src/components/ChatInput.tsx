@@ -451,9 +451,9 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const [isFocused, setIsFocused] = useState(false);
     const [images, setImages] = useState<Array<ImageAttachment>>([]);
     const [showModelPicker, setShowModelPicker] = useState(false);
-    const [showAgentPicker, setShowAgentPicker] = useState(false);
     const [showPermissionPicker, setShowPermissionPicker] = useState(false);
     const [showEffortPicker, setShowEffortPicker] = useState(false);
+    const [showPlusMenu, setShowPlusMenu] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
     const [voiceHandle, setVoiceHandle] = useState<DictationHandle | null>(null);
     const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
@@ -608,7 +608,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const handleAgentModeSelect = useCallback(
         async (mode: AgentMode) => {
             setAgentMode(mode);
-            setShowAgentPicker(false);
             if (activeSessionId !== null) {
                 await updateSessionMode(activeSessionId, mode);
             }
@@ -713,42 +712,18 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 {/* Thin separator */}
                 <View style={styles.inputSeparator} />
 
-                {/* Toolbar Row 1: attach | agent | model | sliders | spacer | send */}
+                {/* Single toolbar row: + | model | sliders | spacer | permission-icon | mic | send */}
                 <View style={toolbarStyles.row}>
-                    {/* Attach */}
+                    {/* + button — opens agent mode + attach menu */}
                     <Pressable
-                        style={[
-                            toolbarStyles.toolBtn,
-                            !supportsVision && toolbarStyles.toolBtnDimmed,
-                        ]}
-                        onPress={handlePickImage}
-                        disabled={disabled || !supportsVision}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        accessibilityLabel="Fotoğraf ekle"
-                    >
-                        <PaperclipIcon size={16} color={colors.textSecondary} />
-                    </Pressable>
-
-                    {/* Agent mode pill */}
-                    <Pressable
-                        style={toolbarStyles.modePill}
-                        onPress={() => setShowAgentPicker(true)}
+                        style={toolbarStyles.plusBtn}
+                        onPress={() => setShowPlusMenu(true)}
                         disabled={disabled}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                        accessibilityLabel="Agent modu seç"
+                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                        accessibilityLabel="Eylem menüsü"
                     >
-                        {(() => {
-                            const cfg = agentModeConfig[agentMode];
-                            return (
-                                <>
-                                    <cfg.Icon size={12} color={colors.textTertiary} />
-                                    <Text style={toolbarStyles.modePillText} numberOfLines={1}>
-                                        {cfg.pillLabel}
-                                    </Text>
-                                    <ChevronDownIcon size={10} color={colors.textTertiary} />
-                                </>
-                            );
-                        })()}
+                        <Text style={toolbarStyles.plusText}>+</Text>
+                        <ChevronDownIcon size={10} color={colors.textTertiary} />
                     </Pressable>
 
                     {/* Model selector pill */}
@@ -766,7 +741,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         <ChevronDownIcon size={10} color={colors.textTertiary} />
                     </Pressable>
 
-                    {/* Thinking effort / settings */}
+                    {/* Thinking effort */}
                     {effortInfo.supported && (
                         <Pressable
                             style={toolbarStyles.toolBtn}
@@ -781,7 +756,32 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
 
                     <View style={toolbarStyles.spacer} />
 
-                    {/* Send / Abort / Queue button */}
+                    {/* Permission icon only */}
+                    <Pressable
+                        style={toolbarStyles.toolBtn}
+                        onPress={() => setShowPermissionPicker(true)}
+                        disabled={disabled}
+                        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                        accessibilityLabel="İzin seviyesi"
+                    >
+                        {(() => {
+                            const cfg = permissionLevelConfig[permissionLevel];
+                            return <cfg.Icon size={16} color={colors.textSecondary} />;
+                        })()}
+                    </Pressable>
+
+                    {/* Mic */}
+                    <Pressable
+                        style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
+                        onPress={handleToggleVoice}
+                        disabled={disabled}
+                        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                        accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
+                    >
+                        <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
+                    </Pressable>
+
+                    {/* Send / Abort / Queue */}
                     {isTyping && canSend ? (
                         <View style={toolbarStyles.sendGroup}>
                             <Pressable
@@ -824,44 +824,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         </View>
                     )}
                 </View>
-
-                {/* Toolbar Row 2: permission pill | spacer | mic */}
-                <View style={toolbarStyles.row2}>
-                    {/* Permission level pill */}
-                    <Pressable
-                        style={toolbarStyles.modePill}
-                        onPress={() => setShowPermissionPicker(true)}
-                        disabled={disabled}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                        accessibilityLabel="İzin seviyesi seç"
-                    >
-                        {(() => {
-                            const cfg = permissionLevelConfig[permissionLevel];
-                            return (
-                                <>
-                                    <cfg.Icon size={12} color={colors.textTertiary} />
-                                    <Text style={toolbarStyles.modePillText} numberOfLines={1}>
-                                        {cfg.pillLabel}
-                                    </Text>
-                                    <ChevronDownIcon size={10} color={colors.textTertiary} />
-                                </>
-                            );
-                        })()}
-                    </Pressable>
-
-                    <View style={toolbarStyles.spacer} />
-
-                    {/* Mic — voice dictation */}
-                    <Pressable
-                        style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
-                        onPress={handleToggleVoice}
-                        disabled={disabled}
-                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                        accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
-                    >
-                        <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
-                    </Pressable>
-                </View>
             </View>
 
             {/* Model picker modal */}
@@ -877,12 +839,13 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 />
             </DropdownModal>
 
-            {/* Agent mode picker */}
+            {/* + menu: agent mode + attach image */}
             <DropdownModal
-                visible={showAgentPicker}
-                onClose={() => setShowAgentPicker(false)}
-                title="Agent Mode"
+                visible={showPlusMenu}
+                onClose={() => setShowPlusMenu(false)}
+                title="Mode & Actions"
             >
+                <Text style={dropdownStyles.sectionLabel}>Agent Mode</Text>
                 <View style={dropdownStyles.effortList}>
                     {(["agent", "plan", "ask"] as const).map((mode) => {
                         const cfg = agentModeConfig[mode];
@@ -891,7 +854,10 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                             <Pressable
                                 key={mode}
                                 style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
-                                onPress={() => { void handleAgentModeSelect(mode); }}
+                                onPress={() => {
+                                    void handleAgentModeSelect(mode);
+                                    setShowPlusMenu(false);
+                                }}
                             >
                                 <View style={dropdownStyles.effortItemLeft}>
                                     <View style={dropdownStyles.checkmarkSlot}>
@@ -912,6 +878,28 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         );
                     })}
                 </View>
+                {supportsVision && (
+                    <>
+                        <View style={dropdownStyles.sectionDivider} />
+                        <Text style={dropdownStyles.sectionLabel}>Attach</Text>
+                        <Pressable
+                            style={dropdownStyles.effortItem}
+                            onPress={() => {
+                                setShowPlusMenu(false);
+                                void handlePickImage();
+                            }}
+                        >
+                            <View style={dropdownStyles.effortItemLeft}>
+                                <View style={dropdownStyles.checkmarkSlot} />
+                                <View style={{ flex: 1 }}>
+                                    <Text style={dropdownStyles.effortLabel}>Attach Image</Text>
+                                    <Text style={dropdownStyles.effortDesc}>Pick a photo from your library</Text>
+                                </View>
+                            </View>
+                            <PaperclipIcon size={18} color={colors.textTertiary} />
+                        </Pressable>
+                    </>
+                )}
             </DropdownModal>
 
             {/* Permission level picker */}
@@ -1225,17 +1213,27 @@ const toolbarStyles = StyleSheet.create({
         gap: 4,
         overflow: "hidden",
     },
-    row2: {
+    plusBtn: {
         flexDirection: "row",
         alignItems: "center",
-        minHeight: 32,
-        gap: 4,
-        marginTop: 2,
-        overflow: "hidden",
+        paddingHorizontal: 8,
+        paddingVertical: 5,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.bgElevated,
+        gap: 3,
+    },
+    plusText: {
+        color: colors.textSecondary,
+        fontSize: 18,
+        fontWeight: "400",
+        lineHeight: 20,
+        includeFontPadding: false,
     },
     toolBtn: {
-        width: 34,
-        height: 34,
+        width: 32,
+        height: 32,
         borderRadius: borderRadius.md,
         justifyContent: "center",
         alignItems: "center",
@@ -1245,13 +1243,6 @@ const toolbarStyles = StyleSheet.create({
     },
     toolBtnActive: {
         backgroundColor: colors.accentMuted,
-    },
-    attachIcon: {
-        fontSize: 16,
-    },
-    gearIcon: {
-        color: colors.textSecondary,
-        fontSize: fs.base,
     },
     modelPill: {
         flexDirection: "row",
@@ -1272,43 +1263,6 @@ const toolbarStyles = StyleSheet.create({
         fontWeight: "500",
         flexShrink: 1,
     },
-    modePill: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 4,
-        borderRadius: borderRadius.full,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.bgElevated,
-        gap: 4,
-        flexShrink: 1,
-        minWidth: 0,
-    },
-    modePillText: {
-        color: colors.textTertiary,
-        fontSize: fs.xs,
-        fontWeight: "500",
-        flexShrink: 1,
-    },
-    selectorPill: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
-        borderRadius: borderRadius.full,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.bgElevated,
-        gap: 4,
-        maxWidth: 160,
-    },
-    selectorPillText: {
-        color: colors.textSecondary,
-        fontSize: fs.sm,
-        fontWeight: "500",
-        flex: 1,
-    },
     spacer: {
         flex: 1,
     },
@@ -1319,14 +1273,10 @@ const toolbarStyles = StyleSheet.create({
     },
     sendMenuButton: {
         width: 22,
-        height: 34,
+        height: 32,
         justifyContent: "center",
         alignItems: "center",
         borderRadius: borderRadius.sm,
-    },
-    sendMenuChevron: {
-        color: colors.textPrimary,
-        fontSize: fs.sm,
     },
 });
 

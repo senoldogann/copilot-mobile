@@ -81,6 +81,9 @@ export type {
     ModelsRequestMessage,
     ReconnectMessage,
     CapabilitiesRequestMessage,
+    SkillInfo,
+    SkillsListRequestMessage,
+    SkillsListResponseMessage,
 } from "./protocol";
 
 export type {

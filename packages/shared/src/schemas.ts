@@ -465,6 +465,15 @@ const workspaceDiffResponseSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const skillsListResponseSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("skills.list.response"),
+    payload: z.object({
+        skills: z.array(
+            z.object({ name: z.string().min(1), description: z.string() })
+        ).readonly(),
+    }),
+});
+
 export const serverMessageSchema = z.discriminatedUnion("type", [
     pairingSuccessSchema,
     sessionCreatedSchema,
@@ -499,6 +508,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     workspacePushResultSchema,
     workspaceFileResponseSchema,
     workspaceDiffResponseSchema,
+    skillsListResponseSchema,
 ]);
 
 // --- Client → Server Message Schemas ---
@@ -639,6 +649,11 @@ const workspaceDiffRequestSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const skillsListRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("skills.list.request"),
+    payload: z.object({}).strict(),
+});
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
     authPairSchema,
     sessionCreateSchema,
@@ -661,6 +676,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     workspacePushSchema,
     workspaceFileRequestSchema,
     workspaceDiffRequestSchema,
+    skillsListRequestSchema,
 ]);
 
 // --- QR Payload Schema ---
