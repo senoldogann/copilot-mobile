@@ -26,6 +26,7 @@ import {
     buildWorkspaceGitSummary,
     buildWorkspaceTree,
     performWorkspaceGitOperation,
+    readWorkspaceDiff,
     readWorkspaceFile,
 } from "../utils/workspace.js";
 
@@ -895,6 +896,38 @@ export function createSessionManager(
                     content: result.content,
                     mimeType: result.mimeType,
                     truncated: result.truncated,
+                    ...(result.error !== undefined ? { error: result.error } : {}),
+                },
+            });
+        },
+
+        async readWorkspaceDiff(
+            sessionId: string,
+            requestedPath: string
+        ): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                send({
+                    ...makeBase(),
+                    type: "workspace.diff.response",
+                    payload: {
+                        sessionId,
+                        path: requestedPath,
+                        diff: "",
+                        error: "SESSION_NOT_FOUND",
+                    },
+                });
+                return;
+            }
+
+            const result = await readWorkspaceDiff(context, requestedPath);
+            send({
+                ...makeBase(),
+                type: "workspace.diff.response",
+                payload: {
+                    sessionId,
+                    path: requestedPath,
+                    diff: result.diff,
                     ...(result.error !== undefined ? { error: result.error } : {}),
                 },
             });

@@ -5,12 +5,12 @@ import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
 import { useRouter } from "expo-router";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
 import {
-    SparklesIcon,
     WifiOffIcon,
     TerminalIcon,
     WrenchIcon,
     CheckSquareIcon,
     CodeIcon,
+    CopilotIcon,
 } from "./ProviderIcon";
 
 type SuggestionIcon = "terminal" | "wrench" | "check" | "code";
@@ -103,7 +103,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
         <View style={styles.container}>
             <View style={styles.logoContainer}>
                 <View style={styles.logo}>
-                    <SparklesIcon size={32} color={colors.copilotPurple} />
+                    <CopilotIcon size={36} color={colors.textPrimary} />
                 </View>
             </View>
             <Text style={styles.title}>GitHub Copilot</Text>

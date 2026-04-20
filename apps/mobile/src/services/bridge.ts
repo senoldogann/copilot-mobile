@@ -15,9 +15,9 @@ import { handleServerMessage } from "./message-handler";
 import { useConnectionStore } from "../stores/connection-store";
 import { useSessionStore } from "../stores/session-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
-import { dispatchWorkspaceFileResponse, onWorkspaceFileResponse } from "./workspace-events";
+import { dispatchWorkspaceFileResponse, onWorkspaceFileResponse, dispatchWorkspaceDiffResponse, onWorkspaceDiffResponse } from "./workspace-events";
 
-export { onWorkspaceFileResponse };
+export { onWorkspaceFileResponse, onWorkspaceDiffResponse };
 
 let client: ReturnType<typeof createWSClient> | null = null;
 
@@ -382,6 +382,24 @@ export async function requestWorkspaceFile(
             content: "",
             mimeType: "text/plain",
             truncated: false,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
+
+export async function requestWorkspaceDiff(
+    sessionId: string,
+    path: string
+): Promise<void> {
+    const c = getClient();
+    try {
+        await c.sendMessage("workspace.diff.request", {
+            sessionId,
+            path,
+        });
+    } catch (error) {
+        dispatchWorkspaceDiffResponse(path, {
+            diff: "",
             error: error instanceof Error ? error.message : String(error),
         });
     }

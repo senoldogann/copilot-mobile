@@ -11,7 +11,7 @@ import {
     clearBackgroundCompletion,
     notifyIfBackgroundCompletion,
 } from "./app-runtime";
-import { dispatchWorkspaceFileResponse } from "./workspace-events";
+import { dispatchWorkspaceFileResponse, dispatchWorkspaceDiffResponse } from "./workspace-events";
 
 function collectPermissionDetails(metadata: Record<string, unknown>): Array<string> {
     const details: Array<string> = [];
@@ -529,6 +529,24 @@ export function handleServerMessage(message: ServerMessage): void {
                 content,
                 mimeType,
                 truncated,
+                ...(error !== undefined ? { error } : {}),
+            });
+            break;
+        }
+
+        case "workspace.diff.response": {
+            const { path, diff, error } = message.payload;
+            dispatchWorkspaceDiffResponse(path, {
+                diff,
+                ...(error !== undefined ? { error } : {}),
+            });
+            break;
+        }
+
+        case "workspace.diff.response": {
+            const { path, diff, error } = message.payload;
+            dispatchWorkspaceDiffResponse(path, {
+                diff,
                 ...(error !== undefined ? { error } : {}),
             });
             break;

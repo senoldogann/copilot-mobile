@@ -455,6 +455,16 @@ const workspaceFileResponseSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceDiffResponseSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.diff.response"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        path: z.string().min(1),
+        diff: z.string(),
+        error: z.string().optional(),
+    }),
+});
+
 export const serverMessageSchema = z.discriminatedUnion("type", [
     pairingSuccessSchema,
     sessionCreatedSchema,
@@ -488,6 +498,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     workspacePullResultSchema,
     workspacePushResultSchema,
     workspaceFileResponseSchema,
+    workspaceDiffResponseSchema,
 ]);
 
 // --- Client → Server Message Schemas ---
@@ -620,6 +631,14 @@ const workspaceFileRequestSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceDiffRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.diff.request"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        path: z.string().min(1),
+    }),
+});
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
     authPairSchema,
     sessionCreateSchema,
@@ -641,6 +660,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     workspacePullSchema,
     workspacePushSchema,
     workspaceFileRequestSchema,
+    workspaceDiffRequestSchema,
 ]);
 
 // --- QR Payload Schema ---

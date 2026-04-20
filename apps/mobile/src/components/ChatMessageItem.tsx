@@ -14,6 +14,7 @@ import type { SessionMessageAttachment } from "@copilot-mobile/shared";
 import type { ChatItem } from "../stores/session-store";
 import { ThinkingBubble } from "./ThinkingBubble";
 import { ToolCard } from "./ToolCard";
+import { FileContentViewer } from "./FileContentViewer";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
 import { useSessionStore } from "../stores/session-store";
 import { requestWorkspaceFile, onWorkspaceFileResponse } from "../services/bridge";
@@ -141,146 +142,21 @@ function InlineMarkdown({ segments }: { segments: ReadonlyArray<MarkdownSegment>
     );
 }
 
+// File viewer context — lets FileLink open viewer from deep inside Text tree
+const FileViewerContext = React.createContext<(path: string) => void>(() => undefined);
+
 // File link — colored, tappable to open content viewer
 function FileLink({ path }: { path: string }) {
-    const [showViewer, setShowViewer] = useState(false);
-
-    // Modal'ı Text ağacının dışına taşı — RN, Text içinde Modal desteklemez
+    const openFile = React.useContext(FileViewerContext);
     return (
-        <>
-            <Text
-                style={mdStyles.fileLink}
-                onPress={() => setShowViewer(true)}
-            >
-                {path}
-            </Text>
-            {showViewer && (
-                <View style={{ position: "absolute" }}>
-                    <FileContentViewer
-                        path={path}
-                        onClose={() => setShowViewer(false)}
-                    />
-                </View>
-            )}
-        </>
+        <Text style={mdStyles.fileLink} onPress={() => openFile(path)}>
+            {path}
+        </Text>
     );
 }
 
-// File content viewer — slide-in modal showing file path and content from bridge
-function FileContentViewer({
-    path,
-    onClose,
-}: {
-    path: string;
-    onClose: () => void;
-}) {
-    const cleanPath = path.replace(/:\d+(-\d+)?$/, "");
-    const lineMatch = path.match(/:(\d+)(?:-(\d+))?$/);
-    const lineInfo = lineMatch
-        ? lineMatch[2]
-            ? `Lines ${lineMatch[1]}-${lineMatch[2]}`
-            : `Line ${lineMatch[1]}`
-        : null;
-
-    const [loading, setLoading] = useState(true);
-    const [content, setContent] = useState<string | null>(null);
-    const [error, setError] = useState<string | null>(null);
-    const [truncated, setTruncated] = useState(false);
-
-    const activeSessionId = useSessionStore((s) => s.activeSessionId);
-
-    const loadFile = useCallback(() => {
-        if (activeSessionId === null) {
-            setLoading(false);
-            setError("No active session. Connect to the bridge first.");
-            return;
-        }
-        setLoading(true);
-        setError(null);
-        const unsubscribe = onWorkspaceFileResponse(cleanPath, (payload) => {
-            unsubscribe();
-            setLoading(false);
-            if (payload.error !== undefined) {
-                setError(payload.error);
-            } else {
-                setContent(payload.content);
-                setTruncated(payload.truncated);
-            }
-        });
-        void requestWorkspaceFile(activeSessionId, cleanPath);
-        const timeout = setTimeout(() => {
-            unsubscribe();
-            setLoading(false);
-            setError("Timed out waiting for file content.");
-        }, 10_000);
-        return () => {
-            clearTimeout(timeout);
-            unsubscribe();
-        };
-    }, [activeSessionId, cleanPath]);
-
-    useEffect(() => {
-        const cleanup = loadFile();
-        return cleanup;
-    }, [loadFile]);
-
-    return (
-        <Modal
-            visible
-            animationType="slide"
-            presentationStyle="pageSheet"
-            onRequestClose={onClose}
-        >
-            <View style={viewerStyles.container}>
-                <View style={viewerStyles.header}>
-                    <View style={viewerStyles.headerLeft}>
-                        <Text style={viewerStyles.fileIcon}>📄</Text>
-                        <View style={viewerStyles.headerText}>
-                            <Text style={viewerStyles.fileName} numberOfLines={1}>
-                                {cleanPath.split("/").pop()}
-                            </Text>
-                            <Text style={viewerStyles.filePath} numberOfLines={1}>
-                                {cleanPath}
-                            </Text>
-                        </View>
-                    </View>
-                    <Pressable style={viewerStyles.closeButton} onPress={onClose}>
-                        <Text style={viewerStyles.closeText}>✕</Text>
-                    </Pressable>
-                </View>
-                {lineInfo !== null && (
-                    <View style={viewerStyles.lineInfo}>
-                        <Text style={viewerStyles.lineInfoText}>{lineInfo}</Text>
-                    </View>
-                )}
-                {truncated && (
-                    <View style={viewerStyles.truncatedBanner}>
-                        <Text style={viewerStyles.truncatedText}>File truncated — showing first 256 KB</Text>
-                    </View>
-                )}
-                <ScrollView style={viewerStyles.body} contentContainerStyle={viewerStyles.bodyContent}>
-                    {loading ? (
-                        <View style={viewerStyles.centered}>
-                            <ActivityIndicator color={colors.accent} size="small" />
-                            <Text style={viewerStyles.loadingText}>Loading…</Text>
-                        </View>
-                    ) : error !== null ? (
-                        <View style={viewerStyles.centered}>
-                            <Text style={viewerStyles.errorText}>{error}</Text>
-                            <Pressable style={viewerStyles.retryBtn} onPress={loadFile}>
-                                <Text style={viewerStyles.retryText}>Retry</Text>
-                            </Pressable>
-                        </View>
-                    ) : (
-                        <Text style={viewerStyles.codeText} selectable>
-                            {content ?? ""}
-                        </Text>
-                    )}
-                </ScrollView>
-            </View>
-        </Modal>
-    );
-}
+// File content viewer lives in its own file so workspace panel can reuse it.
+// See ./FileContentViewer.tsx
 
 // Parse full markdown content into renderable blocks
 type MarkdownBlock =
@@ -572,142 +448,43 @@ function AssistantBubble({
 }
 
 function ChatMessageItemComponent({ item }: Props) {
-    switch (item.type) {
-        case "user":
-            return (
-                <UserBubble
-                    content={item.content}
-                    {...(item.attachments !== undefined ? { attachments: item.attachments } : {})}
+    const [viewerPath, setViewerPath] = useState<string | null>(null);
+
+    return (
+        <FileViewerContext.Provider value={setViewerPath}>
+            {(() => {
+                switch (item.type) {
+                    case "user":
+                        return (
+                            <UserBubble
+                                content={item.content}
+                                {...(item.attachments !== undefined ? { attachments: item.attachments } : {})}
+                            />
+                        );
+                    case "assistant":
+                        return (
+                            <AssistantBubble
+                                content={item.content}
+                                isStreaming={item.isStreaming}
+                            />
+                        );
+                    case "thinking":
+                        return <ThinkingBubble item={item} />;
+                    case "tool":
+                        return <ToolCard item={item} />;
+                }
+            })()}
+            {viewerPath !== null && (
+                <FileContentViewer
+                    path={viewerPath}
+                    onClose={() => setViewerPath(null)}
                 />
-            );
-        case "assistant":
-            return (
-                <AssistantBubble
-                    content={item.content}
-                    isStreaming={item.isStreaming}
-                />
-            );
-        case "thinking":
-            return <ThinkingBubble item={item} />;
-        case "tool":
-            return <ToolCard item={item} />;
-    }
+            )}
+        </FileViewerContext.Provider>
+    );
 }
 
 export const ChatMessageItem = React.memo(ChatMessageItemComponent);
-
-// --- Dosya içerik görüntüleyici stilleri ---
-const viewerStyles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.bg,
-    },
-    header: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 14,
-        backgroundColor: colors.bgSecondary,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    headerLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        flex: 1,
-    },
-    headerText: {
-        flex: 1,
-    },
-    fileIcon: {
-        fontSize: 18,
-    },
-    fileName: {
-        fontSize: fontSize.base,
-        fontWeight: "600",
-        color: colors.textPrimary,
-    },
-    filePath: {
-        fontSize: fontSize.xs,
-        color: colors.textSecondary,
-    },
-    closeButton: {
-        width: 32,
-        height: 32,
-        borderRadius: borderRadius.sm,
-        backgroundColor: colors.bgElevated,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    closeText: {
-        fontSize: fontSize.base,
-        color: colors.textPrimary,
-    },
-    lineInfo: {
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 6,
-        backgroundColor: colors.accentMuted,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    lineInfoText: {
-        fontSize: fontSize.sm,
-        color: colors.accent,
-    },
-    truncatedBanner: {
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 6,
-        backgroundColor: colors.bgElevated,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    truncatedText: {
-        fontSize: fontSize.sm,
-        color: colors.textTertiary,
-    },
-    body: {
-        flex: 1,
-    },
-    bodyContent: {
-        padding: spacing.lg,
-        paddingBottom: 40,
-    },
-    centered: {
-        alignItems: "center",
-        justifyContent: "center",
-        paddingVertical: 40,
-        gap: 12,
-    },
-    loadingText: {
-        fontSize: fontSize.sm,
-        color: colors.textTertiary,
-    },
-    errorText: {
-        fontSize: fontSize.sm,
-        color: colors.error,
-        textAlign: "center",
-    },
-    retryBtn: {
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 8,
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.bgElevated,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    retryText: {
-        fontSize: fontSize.sm,
-        color: colors.textPrimary,
-    },
-    codeText: {
-        fontSize: 12,
-        lineHeight: 18,
-        color: colors.textPrimary,
-        fontFamily: "monospace",
-    },
-});
 
 // --- Markdown stilleri ---
 const mdStyles = StyleSheet.create({

@@ -223,6 +223,12 @@ export function createMessageHandler(
                         message.payload.maxBytes
                     );
 
+                case "workspace.diff.request":
+                    return sessionManager.readWorkspaceDiff(
+                        message.payload.sessionId,
+                        message.payload.path
+                    );
+
                 case "reconnect": {
                     // Reconnect — replay messages after lastSeenSeq
                     const lastSeenSeq = message.payload.lastSeenSeq;

@@ -498,3 +498,49 @@ export async function readWorkspaceFile(
         };
     }
 }
+
+// Uncommitted değişikliklerin unified diff'ini döndür. Untracked dosyalar için `diff --no-index`
+// kullanarak tamamen ekleme olarak gösterir.
+export async function readWorkspaceDiff(
+    context: SessionContext,
+    requestedPath: string
+): Promise<{ diff: string; error?: string }> {
+    const root = resolve(context.cwd);
+    const absPath = isAbsolute(requestedPath)
+        ? resolve(requestedPath)
+        : resolve(root, requestedPath);
+
+    if (!isWithinRoot(root, absPath)) {
+        return { diff: "", error: "Path is outside workspace root" };
+    }
+
+    const relPath = toPosixRelativePath(root, absPath);
+
+    // Önce tracked mi untracked mi olduğunu belirle.
+    const lsFiles = await runGit(root, ["ls-files", "--error-unmatch", "--", relPath]);
+    if (lsFiles.success) {
+        const tracked = await runGit(root, ["diff", "--no-color", "HEAD", "--", relPath]);
+        if (!tracked.success) {
+            return { diff: "", error: tracked.stderr || "git diff failed" };
+        }
+        return { diff: tracked.stdout };
+    }
+
+    // Untracked: /dev/null'a karşı diff al.
+    const untracked = await runGit(root, [
+        "diff",
+        "--no-color",
+        "--no-index",
+        "--",
+        "/dev/null",
+        relPath,
+    ]);
+    // `diff --no-index` fark bulduğunda exit code 1 verir; bu hata değil.
+    if (untracked.stdout.length > 0) {
+        return { diff: untracked.stdout };
+    }
+    if (!untracked.success && untracked.stderr.length > 0) {
+        return { diff: "", error: untracked.stderr };
+    }
+    return { diff: "" };
+}

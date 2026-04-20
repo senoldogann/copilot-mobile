@@ -267,6 +267,20 @@ async function syncCustomAgent(
     }
 }
 
+// SDK bazen mode.get() / mode.set() yanıtında `mode`'u tanımsız ya da tanınmayan bir değer
+// olarak döndürebiliyor (özellikle resume akışında). Zod şeması runtimeMode'u zorunlu enum
+// olarak işaretlediği için mobil tarafta "payload.runtimeMode required" validation hatası
+// üretiyor. Bu guard her zaman geçerli bir enum döndürür.
+function normalizeRuntimeMode(
+    candidate: unknown,
+    fallback: RuntimeMode
+): RuntimeMode {
+    if (candidate === "interactive" || candidate === "plan" || candidate === "autopilot") {
+        return candidate;
+    }
+    return fallback;
+}
+
 async function applySDKSessionState(
     sdkSession: CopilotSession,
     stateRef: SessionStateRef
@@ -274,7 +288,7 @@ async function applySDKSessionState(
     await syncCustomAgent(sdkSession, stateRef.agentMode);
     const runtimeMode = deriveRuntimeMode(stateRef);
     const result = await sdkSession.rpc.mode.set({ mode: runtimeMode });
-    const resolvedMode =
+    const resolvedCandidate =
         result !== null && typeof result === "object" && "mode" in result
             ? result.mode
             : (await sdkSession.rpc.mode.get()).mode;
@@ -282,7 +296,7 @@ async function applySDKSessionState(
     return {
         agentMode: stateRef.agentMode,
         permissionLevel: stateRef.permissionLevel,
-        runtimeMode: resolvedMode,
+        runtimeMode: normalizeRuntimeMode(resolvedCandidate, runtimeMode),
     };
 }
 
@@ -300,11 +314,12 @@ async function readSDKSessionState(
             : modeResult.mode === "plan"
                 ? "plan"
                 : "agent";
+    const fallbackRuntimeMode = deriveRuntimeMode({ agentMode, permissionLevel });
 
     return {
         agentMode,
         permissionLevel,
-        runtimeMode: modeResult.mode,
+        runtimeMode: normalizeRuntimeMode(modeResult.mode, fallbackRuntimeMode),
     };
 }
 
