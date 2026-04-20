@@ -5,6 +5,7 @@ import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
 import type { ThinkingItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
 import { SparklesIcon } from "./ProviderIcon";
+import { ShimmerHighlight } from "./ShimmerHighlight";
 import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = {
@@ -47,27 +48,30 @@ function ThinkingBubbleComponent({ item }: Props) {
 
     return (
         <>
-            <Pressable
-                style={styles.row}
-                onPress={() => hasContent && setShowSheet(true)}
-                disabled={!hasContent}
-            >
-                <View style={styles.iconContainer}>
-                    {item.isStreaming ? (
-                        <SpinnerRing />
-                    ) : (
-                        <SparklesIcon size={13} color={colors.textTertiary} />                    )}
-                </View>
-                <Text style={styles.label}>
-                    {item.isStreaming ? "Thinking…" : "Thought"}
-                </Text>
-                {!item.isStreaming && hasContent && (
-                    <Text style={styles.charCount}>{charLabel}</Text>
-                )}
-                {hasContent && (
-                    <Text style={styles.chevron}>›</Text>
-                )}
-            </Pressable>
+            <View style={styles.rowWrap}>
+                <Pressable
+                    style={styles.row}
+                    onPress={() => hasContent && setShowSheet(true)}
+                    disabled={!hasContent}
+                >
+                    <View style={styles.iconContainer}>
+                        {item.isStreaming ? (
+                            <SpinnerRing />
+                        ) : (
+                            <SparklesIcon size={13} color={colors.textTertiary} />                    )}
+                    </View>
+                    <Text style={styles.label}>
+                        {item.isStreaming ? "Thinking…" : "Thought"}
+                    </Text>
+                    {!item.isStreaming && hasContent && (
+                        <Text style={styles.charCount}>{charLabel}</Text>
+                    )}
+                    {hasContent && (
+                        <Text style={styles.chevron}>›</Text>
+                    )}
+                </Pressable>
+                <ShimmerHighlight active={item.isStreaming} />
+            </View>
 
             <BottomSheet
                 visible={showSheet}
@@ -108,6 +112,9 @@ const styles = StyleSheet.create({
         paddingVertical: 6,
         paddingHorizontal: spacing.lg,
         gap: spacing.sm,
+    },
+    rowWrap: {
+        overflow: "hidden",
     },
     iconContainer: {
         width: 18,

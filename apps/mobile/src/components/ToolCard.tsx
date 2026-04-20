@@ -6,6 +6,7 @@ import type { ToolItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
 import { ToolIcon } from "./Icons";
 import type { FeatherName } from "./Icons";
+import { ShimmerHighlight } from "./ShimmerHighlight";
 import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = { item: ToolItem };
@@ -406,22 +407,25 @@ function ToolCardComponent({ item }: Props) {
 
     return (
         <>
-            <Pressable
-                style={styles.row}
-                onPress={() => setShowSheet(true)}
-                hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-            >
-                <View style={[styles.iconBox, isFailed && styles.iconBoxFailed]}>
-                    {isRunning ? <ToolSpinner /> : (
-                        <ToolIcon toolName={item.toolName} size={11} color={isFailed ? colors.error : colors.textTertiary} />
-                    )}
-                </View>
-                <Text style={[styles.label, isFailed && styles.labelFailed]} numberOfLines={1}>
-                    {label}
-                </Text>
-                <Text style={styles.argText} numberOfLines={1}>{rowSummary}</Text>
-                <Text style={styles.chevron}>›</Text>
-            </Pressable>
+            <View style={styles.rowWrap}>
+                <Pressable
+                    style={styles.row}
+                    onPress={() => setShowSheet(true)}
+                    hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
+                >
+                    <View style={[styles.iconBox, isFailed && styles.iconBoxFailed]}>
+                        {isRunning ? <ToolSpinner /> : (
+                            <ToolIcon toolName={item.toolName} size={11} color={isFailed ? colors.error : colors.textTertiary} />
+                        )}
+                    </View>
+                    <Text style={[styles.label, isFailed && styles.labelFailed]} numberOfLines={1}>
+                        {label}
+                    </Text>
+                    <Text style={styles.argText} numberOfLines={1}>{rowSummary}</Text>
+                    <Text style={styles.chevron}>›</Text>
+                </Pressable>
+                <ShimmerHighlight active={isRunning} />
+            </View>
 
             <BottomSheet
                 visible={showSheet}
@@ -569,6 +573,9 @@ const thoughtStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+    rowWrap: {
+        overflow: "hidden",
+    },
     row: {
         flexDirection: "row",
         alignItems: "center",

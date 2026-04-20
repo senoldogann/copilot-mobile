@@ -1,162 +1,9 @@
 // Ayarlar ekranı — GitHub Copilot mobil stili model seçimi, akıl yürütme eforu, bağlantı bilgileri
 
 import React from "react";
-import { View, Text, Pressable, ScrollView, StyleSheet, Switch } from "react-native";
-import { useSessionStore, deriveAvailableReasoningEfforts } from "../src/stores/session-store";
+import { View, Text, ScrollView, StyleSheet } from "react-native";
 import { useConnectionStore } from "../src/stores/connection-store";
-import { listModels, updateSettings } from "../src/services/bridge";
 import { colors, spacing, fontSize as fs, borderRadius } from "../src/theme/colors";
-import type { ReasoningEffortLevel } from "@copilot-mobile/shared";
-
-// Readable labels for reasoning effort levels
-const effortLabels: Record<ReasoningEffortLevel, string> = {
-    low: "Low",
-    medium: "Medium",
-    high: "High",
-    xhigh: "Extra High",
-};
-
-function effortLabel(level: ReasoningEffortLevel): string {
-    return effortLabels[level];
-}
-
-function ReasoningEffortPicker() {
-    const current = useSessionStore((s) => s.reasoningEffort);
-    const setEffort = useSessionStore((s) => s.setReasoningEffort);
-    const models = useSessionStore((s) => s.models);
-    const selectedModelId = useSessionStore((s) => s.selectedModel);
-
-    const selectedModel = models.find((m) => m.id === selectedModelId);
-    const { options, supported, listKnown } = deriveAvailableReasoningEfforts(selectedModel);
-
-    // Hide picker if model does not support effort parameter.
-    if (!supported) {
-        return null;
-    }
-
-    // Support exists but host did not report level list — show picker disabled.
-    if (!listKnown) {
-        return (
-            <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Reasoning Effort</Text>
-                <Text style={styles.emptyText}>
-                    This model supports reasoning effort but the host did not report available levels.
-                    {current !== null ? `\nCurrent: ${current}` : ""}
-                </Text>
-            </View>
-        );
-    }
-
-    return (
-        <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Reasoning Effort</Text>
-            <View style={styles.segmentedControl}>
-                {options.map((level) => (
-                    <Pressable
-                        key={level}
-                        style={[
-                            styles.segment,
-                            current === level && styles.segmentActive,
-                        ]}
-                        onPress={() => setEffort(level)}
-                    >
-                        <Text
-                            style={[
-                                styles.segmentText,
-                                current === level && styles.segmentTextActive,
-                            ]}
-                        >
-                            {effortLabel(level)}
-                        </Text>
-                    </Pressable>
-                ))}
-            </View>
-        </View>
-    );
-}
-
-function formatContextWindow(tokens: number | undefined): string | null {
-    if (tokens === undefined || tokens <= 0) return null;
-    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(0)}M ctx`;
-    if (tokens >= 1_000) return `${(tokens / 1_000).toFixed(0)}K ctx`;
-    return `${tokens} ctx`;
-}
-
-function ModelPicker() {
-    const models = useSessionStore((s) => s.models);
-    const selected = useSessionStore((s) => s.selectedModel);
-    const setModel = useSessionStore((s) => s.setSelectedModel);
-
-    return (
-        <View style={styles.section}>
-            <View style={styles.sectionHeader}>
-                <Text style={styles.sectionTitle}>Model</Text>
-                <Pressable onPress={() => listModels()}>
-                    <Text style={styles.refreshText}>Refresh</Text>
-                </Pressable>
-            </View>
-            {models.length === 0 ? (
-                <Text style={styles.emptyText}>Could not load model list</Text>
-            ) : (
-                models.map((model) => {
-                    const isDisabled = model.policyState === "disabled";
-                    const isSelected = selected === model.id;
-                    const badges: Array<string> = [];
-
-                    if (model.supportsVision === true) badges.push("👁 Vision");
-                    const ctxLabel = formatContextWindow(model.contextWindowTokens);
-                    if (ctxLabel !== null) badges.push(ctxLabel);
-                    if (model.billingMultiplier !== undefined && model.billingMultiplier !== 1) {
-                        badges.push(`${model.billingMultiplier}× cost`);
-                    }
-
-                    return (
-                        <Pressable
-                            key={model.id}
-                            style={[
-                                styles.modelItem,
-                                isSelected && styles.modelItemActive,
-                                isDisabled && styles.modelItemDisabled,
-                            ]}
-                            onPress={() => {
-                                if (!isDisabled) setModel(model.id);
-                            }}
-                            disabled={isDisabled}
-                        >
-                            <View style={styles.modelHeader}>
-                                <Text
-                                    style={[
-                                        styles.modelName,
-                                        isSelected && styles.modelNameActive,
-                                        isDisabled && styles.modelNameDisabled,
-                                    ]}
-                                >
-                                    {model.name}
-                                </Text>
-                                {isDisabled && (
-                                    <View style={styles.policyBadge}>
-                                        <Text style={styles.policyBadgeText}>Disabled</Text>
-                                    </View>
-                                )}
-                            </View>
-                            <Text style={[
-                                styles.modelProvider,
-                                isDisabled && styles.modelProviderDisabled,
-                            ]}>
-                                {model.provider}
-                            </Text>
-                            {badges.length > 0 && (
-                                <Text style={styles.modelMeta}>
-                                    {badges.join(" · ")}
-                                </Text>
-                            )}
-                        </Pressable>
-                    );
-                })
-            )}
-        </View>
-    );
-}
 
 function ConnectionInfo() {
     const serverUrl = useConnectionStore((s) => s.serverUrl);
@@ -189,55 +36,12 @@ function ConnectionInfo() {
 }
 
 function ApprovalSettings() {
-    const autoApproveReads = useSessionStore((s) => s.autoApproveReads);
-    const setAutoApproveReads = useSessionStore((s) => s.setAutoApproveReads);
-    const readApprovalsConfigurable = useSessionStore(
-        (s) => s.bridgeSettings.readApprovalsConfigurable
-    );
-
-    // Do not show toggle if bridge does not support read approval configuration.
-    if (!readApprovalsConfigurable) {
-        return null;
-    }
-
-    return (
-        <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Default Approvals</Text>
-            <View style={styles.toggleCard}>
-                <View style={styles.toggleTextGroup}>
-                    <Text style={styles.toggleTitle}>Auto-approve read permissions</Text>
-                    <Text style={styles.toggleDescription}>
-                        Applies to the Default approval level. Read-only file access is approved without interrupting the session.
-                    </Text>
-                </View>
-                <Switch
-                    value={autoApproveReads}
-                    onValueChange={(value) => {
-                        setAutoApproveReads(value);
-                        void updateSettings({ autoApproveReads: value });
-                    }}
-                    trackColor={{ false: colors.bgOverlay, true: colors.accent }}
-                    thumbColor={colors.textOnAccent}
-                />
-            </View>
-            <View style={[styles.toggleCard, { marginTop: 8, alignItems: "flex-start" }]}>
-                <View style={styles.toggleTextGroup}>
-                    <Text style={styles.toggleTitle}>Session permission levels</Text>
-                    <Text style={styles.toggleDescription}>
-                        Choose Default, Bypass, or Autopilot from the composer. Those levels are session controls, not global settings.
-                    </Text>
-                </View>
-            </View>
-        </View>
-    );
+    return null;
 }
 
 export default function SettingsScreen() {
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-            <ModelPicker />
-            <ReasoningEffortPicker />
-            <ApprovalSettings />
             <ConnectionInfo />
 
             <View style={styles.footer}>

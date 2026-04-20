@@ -1,49 +1,66 @@
-// Aktivite göstergesi — agent/asistan çalışırken turuncu titreyen noktalar
+// Aktivite göstergesi — her zaman altta görünen 3 nokta, aktifken daha canlı
 
 import React, { useEffect, useRef } from "react";
-import { View, Animated, StyleSheet } from "react-native";
-import { colors, spacing } from "../theme/colors";
+import { View, Text, Animated, StyleSheet } from "react-native";
+import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = {
     active: boolean;
+    intent?: string | null;
 };
 
-function Dot({ delay }: { delay: number }) {
-    const opacity = useRef(new Animated.Value(0.3)).current;
+// Her nokta bağımsız opaklık + dikey sıçrama animasyonu
+function Dot({ delay, active }: { delay: number; active: boolean }) {
+    const anim = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
-        const animation = Animated.loop(
+        const duration = active ? 380 : 900;
+        const loop = Animated.loop(
             Animated.sequence([
-                Animated.timing(opacity, {
+                Animated.timing(anim, {
                     toValue: 1,
-                    duration: 400,
+                    duration,
                     delay,
                     useNativeDriver: true,
                 }),
-                Animated.timing(opacity, {
-                    toValue: 0.3,
-                    duration: 400,
+                Animated.timing(anim, {
+                    toValue: 0,
+                    duration,
                     useNativeDriver: true,
                 }),
             ])
         );
-        animation.start();
-        return () => animation.stop();
-    }, [opacity, delay]);
+        loop.start();
+        return () => loop.stop();
+    }, [anim, delay, active]);
 
-    return <Animated.View style={[styles.dot, { opacity }]} />;
-}
-
-export function ActivityDots({ active }: Props) {
-    if (!active) {
-        return null;
-    }
+    const opacity = anim.interpolate({
+        inputRange: [0, 1],
+        outputRange: active ? [0.35, 1.0] : [0.06, 0.18],
+    });
+    const translateY = anim.interpolate({
+        inputRange: [0, 0.5, 1],
+        outputRange: active ? [0, -4, 0] : [0, 0, 0],
+    });
 
     return (
+        <Animated.View
+            style={[styles.dot, { opacity, transform: [{ translateY }] }]}
+        />
+    );
+}
+
+export function ActivityDots({ active, intent }: Props) {
+    return (
         <View style={styles.container}>
-            <Dot delay={0} />
-            <Dot delay={150} />
-            <Dot delay={300} />
+            <View style={styles.dotsRow}>
+                <Dot delay={0} active={active} />
+                <Dot delay={160} active={active} />
+                <Dot delay={320} active={active} />
+            </View>
+            {active && intent !== undefined && intent !== null && intent.length > 0 && (
+                <Text style={styles.intent} numberOfLines={1}>{intent}</Text>
+            )}
         </View>
     );
 }
@@ -52,14 +69,24 @@ const styles = StyleSheet.create({
     container: {
         flexDirection: "row",
         alignItems: "center",
-        gap: spacing.xs,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: spacing.xs,
+        gap: spacing.sm,
+        paddingHorizontal: spacing.lg,
+        paddingVertical: 10,
+    },
+    dotsRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
     },
     dot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
+        width: 5,
+        height: 5,
+        borderRadius: 2.5,
         backgroundColor: colors.accent,
+    },
+    intent: {
+        fontSize: fontSize.xs,
+        color: colors.textTertiary,
+        flexShrink: 1,
     },
 });

@@ -11,13 +11,17 @@ import {
     Modal,
     Image,
     ScrollView,
+    Alert,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useSessionStore, deriveAvailableReasoningEfforts } from "../stores/session-store";
+import { useWorkspaceStore } from "../stores/workspace-store";
+import type { WorkspaceTreeNode } from "@copilot-mobile/shared";
 import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
 import type { AgentMode, ModelInfo, PermissionLevel, ReasoningEffortLevel } from "@copilot-mobile/shared";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { updatePermissionLevel, updateSessionMode } from "../services/bridge";
+import { startVoiceDictation, type DictationHandle } from "../services/voice-dictation";
 import {
     ProviderIcon,
     detectProvider,
@@ -377,6 +381,57 @@ const permissionLevelConfig: Record<PermissionLevel, {
 
 // --- Main ChatInput component ---
 
+// Statik slash komutları.
+const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = [
+    { command: "/clear", description: "Clear conversation" },
+    { command: "/help", description: "Show help" },
+    { command: "/explain", description: "Explain selected code" },
+    { command: "/fix", description: "Suggest a fix" },
+    { command: "/tests", description: "Generate tests" },
+    { command: "/new", description: "Start a new session" },
+    { command: "/doc", description: "Add documentation" },
+];
+
+type AutocompleteToken =
+    | { kind: "file"; query: string; start: number; end: number }
+    | { kind: "slash"; query: string; start: number; end: number }
+    | null;
+
+// İmleç konumundan geriye doğru @file veya /command tokeni tespit et.
+function detectAutocompleteToken(text: string, cursor: number): AutocompleteToken {
+    if (cursor <= 0) return null;
+    let i = cursor - 1;
+    while (i >= 0) {
+        const ch = text[i];
+        if (ch === undefined) break;
+        if (ch === " " || ch === "\n" || ch === "\t") return null;
+        if (ch === "@") {
+            // @ başlangıcı yalnızca satır/ kelime başında kabul et.
+            const prev = i > 0 ? text[i - 1] : undefined;
+            if (prev !== undefined && prev !== " " && prev !== "\n" && prev !== "\t") return null;
+            return { kind: "file", query: text.slice(i + 1, cursor), start: i, end: cursor };
+        }
+        if (ch === "/") {
+            const prev = i > 0 ? text[i - 1] : undefined;
+            if (prev !== undefined && prev !== " " && prev !== "\n" && prev !== "\t") return null;
+            return { kind: "slash", query: text.slice(i + 1, cursor), start: i, end: cursor };
+        }
+        i -= 1;
+    }
+    return null;
+}
+
+// Workspace ağacından tüm dosya yollarını çıkar.
+function collectFilePaths(node: WorkspaceTreeNode | null, out: Array<string>): void {
+    if (node === null) return;
+    if (node.type === "file") {
+        out.push(node.path);
+    }
+    if (node.children !== undefined) {
+        for (const child of node.children) collectFilePaths(child, out);
+    }
+}
+
 export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const [input, setInput] = useState("");
     const [isFocused, setIsFocused] = useState(false);
@@ -384,6 +439,9 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const [showModelPicker, setShowModelPicker] = useState(false);
     const [showAgentPicker, setShowAgentPicker] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
+    const [voiceHandle, setVoiceHandle] = useState<DictationHandle | null>(null);
+    const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+    const workspaceTree = useWorkspaceStore((s) => s.tree);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const agentMode = useSessionStore((s) => s.agentMode);
     const setAgentMode = useSessionStore((s) => s.setAgentMode);
@@ -418,6 +476,33 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
             handleSend("send");
         }
     }, [isTyping, handleSend]);
+
+    const handleToggleVoice = useCallback(async () => {
+        if (voiceHandle !== null) {
+            voiceHandle.stop();
+            setVoiceHandle(null);
+            return;
+        }
+        try {
+            const handle = await startVoiceDictation(
+                (transcript) => {
+                    setInput((prev) => (prev.length === 0 ? transcript : `${prev} ${transcript}`));
+                    setVoiceHandle(null);
+                },
+                (message) => {
+                    Alert.alert("Voice error", message);
+                    setVoiceHandle(null);
+                }
+            );
+            setVoiceHandle(handle);
+        } catch (err) {
+            const message = err instanceof Error ? err.message : String(err);
+            Alert.alert(
+                "Voice unavailable",
+                `Voice dictation requires a development build with expo-speech-recognition.\n\n${message}`
+            );
+        }
+    }, [voiceHandle]);
 
     const handlePickImage = useCallback(async () => {
         const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -592,10 +677,16 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
 
                 <View style={toolbarStyles.spacer} />
 
-                {/* Mic — visual placeholder */}
-                <View style={[toolbarStyles.toolBtn, toolbarStyles.toolBtnDimmed]}>
-                    <MicIcon size={16} color={colors.textSecondary} />
-                </View>
+                {/* Mic — sesli dikte */}
+                <Pressable
+                    style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
+                    onPress={handleToggleVoice}
+                    disabled={disabled}
+                    hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                    accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
+                >
+                    <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
+                </Pressable>
 
                 {/* Send / Abort / Queue button */}
                 {isTyping && canSend ? (
@@ -1011,6 +1102,9 @@ const toolbarStyles = StyleSheet.create({
     toolBtnDimmed: {
         opacity: 0.3,
     },
+    toolBtnActive: {
+        backgroundColor: colors.accentMuted,
+    },
     attachIcon: {
         fontSize: 16,
     },
@@ -1026,7 +1120,7 @@ const toolbarStyles = StyleSheet.create({
         borderRadius: borderRadius.full,
         borderWidth: 1,
         borderColor: colors.border,
-        backgroundColor: colors.bgElevated,
+        backgroundColor: "transparent",
         gap: 4,
         maxWidth: 180,
     },

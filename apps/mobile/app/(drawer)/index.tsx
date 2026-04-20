@@ -215,6 +215,7 @@ export default function ChatScreen() {
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const isSessionLoading = useSessionStore((s) => s.isSessionLoading);
     const isTyping = useSessionStore((s) => s.isAssistantTyping);
+    const chatCurrentIntent = useSessionStore((s) => s.currentIntent);
     const models = useSessionStore((s) => s.models);
     const selectedModel = useSessionStore((s) => s.selectedModel);
     const reasoningEffort = useSessionStore((s) => s.reasoningEffort);
@@ -495,6 +496,9 @@ export default function ChatScreen() {
                             onScroll={handleScroll}
                             scrollEventThrottle={80}
                             maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
+                            ListFooterComponent={
+                                <ActivityDots active={isTyping} intent={chatCurrentIntent} />
+                            }
                         />
                         {showScrollToBottom && (
                             <Pressable
