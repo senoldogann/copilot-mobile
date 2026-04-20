@@ -395,15 +395,49 @@ const permissionLevelConfig: Record<PermissionLevel, {
 
 // --- Main ChatInput component ---
 
-// Statik slash komutları.
-const SLASH_COMMANDS: ReadonlyArray<{ command: string; description: string }> = [
-    { command: "/clear", description: "Clear conversation" },
-    { command: "/help", description: "Show help" },
-    { command: "/explain", description: "Explain selected code" },
-    { command: "/fix", description: "Suggest a fix" },
-    { command: "/tests", description: "Generate tests" },
-    { command: "/new", description: "Start a new session" },
-    { command: "/doc", description: "Add documentation" },
+// Model bağlam penceresi boyutunu insan okunabilir formata çevir.
+function formatCtxWindow(tokens: number): string {
+    if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
+    if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
+    return String(tokens);
+}
+
+// Statik slash komutları — VS Code Copilot chat palet komutlarıyla uyumlu.
+type SlashCommand = { command: string; description: string; category: string };
+
+const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
+    // Sohbet yönetimi
+    { command: "/clear",      description: "Start new chat, archive current",         category: "chat" },
+    { command: "/compact",    description: "Compact conversation to save context",     category: "chat" },
+    { command: "/fork",       description: "Fork conversation into a new session",     category: "chat" },
+    { command: "/rename",     description: "Rename this chat",                         category: "chat" },
+    // Kod eylemleri
+    { command: "/explain",    description: "Explain selected code",                    category: "code" },
+    { command: "/fix",        description: "Suggest a fix for the current issue",      category: "code" },
+    { command: "/doc",        description: "Add documentation to code",                category: "code" },
+    { command: "/new",        description: "Start a new session",                      category: "code" },
+    { command: "/tests",      description: "Generate tests",                           category: "code" },
+    { command: "/newNotebook",description: "Create a new notebook",                    category: "code" },
+    { command: "/setupTests", description: "Set up the test framework",                category: "code" },
+    // Copilot yapılandırma
+    { command: "/agents",     description: "Configure custom agents",                  category: "config" },
+    { command: "/debug",      description: "Show chat debug view",                     category: "config" },
+    { command: "/hooks",      description: "Configure hooks",                          category: "config" },
+    { command: "/instructions",description: "Configure instructions",                  category: "config" },
+    { command: "/models",     description: "Open the model picker",                    category: "config" },
+    { command: "/plugins",    description: "Manage plugins",                           category: "config" },
+    { command: "/prompts",    description: "Configure prompt files",                   category: "config" },
+    { command: "/skills",     description: "Configure skills",                         category: "config" },
+    { command: "/tools",      description: "Configure tools",                          category: "config" },
+    // Oturum izinleri
+    { command: "/autoApprove",      description: "Set permissions to bypass approvals", category: "session" },
+    { command: "/autopilot",        description: "Set permissions to autopilot mode",   category: "session" },
+    { command: "/yolo",             description: "Set permissions to bypass approvals", category: "session" },
+    { command: "/disableAutoApprove",description: "Set permissions back to default",    category: "session" },
+    { command: "/disableYolo",      description: "Set permissions back to default",     category: "session" },
+    { command: "/exitAutopilot",    description: "Set permissions back to default",     category: "session" },
+    // Yardım
+    { command: "/help",       description: "Show help and available commands",         category: "help" },
 ];
 
 type AutocompleteToken =
@@ -469,6 +503,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const setSelectedModel = useSessionStore((s) => s.setSelectedModel);
     const reasoningEffort = useSessionStore((s) => s.reasoningEffort);
     const setReasoningEffort = useSessionStore((s) => s.setReasoningEffort);
+    const skills = useSessionStore((s) => s.skills);
 
     const currentModel = models.find((m) => m.id === selectedModel);
     const effortInfo = deriveAvailableReasoningEfforts(currentModel);
@@ -533,7 +568,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
         return out;
     }, [workspaceTree]);
 
-    // Token tipine göre filtrelenmiş öneriler.
+    // Token tipine göre filtrelenmiş öneriler (slash + skill komutları dahil).
     const suggestions = useMemo<ReadonlyArray<{ label: string; value: string; hint?: string }>>(() => {
         if (activeToken === null) return [];
         const query = activeToken.query.toLowerCase();
@@ -543,11 +578,21 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 .slice(0, 8)
                 .map((p) => ({ label: p, value: `@${p} ` }));
         }
-        return SLASH_COMMANDS
+        // Slash: önce statik komutlar, sonra skill türetilmiş komutlar.
+        const staticMatches = SLASH_COMMANDS
             .filter((c) => c.command.slice(1).toLowerCase().startsWith(query))
-            .slice(0, 8)
             .map((c) => ({ label: c.command, value: `${c.command} `, hint: c.description }));
-    }, [activeToken, filePaths]);
+
+        const skillMatches = skills
+            .filter((s) => s.name.toLowerCase().startsWith(query))
+            .map((s) => ({
+                label: `/${s.name}`,
+                value: `/${s.name} `,
+                hint: s.description.length > 0 ? s.description : "Agent skill",
+            }));
+
+        return [...staticMatches, ...skillMatches].slice(0, 10);
+    }, [activeToken, filePaths, skills]);
 
     // Seçilen öneriyi input'a uygula: tokeni değiştirip imleci sona taşı.
     const applySuggestion = useCallback((value: string) => {
@@ -669,6 +714,24 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
             {/* Input card — text area + toolbar in one unified rounded container */}
             {suggestions.length > 0 && (
                 <View style={autocompleteStyles.popover}>
+                    {/* Slash modunda model ve bağlam penceresi bilgisi */}
+                    {activeToken?.kind === "slash" && currentModel !== undefined && (
+                        <View style={autocompleteStyles.ctxHeader}>
+                            <ProviderIcon
+                                provider={detectProvider(currentModel.id)}
+                                size={11}
+                                color={colors.textTertiary}
+                            />
+                            <Text style={autocompleteStyles.ctxModelName} numberOfLines={1}>
+                                {currentModel.name}
+                            </Text>
+                            {currentModel.contextWindowTokens !== undefined && (
+                                <Text style={autocompleteStyles.ctxSize}>
+                                    · {formatCtxWindow(currentModel.contextWindowTokens)} ctx
+                                </Text>
+                            )}
+                        </View>
+                    )}
                     {suggestions.map((s) => (
                         <Pressable
                             key={s.value}
@@ -860,45 +923,43 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                             >
                                 <View style={dropdownStyles.effortItemLeft}>
                                     <View style={dropdownStyles.checkmarkSlot}>
-                                        {isSelected && <CheckIcon size={13} color={cfg.color} />}
+                                        {isSelected && <CheckIcon size={13} color={colors.textPrimary} />}
                                     </View>
                                     <View style={{ flex: 1 }}>
                                         <Text style={[
                                             dropdownStyles.effortLabel,
-                                            isSelected && { color: cfg.color, fontWeight: "700" },
+                                            isSelected && { color: colors.textPrimary, fontWeight: "600" },
                                         ]}>
                                             {cfg.label}
                                         </Text>
                                         <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
                                     </View>
                                 </View>
-                                <cfg.Icon size={18} color={isSelected ? cfg.color : colors.textTertiary} />
+                                <cfg.Icon size={18} color={isSelected ? colors.textSecondary : colors.textTertiary} />
                             </Pressable>
                         );
                     })}
                 </View>
-                {supportsVision && (
-                    <>
-                        <View style={dropdownStyles.sectionDivider} />
-                        <Text style={dropdownStyles.sectionLabel}>Attach</Text>
-                        <Pressable
-                            style={dropdownStyles.effortItem}
-                            onPress={() => {
-                                setShowPlusMenu(false);
-                                void handlePickImage();
-                            }}
-                        >
-                            <View style={dropdownStyles.effortItemLeft}>
-                                <View style={dropdownStyles.checkmarkSlot} />
-                                <View style={{ flex: 1 }}>
-                                    <Text style={dropdownStyles.effortLabel}>Attach Image</Text>
-                                    <Text style={dropdownStyles.effortDesc}>Pick a photo from your library</Text>
-                                </View>
+                <>
+                    <View style={dropdownStyles.sectionDivider} />
+                    <Text style={dropdownStyles.sectionLabel}>Attach</Text>
+                    <Pressable
+                        style={dropdownStyles.effortItem}
+                        onPress={() => {
+                            setShowPlusMenu(false);
+                            void handlePickImage();
+                        }}
+                    >
+                        <View style={dropdownStyles.effortItemLeft}>
+                            <View style={dropdownStyles.checkmarkSlot} />
+                            <View style={{ flex: 1 }}>
+                                <Text style={dropdownStyles.effortLabel}>Attach Image</Text>
+                                <Text style={dropdownStyles.effortDesc}>Pick a photo from your library</Text>
                             </View>
-                            <PaperclipIcon size={18} color={colors.textTertiary} />
-                        </Pressable>
-                    </>
-                )}
+                        </View>
+                        <PaperclipIcon size={18} color={colors.textTertiary} />
+                    </Pressable>
+                </>
             </DropdownModal>
 
             {/* Permission level picker */}
@@ -1345,6 +1406,26 @@ const autocompleteStyles = StyleSheet.create({
         borderRadius: borderRadius.md,
         marginBottom: 6,
         overflow: "hidden",
+    },
+    ctxHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 7,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: colors.border,
+        backgroundColor: colors.bgSecondary,
+    },
+    ctxModelName: {
+        fontSize: fs.xs,
+        color: colors.textTertiary,
+        fontWeight: "500",
+        flexShrink: 1,
+    },
+    ctxSize: {
+        fontSize: fs.xs,
+        color: colors.textTertiary,
     },
     item: {
         paddingHorizontal: spacing.md,
