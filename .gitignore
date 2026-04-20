@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.expo/
+.cursor/
+.DS_Store
+*.tsbuildinfo
+.env
+.env.local
+*.pem
+*.key
