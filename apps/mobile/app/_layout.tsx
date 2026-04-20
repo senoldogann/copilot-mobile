@@ -4,10 +4,13 @@ import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import React from "react";
+import React, { useEffect } from "react";
 import { colors } from "../src/theme/colors";
+import { initializeAppRuntime } from "../src/services/app-runtime";
 
 export default function RootLayout() {
+    useEffect(() => initializeAppRuntime(), []);
+
     return (
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaProvider>

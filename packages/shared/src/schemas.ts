@@ -418,7 +418,7 @@ const workspaceGitSummarySchema = baseBridgeMessageSchema.extend({
         sessionId: z.string().min(1),
         context: sessionContextSchema,
         rootPath: z.string().min(1),
-        gitRoot: z.string().min(1),
+        gitRoot: z.string().min(1).nullable(),
         repository: z.string().optional(),
         branch: z.string().optional(),
         uncommittedChanges: z.array(gitFileChangeSchema),

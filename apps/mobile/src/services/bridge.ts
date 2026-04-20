@@ -355,6 +355,13 @@ export async function pushWorkspace(sessionId: string): Promise<void> {
     }
 }
 
+export function resumeBridgeConnection(): boolean {
+    if (client === null) {
+        return false;
+    }
+    return client.resume();
+}
+
 // Disconnect
 export function disconnect(): void {
     if (client !== null) {

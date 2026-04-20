@@ -361,5 +361,19 @@ export function createWSClient(config: WSClientConfig) {
             return state;
         },
 
+        resume(): boolean {
+            if (jwt === null || serverUrl === null) {
+                return false;
+            }
+
+            if (state === "authenticated" || state === "connected" || state === "connecting") {
+                return true;
+            }
+
+            reconnectAttempt = 0;
+            connectWithJWT(jwt);
+            return true;
+        },
+
     };
 }

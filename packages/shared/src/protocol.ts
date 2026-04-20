@@ -132,7 +132,7 @@ export type WorkspaceGitSummaryMessage = BaseBridgeMessage & {
         sessionId: string;
         context: SessionContext;
         rootPath: string;
-        gitRoot: string;
+        gitRoot: string | null;
         repository?: string;
         branch?: string;
         uncommittedChanges: ReadonlyArray<GitFileChange>;

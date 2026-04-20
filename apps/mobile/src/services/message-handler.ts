@@ -6,6 +6,11 @@ import type { ChatItem } from "../stores/session-store";
 import { useSessionStore } from "../stores/session-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
+import {
+    armBackgroundCompletion,
+    clearBackgroundCompletion,
+    notifyIfBackgroundCompletion,
+} from "./app-runtime";
 
 function collectPermissionDetails(metadata: Record<string, unknown>): Array<string> {
     const details: Array<string> = [];
@@ -254,6 +259,7 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setSessionLoading(false);
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.upsertSession(message.payload.session);
+            clearBackgroundCompletion(message.payload.session.id);
 
             // Link active conversation to this session.
             const chatHistoryStore = useChatHistoryStore.getState();
@@ -271,10 +277,12 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setSessionLoading(false);
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.upsertSession(message.payload.session);
+            clearBackgroundCompletion(message.payload.session.id);
             break;
         }
 
         case "session.idle": {
+            notifyIfBackgroundCompletion(message.payload.sessionId);
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.setAssistantTyping(false);
             sessionStore.finalizeThinking();
@@ -312,6 +320,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.message_delta": {
             if (!isActiveSession(message.payload.sessionId)) break;
+            armBackgroundCompletion(message.payload.sessionId);
             sessionStore.setAssistantTyping(true);
             sessionStore.appendAssistantDelta(message.payload.delta, message.payload.index);
             break;
@@ -326,6 +335,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.reasoning_delta": {
             if (!isActiveSession(message.payload.sessionId)) break;
+            armBackgroundCompletion(message.payload.sessionId);
             sessionStore.appendThinkingDelta(message.payload.delta, message.payload.index);
             break;
         }
@@ -401,6 +411,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "error": {
+            clearBackgroundCompletion();
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
             // Hata durumunda açık dialog'ları temizle — ekranda takılı kalmasın
@@ -445,6 +456,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.error": {
+            clearBackgroundCompletion(message.payload.sessionId);
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
             sessionStore.setPermissionPrompt(null);

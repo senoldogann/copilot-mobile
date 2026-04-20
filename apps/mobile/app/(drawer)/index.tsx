@@ -46,6 +46,7 @@ import {
 function ChatHeader() {
     const navigation = useNavigation<DrawerNavigationProp<ParamListBase>>("/(drawer)");
     const isTyping = useSessionStore((s) => s.isAssistantTyping);
+    const isSessionLoading = useSessionStore((s) => s.isSessionLoading);
     const sessions = useSessionStore((s) => s.sessions);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const currentIntent = useSessionStore((s) => s.currentIntent);
@@ -55,7 +56,9 @@ function ChatHeader() {
     const handleCloseWorkspace = React.useCallback(() => setWorkspaceOpen(false), []);
 
     const activeSession = sessions.find((s) => s.id === activeSessionId);
-    const sessionTitle = currentIntent ?? activeSession?.title ?? null;
+    const sessionTitle = currentIntent
+        ?? activeSession?.title
+        ?? (activeSessionId !== null && isSessionLoading ? "Syncing session..." : null);
     const branchName = branch ?? "main";
     const repoName = repository ?? "copilot-mobile";
 

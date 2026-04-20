@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
@@ -405,6 +406,18 @@ async function createWorkspaceFixture(options: { commitCount?: number; deepDepth
     return { root };
 }
 
+async function createPlainWorkspaceFixture(): Promise<{ root: string }> {
+    const fixturesRoot = join(tmpdir(), "copilot-mobile-workspace-fixtures");
+    await mkdir(fixturesRoot, { recursive: true });
+
+    const root = join(fixturesRoot, `plain-${randomUUID()}`);
+    await mkdir(join(root, "src"), { recursive: true });
+    await writeFile(join(root, "README.md"), "plain workspace\n");
+    await writeFile(join(root, "src", "index.ts"), "export const value = 1;\n");
+
+    return { root };
+}
+
 describe("bridge reconnect and auth integration", () => {
     let session: FakeSession;
     let server: ReturnType<typeof createBridgeServer>;
@@ -766,6 +779,55 @@ describe("workspace explorer integration", () => {
         } finally {
             await client.close();
             await cappedServer.shutdown();
+            delete process.env["BRIDGE_PORT"];
+            await rm(fixture.root, { recursive: true, force: true });
+        }
+    });
+
+    it("returns an empty git summary for non-repository workspaces", async () => {
+        const fixture = await createPlainWorkspaceFixture();
+        const plainSession = new FakeSession();
+        plainSession.setContext({
+            cwd: fixture.root,
+        });
+
+        process.env["BRIDGE_PORT"] = String(WORKSPACE_LIMIT_PORT);
+        const plainServer = createBridgeServer(createFakeClient(plainSession));
+        await plainServer.start();
+
+        const token = generatePairingToken();
+        const client = await createWSClient(WORKSPACE_LIMIT_PORT);
+
+        try {
+            client.send(makeClientMessage("auth.pair", { pairingToken: token }));
+            await client.waitForMessage("pairing.success");
+
+            client.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await client.waitForMessage("session.created");
+
+            client.send(makeClientMessage("workspace.git.request", {
+                sessionId: plainSession.id,
+                commitLimit: 5,
+            }));
+            const gitMsg = await client.waitForMessage("workspace.git.summary");
+            if (gitMsg.type !== "workspace.git.summary") {
+                throw new Error("Expected workspace.git.summary");
+            }
+
+            assert.equal(gitMsg.payload.rootPath, fixture.root);
+            assert.equal(gitMsg.payload.gitRoot, null);
+            assert.deepEqual(gitMsg.payload.uncommittedChanges, []);
+            assert.deepEqual(gitMsg.payload.recentCommits, []);
+        } finally {
+            await client.close();
+            await plainServer.shutdown();
             delete process.env["BRIDGE_PORT"];
             await rm(fixture.root, { recursive: true, force: true });
         }

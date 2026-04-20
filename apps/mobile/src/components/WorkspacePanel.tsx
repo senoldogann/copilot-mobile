@@ -86,8 +86,11 @@ function getTreeIcon(type: "file" | "directory" | "symlink"): string {
 
 function WorkspacePanelComponent({ visible, onClose }: Props) {
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
+    const sessions = useSessionStore((s) => s.sessions);
     const connectionState = useConnectionStore((s) => s.state);
     const isConnected = connectionState === "authenticated";
+    const activeSession = sessions.find((session) => session.id === activeSessionId);
+    const activeContext = activeSession?.context;
 
     const workspace = useWorkspaceStore(useShallow((s) => ({
         sessionId: s.sessionId,
@@ -135,7 +138,13 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     }, [visible, activeSessionId, isConnected]);
 
     const refreshWorkspace = useCallback(() => {
-        if (!isConnected || activeSessionId === null) {
+        if (activeSessionId === null) {
+            useWorkspaceStore.getState().setError("Open or resume a session first to inspect the workspace.");
+            return;
+        }
+
+        if (!isConnected) {
+            useWorkspaceStore.getState().setError("Reconnect to the bridge to refresh workspace changes and files.");
             return;
         }
 
@@ -144,14 +153,24 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     }, [activeSessionId, isConnected]);
 
     const handlePull = useCallback(() => {
-        if (activeSessionId === null || !isConnected) {
+        if (activeSessionId === null) {
+            useWorkspaceStore.getState().setError("Open or resume a session first to pull workspace changes.");
+            return;
+        }
+        if (!isConnected) {
+            useWorkspaceStore.getState().setError("Reconnect to the bridge before pulling workspace changes.");
             return;
         }
         void pullWorkspace(activeSessionId);
     }, [activeSessionId, isConnected]);
 
     const handlePush = useCallback(() => {
-        if (activeSessionId === null || !isConnected) {
+        if (activeSessionId === null) {
+            useWorkspaceStore.getState().setError("Open or resume a session first to push workspace changes.");
+            return;
+        }
+        if (!isConnected) {
+            useWorkspaceStore.getState().setError("Reconnect to the bridge before pushing workspace changes.");
             return;
         }
         void pushWorkspace(activeSessionId);
@@ -159,6 +178,17 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
     const hasRepo = workspace.gitRoot !== null;
     const treeRoot = workspace.tree;
+    const rootTreeLoading = workspace.loadingTreePaths["__root__"] === true;
+    const canRefresh = activeSessionId !== null && isConnected;
+    const isInitialGitLoading = isConnected
+        && activeSessionId !== null
+        && workspace.isLoadingGit
+        && workspace.uncommittedChanges.length === 0
+        && workspace.recentCommits.length === 0;
+    const isInitialTreeLoading = isConnected
+        && activeSessionId !== null
+        && treeRoot === null
+        && rootTreeLoading;
 
     const summarySubtitle = useMemo(() => {
         if (workspace.repository !== null && workspace.branch !== null) {
@@ -170,8 +200,17 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         if (workspace.branch !== null) {
             return workspace.branch;
         }
-        return workspace.rootPath ?? "Workspace";
-    }, [workspace.branch, workspace.repository, workspace.rootPath]);
+        if (activeContext?.repository !== undefined && activeContext?.branch !== undefined) {
+            return `${activeContext.repository} · ${activeContext.branch}`;
+        }
+        if (activeContext?.repository !== undefined) {
+            return activeContext.repository;
+        }
+        if (activeContext?.branch !== undefined) {
+            return activeContext.branch;
+        }
+        return workspace.rootPath ?? activeContext?.cwd ?? "Workspace";
+    }, [activeContext?.branch, activeContext?.cwd, activeContext?.repository, workspace.branch, workspace.repository, workspace.rootPath]);
 
     const renderTreeNode = useCallback(
         (node: NonNullable<typeof workspace.tree>, depth: number): React.ReactNode => {
@@ -240,13 +279,17 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     <View style={styles.headerLeft}>
                         <Text style={styles.headerIcon}>⟡</Text>
                         <View style={styles.headerText}>
-                            <Text style={styles.title}>{workspace.repository ?? "Workspace changes"}</Text>
+                            <Text style={styles.title}>{workspace.repository ?? activeContext?.repository ?? "Workspace changes"}</Text>
                             <Text style={styles.subtitle} numberOfLines={1}>
                                 {summarySubtitle}
                             </Text>
                         </View>
                     </View>
-                    <Pressable style={styles.refreshButton} onPress={refreshWorkspace}>
+                    <Pressable
+                        style={[styles.refreshButton, !canRefresh && styles.refreshButtonDisabled]}
+                        onPress={refreshWorkspace}
+                        disabled={!canRefresh}
+                    >
                         <Text style={styles.refreshButtonText}>↻</Text>
                     </Pressable>
                 </View>
@@ -286,8 +329,20 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 </View>
             )}
 
-            <SectionHeader title="Uncommitted changes" count={workspace.uncommittedChanges.length} />
-            {workspace.isLoadingGit && workspace.uncommittedChanges.length === 0 ? (
+            {activeSessionId === null ? (
+                <EmptyState
+                    title="No active session"
+                    text="Open or resume a session first. Workspace changes and files attach to the currently active session."
+                />
+            ) : !isConnected ? (
+                <EmptyState
+                    title="Bridge disconnected"
+                    text="Reconnect to your bridge to load the latest workspace changes and files."
+                />
+            ) : (
+                <>
+                    <SectionHeader title="Uncommitted changes" count={workspace.uncommittedChanges.length} />
+                    {isInitialGitLoading ? (
                 <EmptyState text="Loading changes…" />
             ) : workspace.uncommittedChanges.length === 0 ? (
                 <EmptyState text={hasRepo ? "Working tree clean" : "No git repository connected"} />
@@ -317,9 +372,9 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 </View>
             )}
 
-            <SectionHeader title="Recent commits" count={workspace.recentCommits.length} />
-            {workspace.isLoadingGit && workspace.recentCommits.length === 0 ? (
-                <EmptyState text="Loading commits…" />
+                    <SectionHeader title="Recent commits" count={workspace.recentCommits.length} />
+                    {isInitialGitLoading ? (
+                <EmptyState text="Loading changes…" />
             ) : workspace.recentCommits.length === 0 ? (
                 <EmptyState text={hasRepo ? "No recent commits" : "Recent commits unavailable"} />
             ) : (
@@ -342,6 +397,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     ))}
                 </View>
             )}
+                </>
+            )}
         </View>
     );
 
@@ -354,11 +411,15 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                         <View style={styles.headerText}>
                             <Text style={styles.title}>Files</Text>
                             <Text style={styles.subtitle} numberOfLines={1}>
-                                {workspace.rootPath ?? "Workspace tree"}
+                                {workspace.rootPath ?? activeContext?.cwd ?? "Workspace tree"}
                             </Text>
                         </View>
                     </View>
-                    <Pressable style={styles.refreshButton} onPress={refreshWorkspace}>
+                    <Pressable
+                        style={[styles.refreshButton, !canRefresh && styles.refreshButtonDisabled]}
+                        onPress={refreshWorkspace}
+                        disabled={!canRefresh}
+                    >
                         <Text style={styles.refreshButtonText}>↻</Text>
                     </Pressable>
                 </View>
@@ -368,7 +429,19 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 </View>
             </View>
 
-            {workspace.tree === null ? (
+            {activeSessionId === null ? (
+                <EmptyState
+                    title="No active session"
+                    text="Open or resume a session first. The Files tab mirrors the active session workspace."
+                />
+            ) : !isConnected ? (
+                <EmptyState
+                    title="Bridge disconnected"
+                    text="Reconnect to your bridge to browse the latest workspace tree."
+                />
+            ) : isInitialTreeLoading ? (
+                <EmptyState text="Loading files…" />
+            ) : workspace.tree === null ? (
                 <EmptyState
                     text={isConnected
                         ? "Open a workspace to load files"
@@ -466,9 +539,12 @@ function SectionHeader({ title, count }: { title: string; count: number }) {
     );
 }
 
-function EmptyState({ text }: { text: string }) {
+function EmptyState({ title, text }: { title?: string; text: string }) {
     return (
         <View style={styles.emptyState}>
+            {title !== undefined && (
+                <Text style={styles.emptyStateTitle}>{title}</Text>
+            )}
             <Text style={styles.emptyStateText}>{text}</Text>
         </View>
     );
@@ -656,6 +732,9 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: colors.borderMuted,
     },
+    refreshButtonDisabled: {
+        opacity: 0.45,
+    },
     refreshButtonText: {
         fontSize: fontSize.base,
         color: colors.textSecondary,
@@ -835,6 +914,13 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderColor: colors.borderMuted,
         alignItems: "center",
+        gap: 6,
+    },
+    emptyStateTitle: {
+        fontSize: fontSize.sm,
+        color: colors.textPrimary,
+        fontWeight: "600",
+        textAlign: "center",
     },
     emptyStateText: {
         fontSize: fontSize.sm,

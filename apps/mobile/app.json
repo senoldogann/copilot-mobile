@@ -39,7 +39,13 @@
                     "cameraPermission": "Camera permission is required for QR code scanning"
                 }
             ],
-            "expo-secure-store"
+            "expo-secure-store",
+            [
+                "expo-notifications",
+                {
+                    "color": "#161918"
+                }
+            ]
         ]
     }
 }

@@ -304,7 +304,7 @@ export async function buildWorkspaceGitSummary(
     commitLimit = 10
 ): Promise<{
     rootPath: string;
-    gitRoot: string;
+    gitRoot: string | null;
     repository?: string;
     branch?: string;
     uncommittedChanges: ReadonlyArray<GitFileChange>;
@@ -313,7 +313,20 @@ export async function buildWorkspaceGitSummary(
 }> {
     const normalizedCommitLimit = Math.min(Math.max(1, commitLimit), MAX_WORKSPACE_COMMIT_LIMIT);
     const rootPath = resolve(context.cwd);
-    const gitRoot = resolve(context.gitRoot ?? context.cwd);
+    const gitRootCandidate = resolve(context.gitRoot ?? context.cwd);
+    const topLevelResult = await runGit(gitRootCandidate, ["rev-parse", "--show-toplevel"]);
+    if (!topLevelResult.success || topLevelResult.stdout.trim().length === 0) {
+        return {
+            rootPath,
+            gitRoot: null,
+            repository: context.repository,
+            branch: context.branch,
+            uncommittedChanges: [],
+            recentCommits: [],
+            truncated: false,
+        };
+    }
+    const gitRoot = resolve(topLevelResult.stdout.trim());
 
     const statusResult = await runGit(gitRoot, ["status", "--porcelain=v1", "--untracked-files=all", "--renames"]);
     if (!statusResult.success) {
