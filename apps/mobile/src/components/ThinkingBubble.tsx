@@ -120,7 +120,7 @@ const styles = StyleSheet.create({
     },
     label: {
         fontSize: fontSize.md,
-        color: colors.textSecondary,
+        color: colors.textTertiary,
         fontWeight: "400",
     },
     charCount: {
@@ -135,7 +135,7 @@ const styles = StyleSheet.create({
     content: {
         fontSize: fontSize.md,
         lineHeight: 20,
-        color: colors.textSecondary,
+        color: colors.textTertiary,
     },
     cursor: {
         color: colors.accent,

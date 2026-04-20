@@ -274,11 +274,15 @@ async function applySDKSessionState(
     await syncCustomAgent(sdkSession, stateRef.agentMode);
     const runtimeMode = deriveRuntimeMode(stateRef);
     const result = await sdkSession.rpc.mode.set({ mode: runtimeMode });
+    const resolvedMode =
+        result !== null && typeof result === "object" && "mode" in result
+            ? result.mode
+            : (await sdkSession.rpc.mode.get()).mode;
 
     return {
         agentMode: stateRef.agentMode,
         permissionLevel: stateRef.permissionLevel,
-        runtimeMode: result.mode,
+        runtimeMode: resolvedMode,
     };
 }
 

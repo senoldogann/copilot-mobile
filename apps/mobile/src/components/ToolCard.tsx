@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
     },
     label: {
         fontSize: fontSize.sm,
-        color: colors.textSecondary,
+        color: colors.textTertiary,
         fontWeight: "500",
         flexShrink: 0,
         minWidth: 36,

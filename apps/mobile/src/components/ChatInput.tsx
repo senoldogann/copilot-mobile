@@ -19,6 +19,17 @@ import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
 import type { AgentMode, ModelInfo, PermissionLevel, ReasoningEffortLevel } from "@copilot-mobile/shared";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { updatePermissionLevel, updateSessionMode } from "../services/bridge";
+import {
+    ProviderIcon,
+    detectProvider,
+    PaperclipIcon,
+    MicIcon,
+    ArrowUpIcon,
+    ChevronDownIcon,
+    CheckIcon,
+    CloseIcon,
+    SlidersIcon,
+} from "./ProviderIcon";
 
 // --- Types ---
 
@@ -77,10 +88,16 @@ function DropdownModal({
                     <View style={dropdownStyles.header}>
                         <Text style={dropdownStyles.title}>{title}</Text>
                         <Pressable onPress={onClose} hitSlop={8}>
-                            <Feather name="x" size={16} color={colors.textTertiary} />
+                            <CloseIcon size={18} color={colors.textTertiary} />
                         </Pressable>
                     </View>
-                    {children}
+                    <ScrollView
+                        style={dropdownStyles.scroll}
+                        contentContainerStyle={dropdownStyles.scrollContent}
+                        showsVerticalScrollIndicator={false}
+                    >
+                        {children}
+                    </ScrollView>
                 </Pressable>
             </Pressable>
         </Modal>
@@ -199,7 +216,6 @@ function EffortSelectorContent({
 }) {
     return (
         <View style={dropdownStyles.effortList}>
-            <Text style={dropdownStyles.sectionLabel}>Thinking Effort</Text>
             {options.map((level) => {
                 const isSelected = current === level;
                 const isDefault = defaultEffort === level;
@@ -551,7 +567,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     accessibilityLabel="Fotoğraf ekle"
                 >
-                    <Feather name="paperclip" size={16} color={colors.textSecondary} />
+                    <PaperclipIcon size={16} color={colors.textSecondary} />
                 </Pressable>
 
                 {/* Model selector pill */}
@@ -562,11 +578,11 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
                     accessibilityLabel="Model seç"
                 >
-                    <Feather name="cpu" size={12} color={colors.copilotPurple} />
+                    <ProviderIcon provider={detectProvider(currentModel?.id ?? selectedModel)} size={13} color={colors.textPrimary} />
                     <Text style={toolbarStyles.modelText} numberOfLines={1}>
                         {modelDisplayName}{effortSuffix}
                     </Text>
-                    <Feather name="chevron-down" size={10} color={colors.textTertiary} />
+                    <ChevronDownIcon size={11} color={colors.textTertiary} />
                 </Pressable>
 
                 {/* Session settings: agent + permission + effort */}
@@ -577,18 +593,14 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                     accessibilityLabel="Session ayarları"
                 >
-                    <Feather
-                        name={agentModeConfig[agentMode].iconName}
-                        size={15}
-                        color={agentModeConfig[agentMode].color}
-                    />
+                    <SlidersIcon size={16} color={colors.textSecondary} />
                 </Pressable>
 
                 <View style={toolbarStyles.spacer} />
 
                 {/* Mic — visual placeholder */}
                 <View style={[toolbarStyles.toolBtn, toolbarStyles.toolBtnDimmed]}>
-                    <Feather name="mic" size={16} color={colors.textSecondary} />
+                    <MicIcon size={16} color={colors.textSecondary} />
                 </View>
 
                 {/* Send / Abort / Queue button */}
@@ -600,14 +612,14 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                             accessibilityLabel="Mesaj gönder"
                         >
-                            <Feather name="arrow-up" size={16} color={colors.textOnAccent} />
+                            <ArrowUpIcon size={16} color={colors.textOnAccent} />
                         </Pressable>
                         <Pressable
                             style={toolbarStyles.sendMenuButton}
                             onPress={() => setShowSendMenu(true)}
                             hitSlop={4}
                         >
-                    <Feather name="chevron-down" size={12} color={colors.textPrimary} />
+                            <ChevronDownIcon size={12} color={colors.textPrimary} />
                         </Pressable>
                     </View>
                 ) : isTyping ? (
@@ -626,11 +638,11 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         accessibilityLabel="Mesaj gönder"
                     >
-                        <Feather name="arrow-up" size={16} color={colors.textOnAccent} />
+                        <ArrowUpIcon size={16} color={colors.textOnAccent} />
                     </Pressable>
                 ) : (
                     <View style={[styles.sendButton, styles.sendButtonDisabled]}>
-                        <Feather name="arrow-up" size={16} color={colors.textTertiary} />
+                        <ArrowUpIcon size={16} color={colors.textTertiary} />
                     </View>
                 )}
             </View>
@@ -763,8 +775,14 @@ const dropdownStyles = StyleSheet.create({
         backgroundColor: colors.bg,
         borderTopLeftRadius: borderRadius.xl,
         borderTopRightRadius: borderRadius.xl,
-        maxHeight: "60%",
+        maxHeight: "85%",
         paddingBottom: Platform.OS === "ios" ? 34 : 16,
+    },
+    scroll: {
+        maxHeight: 600,
+    },
+    scrollContent: {
+        paddingBottom: spacing.sm,
     },
     header: {
         flexDirection: "row",
@@ -864,6 +882,8 @@ const dropdownStyles = StyleSheet.create({
         paddingBottom: spacing.sm,
     },
     effortItem: {
+        flexDirection: "row",
+        alignItems: "center",
         paddingHorizontal: spacing.lg,
         paddingVertical: spacing.md,
         borderBottomWidth: StyleSheet.hairlineWidth,

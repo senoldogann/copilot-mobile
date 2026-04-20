@@ -3,28 +3,28 @@
 
 export const colors = {
     // Arka planlar
-    bg: "#0d1117",
-    bgSecondary: "#161b22",
-    bgTertiary: "#1c2128",
-    bgElevated: "#21262d",
-    bgOverlay: "#30363d",
+    bg: "#161918",
+    bgSecondary: "#1d201f",
+    bgTertiary: "#232726",
+    bgElevated: "#2a2e2d",
+    bgOverlay: "#333736",
 
     // Kenarlıklar
-    border: "#30363d",
-    borderMuted: "#21262d",
+    border: "#2a2e2d",
+    borderMuted: "#232726",
     borderActive: "#58a6ff",
 
     // Metin
     textPrimary: "#e6edf3",
-    textSecondary: "#8b949e",
-    textTertiary: "#6e7681",
-    textDisabled: "#484f58",
+    textSecondary: "#a0a3a2",
+    textTertiary: "#595B5B",
+    textDisabled: "#3f4241",
     textLink: "#58a6ff",
     textOnAccent: "#ffffff",
 
     // Marka
     accent: "#f78166",
-    accentMuted: "#f7816640",
+    accentMuted: "#f7816630",
     accentPressed: "#e06d55",
     copilotPurple: "#a371f7",
     copilotPurpleMuted: "#a371f720",
@@ -38,7 +38,7 @@ export const colors = {
     errorMuted: "#f8514920",
 
     // Yer tutucu ve hata yüzeyleri
-    textPlaceholder: "#8b949e",
+    textPlaceholder: "#595B5B",
     errorBackground: "rgba(248, 81, 73, 0.15)",
     errorSurface: "#f85149",
 
@@ -49,12 +49,12 @@ export const colors = {
     // Butonlar
     btnPrimary: "#238636",
     btnPrimaryHover: "#2ea043",
-    btnSecondary: "#21262d",
+    btnSecondary: "#232726",
     btnDanger: "#da3633",
 
     // Kod blokları
-    codeBg: "#161b22",
-    codeBorder: "#30363d",
+    codeBg: "#1d201f",
+    codeBorder: "#2a2e2d",
     codeText: "#e6edf3",
     codeInline: "#f0883e",
     lineHighlightBg: "#1a3a5c",
@@ -62,19 +62,19 @@ export const colors = {
     lineHighlightText: "#9cdcfe",
 
     // Giriş alanları
-    inputBg: "#0d1117",
-    inputBorder: "#30363d",
+    inputBg: "#161918",
+    inputBorder: "#2a2e2d",
     inputBorderFocus: "#58a6ff",
-    inputPlaceholder: "#484f58",
+    inputPlaceholder: "#595B5B",
 
     // Araç çubuğu
-    toolbarBg: "#161b22",
-    toolbarBorder: "#21262d",
+    toolbarBg: "#1d201f",
+    toolbarBorder: "#232726",
 
     // Drawer / Sidebar
-    sidebarBg: "#0d1117",
-    sidebarItemActive: "#1c2128",
-    sidebarItemHover: "#161b22",
+    sidebarBg: "#161918",
+    sidebarItemActive: "#232726",
+    sidebarItemHover: "#1d201f",
 } as const;
 
 export const spacing = {
