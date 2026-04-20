@@ -11,12 +11,17 @@ import {
     StyleSheet,
     type ViewStyle,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
+import type { FeatherName } from "./Icons";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
 
 type Props = {
     visible: boolean;
     onClose: () => void;
-    icon: string;
+    /** Feather icon name — if provided, renders an SVG icon */
+    iconName?: FeatherName;
+    /** Fallback text icon (used if iconName not provided) */
+    icon?: string;
     title: string;
     subtitle?: string;
     children: React.ReactNode;
@@ -26,6 +31,7 @@ type Props = {
 export function BottomSheet({
     visible,
     onClose,
+    iconName,
     icon,
     title,
     subtitle,
@@ -52,7 +58,13 @@ export function BottomSheet({
                     {/* Başlık */}
                     <View style={styles.header}>
                         <View style={styles.headerLeft}>
-                            <Text style={styles.headerIcon}>{icon}</Text>
+                            {iconName !== undefined ? (
+                                <View style={styles.iconBadge}>
+                                    <Feather name={iconName} size={14} color={colors.textSecondary} />
+                                </View>
+                            ) : icon !== undefined && icon.length > 0 ? (
+                                <Text style={styles.headerIcon}>{icon}</Text>
+                            ) : null}
                             <View style={styles.headerTextContainer}>
                                 <Text style={styles.headerTitle} numberOfLines={1}>
                                     {title}
@@ -69,7 +81,7 @@ export function BottomSheet({
                             onPress={onClose}
                             hitSlop={8}
                         >
-                            <Text style={styles.closeIcon}>✕</Text>
+                            <Feather name="x" size={14} color={colors.textSecondary} />
                         </Pressable>
                     </View>
 
@@ -93,7 +105,7 @@ const styles = StyleSheet.create({
         justifyContent: "flex-end",
     },
     sheet: {
-        maxHeight: "60%",
+        maxHeight: "65%",
         minHeight: 200,
         backgroundColor: colors.bgSecondary,
         borderTopLeftRadius: borderRadius.xl,
@@ -128,6 +140,17 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
         flex: 1,
     },
+    iconBadge: {
+        width: 28,
+        height: 28,
+        borderRadius: borderRadius.sm,
+        backgroundColor: colors.bgTertiary,
+        borderWidth: 1,
+        borderColor: colors.border,
+        justifyContent: "center",
+        alignItems: "center",
+        flexShrink: 0,
+    },
     headerIcon: {
         fontSize: fontSize.lg,
     },
@@ -143,6 +166,7 @@ const styles = StyleSheet.create({
         fontSize: fontSize.xs,
         color: colors.textTertiary,
         marginTop: 2,
+        textTransform: "capitalize",
     },
     closeButton: {
         width: 28,
@@ -152,10 +176,8 @@ const styles = StyleSheet.create({
         justifyContent: "center",
         alignItems: "center",
         marginLeft: spacing.sm,
-    },
-    closeIcon: {
-        fontSize: fontSize.sm,
-        color: colors.textSecondary,
+        borderWidth: 1,
+        borderColor: colors.border,
     },
     content: {
         paddingHorizontal: spacing.lg,

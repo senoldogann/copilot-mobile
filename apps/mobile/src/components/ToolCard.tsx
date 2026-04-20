@@ -1,11 +1,12 @@
 // Araç yürütme kartı — kompakt tek satır terminal stili ile SVG ikonlar
 
 import React, { useState } from "react";
-import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
+import { View, Text, Pressable, StyleSheet, Animated, ScrollView } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import type { ToolItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
 import { ToolIcon } from "./Icons";
+import type { FeatherName } from "./Icons";
 import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = {
@@ -32,10 +33,23 @@ function getToolLabel(toolName: string): string {
         .split(" ")[0] ?? toolName;
 }
 
+// Returns the Feather icon name for a given tool
+function getToolIconName(toolName: string): FeatherName {
+    const lower = toolName.toLowerCase();
+    if (lower.includes("shell") || lower.includes("bash") || lower.includes("exec")) return "terminal";
+    if (lower.includes("read") || lower.includes("view")) return "eye";
+    if (lower.includes("edit")) return "edit-2";
+    if (lower.includes("write") || lower.includes("create")) return "file-plus";
+    if (lower.includes("grep") || lower.includes("search") || lower.includes("find") || lower.includes("glob")) return "search";
+    if (lower.includes("think")) return "cpu";
+    if (lower.includes("web") || lower.includes("fetch")) return "globe";
+    if (lower.includes("git")) return "git-branch";
+    return "tool";
+}
+
 // argumentsText'ten gösterilecek kısa metni çıkar
 function extractDisplayArg(item: ToolItem): string | null {
     if (item.argumentsText === undefined) return null;
-    // JSON mu dene
     try {
         const parsed: unknown = JSON.parse(item.argumentsText);
         if (parsed !== null && typeof parsed === "object") {
@@ -49,9 +63,24 @@ function extractDisplayArg(item: ToolItem): string | null {
             if (typeof firstStr === "string") return firstStr;
         }
     } catch {
-        // JSON değil, olduğu gibi göster
+        // Not JSON
     }
     return item.argumentsText;
+}
+
+// Extract the shell command from argumentsText
+function extractCommand(item: ToolItem): string | null {
+    if (item.argumentsText === undefined) return null;
+    try {
+        const parsed: unknown = JSON.parse(item.argumentsText);
+        if (parsed !== null && typeof parsed === "object") {
+            const obj = parsed as Record<string, unknown>;
+            if (typeof obj["command"] === "string") return obj["command"] as string;
+        }
+    } catch {
+        // Not JSON
+    }
+    return null;
 }
 
 // Dönen animasyon — çalışırken
@@ -80,11 +109,50 @@ function ToolSpinner() {
     );
 }
 
+// Terminal-style output block for shell commands
+function TerminalBlock({ command, output }: { command: string | null; output: string | undefined }) {
+    return (
+        <View style={terminalStyles.container}>
+            {command !== null && (
+                <View style={terminalStyles.promptRow}>
+                    <Text style={terminalStyles.prompt}>$</Text>
+                    <Text style={terminalStyles.command} selectable>{command}</Text>
+                </View>
+            )}
+            {output !== undefined && output.trim().length > 0 && (
+                <View style={terminalStyles.outputBlock}>
+                    {output.trim().split("\n").map((line, i) => (
+                        <Text key={i} style={terminalStyles.outputLine} selectable>
+                            {"> "}{line}
+                        </Text>
+                    ))}
+                </View>
+            )}
+        </View>
+    );
+}
+
+// Generic detail block (non-shell)
+function DetailSection({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+    return (
+        <View style={styles.detailBlock}>
+            <Text style={styles.detailLabel}>{label}</Text>
+            <Text style={[styles.detailBlockValue, mono === true && styles.detailMono]} selectable>
+                {value}
+            </Text>
+        </View>
+    );
+}
+
 function ToolCardComponent({ item }: Props) {
     const [showSheet, setShowSheet] = useState(false);
     const isRunning = item.status === "running";
     const isFailed = item.status === "failed";
     const label = getToolLabel(item.toolName);
+    const iconName = getToolIconName(item.toolName);
+
+    const lower = item.toolName.toLowerCase();
+    const isShell = lower.includes("shell") || lower.includes("bash") || lower.includes("exec");
 
     const displayArg = extractDisplayArg(item)
         ?? item.progressMessage
@@ -95,6 +163,9 @@ function ToolCardComponent({ item }: Props) {
                 : isFailed
                     ? "Failed"
                     : "Completed");
+
+    const command = extractCommand(item);
+    const statusText = isRunning ? "running" : isFailed ? "failed" : "completed";
 
     return (
         <>
@@ -132,77 +203,51 @@ function ToolCardComponent({ item }: Props) {
             <BottomSheet
                 visible={showSheet}
                 onClose={() => setShowSheet(false)}
-                icon="›"
+                iconName={iconName}
                 title={label}
-                subtitle={item.status}
+                subtitle={statusText}
             >
-                <View style={styles.detailContainer}>
-                    <DetailRow label="Tool" value={item.toolName} />
-                    <DetailRow
-                        label="Status"
-                        value={isRunning ? "running" : isFailed ? "failed" : "completed"}
-                        valueColor={isFailed ? colors.error : colors.textSecondary}
-                    />
-                    <DetailRow label="Request ID" value={item.requestId} mono />
-                    {item.argumentsText !== undefined && (
-                        <DetailBlock label="Arguments" value={item.argumentsText} mono />
-                    )}
-                    {item.progressMessage !== undefined && (
-                        <DetailBlock label="Progress" value={item.progressMessage} />
-                    )}
-                    {item.partialOutput !== undefined && item.partialOutput.trim().length > 0 && (
-                        <DetailBlock label="Output" value={item.partialOutput} mono />
-                    )}
-                </View>
+                {isShell ? (
+                    /* Terminal-style output for shell commands */
+                    <View style={styles.detailContainer}>
+                        <TerminalBlock
+                            command={command ?? displayArg}
+                            output={item.partialOutput ?? item.progressMessage}
+                        />
+                        {item.argumentsText !== undefined && command === null && (
+                            <DetailSection label="Arguments" value={item.argumentsText} mono />
+                        )}
+                    </View>
+                ) : (
+                    /* Generic detail view for non-shell tools */
+                    <View style={styles.detailContainer}>
+                        <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>Tool</Text>
+                            <Text style={styles.detailValue}>{item.toolName}</Text>
+                        </View>
+                        <View style={styles.detailRow}>
+                            <Text style={styles.detailLabel}>Status</Text>
+                            <Text style={[
+                                styles.detailValue,
+                                isFailed && { color: colors.error },
+                                !isFailed && !isRunning && { color: colors.success },
+                            ]}>
+                                {statusText}
+                            </Text>
+                        </View>
+                        {item.argumentsText !== undefined && (
+                            <DetailSection label="Arguments" value={item.argumentsText} mono />
+                        )}
+                        {item.progressMessage !== undefined && (
+                            <DetailSection label="Progress" value={item.progressMessage} />
+                        )}
+                        {item.partialOutput !== undefined && item.partialOutput.trim().length > 0 && (
+                            <DetailSection label="Output" value={item.partialOutput} mono />
+                        )}
+                    </View>
+                )}
             </BottomSheet>
         </>
-    );
-}
-
-function DetailRow({
-    label,
-    value,
-    mono,
-    valueColor,
-}: {
-    label: string;
-    value: string;
-    mono?: boolean;
-    valueColor?: string;
-}) {
-    return (
-        <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>{label}</Text>
-            <Text
-                style={[
-                    styles.detailValue,
-                    mono === true && styles.detailMono,
-                    valueColor !== undefined && { color: valueColor },
-                ]}
-                numberOfLines={1}
-            >
-                {value}
-            </Text>
-        </View>
-    );
-}
-
-function DetailBlock({
-    label,
-    value,
-    mono,
-}: {
-    label: string;
-    value: string;
-    mono?: boolean;
-}) {
-    return (
-        <View style={styles.detailBlock}>
-            <Text style={styles.detailLabel}>{label}</Text>
-            <Text style={[styles.detailBlockValue, mono === true && styles.detailMono]}>
-                {value}
-            </Text>
-        </View>
     );
 }
 
@@ -217,6 +262,46 @@ const spinnerStyles = StyleSheet.create({
         borderColor: "transparent",
         borderTopColor: colors.accent,
         borderRightColor: colors.accentMuted,
+    },
+});
+
+const terminalStyles = StyleSheet.create({
+    container: {
+        backgroundColor: "#0d1117",
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: colors.border,
+        padding: spacing.md,
+        gap: 6,
+    },
+    promptRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 8,
+    },
+    prompt: {
+        color: colors.success,
+        fontFamily: "monospace",
+        fontSize: fontSize.sm,
+        lineHeight: 18,
+        fontWeight: "700",
+    },
+    command: {
+        flex: 1,
+        color: colors.textPrimary,
+        fontFamily: "monospace",
+        fontSize: fontSize.sm,
+        lineHeight: 18,
+    },
+    outputBlock: {
+        marginTop: 4,
+        gap: 2,
+    },
+    outputLine: {
+        color: colors.textSecondary,
+        fontFamily: "monospace",
+        fontSize: fontSize.xs,
+        lineHeight: 16,
     },
 });
 
@@ -275,6 +360,9 @@ const styles = StyleSheet.create({
     detailLabel: {
         fontSize: fontSize.sm,
         color: colors.textTertiary,
+        textTransform: "uppercase",
+        letterSpacing: 0.3,
+        fontWeight: "600",
     },
     detailValue: {
         fontSize: fontSize.sm,
@@ -293,3 +381,4 @@ const styles = StyleSheet.create({
         lineHeight: 18,
     },
 });
+

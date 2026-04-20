@@ -72,7 +72,7 @@ function ThinkingBubbleComponent({ item }: Props) {
             <BottomSheet
                 visible={showSheet}
                 onClose={() => setShowSheet(false)}
-                icon="🧠"
+                iconName="cpu"
                 title="Thinking"
                 subtitle={!item.isStreaming && hasContent ? charLabel : ""}
             >

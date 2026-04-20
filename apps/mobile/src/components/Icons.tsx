@@ -4,7 +4,7 @@ import React from "react";
 import { Feather, Ionicons } from "@expo/vector-icons";
 import { colors } from "../theme/colors";
 
-type FeatherName = React.ComponentProps<typeof Feather>["name"];
+export type FeatherName = React.ComponentProps<typeof Feather>["name"];
 type IoniconsName = React.ComponentProps<typeof Ionicons>["name"];
 
 export type IconSize = "xs" | "sm" | "md" | "lg" | "xl";

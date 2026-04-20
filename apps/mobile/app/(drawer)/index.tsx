@@ -357,7 +357,7 @@ export default function ChatScreen() {
     const keyExtractor = useCallback((item: ChatItem) => item.id, []);
 
     return (
-        <SafeAreaView style={styles.container} edges={["top"]}>
+        <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
             <ChatHeader />
 
             <KeyboardAvoidingView

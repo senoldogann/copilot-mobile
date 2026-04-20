@@ -20,16 +20,31 @@ function getClient(): ReturnType<typeof createWSClient> {
     if (client === null) {
         const nextClient = createWSClient({
             onMessage: (message) => {
-                const activeSessionId = useSessionStore.getState().activeSessionId;
-                if (
-                    message.type === "permission.request"
-                    && message.payload.sessionId !== activeSessionId
-                ) {
-                    void nextClient.sendMessage("permission.respond", {
-                        requestId: message.payload.requestId,
-                        approved: false,
-                    });
-                    return;
+                const sessionStore = useSessionStore.getState();
+                const activeSessionId = sessionStore.activeSessionId;
+
+                if (message.type === "permission.request") {
+                    if (message.payload.sessionId !== activeSessionId) {
+                        // Not the active session — auto-deny
+                        void nextClient.sendMessage("permission.respond", {
+                            requestId: message.payload.requestId,
+                            approved: false,
+                        });
+                        return;
+                    }
+
+                    const { autoApproveAll, autoApproveReads } = sessionStore;
+                    const kind = message.payload.kind;
+                    const shouldAutoApprove =
+                        autoApproveAll || (autoApproveReads && kind === "read");
+
+                    if (shouldAutoApprove) {
+                        void nextClient.sendMessage("permission.respond", {
+                            requestId: message.payload.requestId,
+                            approved: true,
+                        });
+                        return;
+                    }
                 }
 
                 if (
