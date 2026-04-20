@@ -15,8 +15,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "expo-router";
 import type { DrawerNavigationProp } from "@react-navigation/drawer";
 import type { ParamListBase } from "@react-navigation/native";
+import { Feather } from "@expo/vector-icons";
 import { useSessionStore } from "../../src/stores/session-store";
 import type { ChatItem } from "../../src/stores/session-store";
+import { useWorkspaceStore } from "../../src/stores/workspace-store";
 import { WorkspacePanel } from "../../src/components/WorkspacePanel";
 import { useConnectionStore } from "../../src/stores/connection-store";
 import { useChatHistoryStore } from "../../src/stores/chat-history-store";
@@ -43,13 +45,19 @@ import {
 // Özel başlık — GitHub Copilot mobil stili üst bar
 function ChatHeader() {
     const navigation = useNavigation<DrawerNavigationProp<ParamListBase>>("/(drawer)");
-    const connectionState = useConnectionStore((s) => s.state);
     const isTyping = useSessionStore((s) => s.isAssistantTyping);
-    const isConnected = connectionState === "authenticated";
+    const sessions = useSessionStore((s) => s.sessions);
+    const activeSessionId = useSessionStore((s) => s.activeSessionId);
+    const currentIntent = useSessionStore((s) => s.currentIntent);
+    const branch = useWorkspaceStore((s) => s.branch);
+    const repository = useWorkspaceStore((s) => s.repository);
     const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
-    const handleCloseWorkspace = React.useCallback(() => {
-        setWorkspaceOpen(false);
-    }, []);
+    const handleCloseWorkspace = React.useCallback(() => setWorkspaceOpen(false), []);
+
+    const activeSession = sessions.find((s) => s.id === activeSessionId);
+    const sessionTitle = currentIntent ?? activeSession?.title ?? null;
+    const branchName = branch ?? "main";
+    const repoName = repository ?? "copilot-mobile";
 
     return (
         <>
@@ -64,29 +72,40 @@ function ChatHeader() {
                     <View style={headerStyles.menuLine} />
                 </Pressable>
 
-                <View style={headerStyles.titleContainer}>
-                    <Text style={headerStyles.sparkle}>✦</Text>
-                    <Text style={headerStyles.title}>Copilot</Text>
-                    {isConnected && (
-                        <View style={headerStyles.statusDot} />
-                    )}
+                <View style={headerStyles.branchContainer}>
+                    <View style={headerStyles.branchRow}>
+                        <Feather name="git-branch" size={13} color={colors.textSecondary} />
+                        <Text style={headerStyles.branchText} numberOfLines={1}>{branchName}</Text>
+                    </View>
+                    <Text style={headerStyles.repoText} numberOfLines={1}>{repoName}</Text>
                 </View>
 
                 <View style={headerStyles.rightContainer}>
                     <Pressable
-                        style={({ pressed }) => [
-                            headerStyles.workspaceButton,
-                            pressed && headerStyles.workspaceButtonPressed,
-                        ]}
+                        style={headerStyles.iconButton}
                         onPress={() => setWorkspaceOpen(true)}
                         hitSlop={10}
-                        accessibilityLabel="Open workspace panel"
+                        accessibilityLabel="Open workspace"
                     >
-                        <Text style={headerStyles.workspaceButtonIcon}>▦</Text>
+                        <Feather name="folder" size={17} color={colors.textSecondary} />
                     </Pressable>
-                    <ActivityDots active={isTyping} />
+                    <Pressable
+                        style={headerStyles.iconButton}
+                        hitSlop={10}
+                        accessibilityLabel="More options"
+                    >
+                        <Feather name="more-vertical" size={17} color={colors.textSecondary} />
+                    </Pressable>
                 </View>
             </View>
+
+            {sessionTitle !== null && (
+                <View style={headerStyles.intentBar}>
+                    <ActivityDots active={isTyping} />
+                    <Text style={headerStyles.intentText} numberOfLines={1}>{sessionTitle}</Text>
+                    <Feather name="chevron-down" size={13} color={colors.textTertiary} />
+                </View>
+            )}
 
             <WorkspacePanel
                 visible={workspaceOpen}
@@ -438,7 +457,7 @@ const headerStyles = StyleSheet.create({
         paddingHorizontal: spacing.lg,
         paddingVertical: spacing.md,
         backgroundColor: colors.bg,
-        borderBottomWidth: 1,
+        borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: colors.borderMuted,
     },
     menuButton: {
@@ -457,48 +476,49 @@ const headerStyles = StyleSheet.create({
     menuLineShort: {
         width: 12,
     },
-    titleContainer: {
+    branchContainer: {
         flex: 1,
+        paddingLeft: spacing.sm,
+    },
+    branchRow: {
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: "center",
-        gap: 6,
+        gap: 5,
     },
-    sparkle: {
-        fontSize: fontSize.base,
-        color: colors.copilotPurple,
-    },
-    title: {
-        fontSize: 15,
-        fontWeight: "600",
+    branchText: {
+        fontSize: 14,
+        fontWeight: "700",
         color: colors.textPrimary,
     },
-    statusDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        backgroundColor: colors.success,
+    repoText: {
+        fontSize: fontSize.sm,
+        color: colors.textTertiary,
+        marginTop: 1,
     },
     rightContainer: {
         flexDirection: "row",
         alignItems: "center",
-        gap: spacing.sm,
+        gap: 2,
     },
-    workspaceButton: {
+    iconButton: {
         width: 34,
         height: 34,
-        borderRadius: borderRadius.full,
-        backgroundColor: colors.bgTertiary,
-        borderWidth: 1,
-        borderColor: colors.borderMuted,
-        alignItems: "center",
         justifyContent: "center",
+        alignItems: "center",
     },
-    workspaceButtonPressed: {
-        opacity: 0.85,
+    intentBar: {
+        flexDirection: "row",
+        alignItems: "center",
+        paddingHorizontal: spacing.lg,
+        paddingVertical: 7,
+        backgroundColor: colors.bg,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: colors.borderMuted,
+        gap: spacing.sm,
     },
-    workspaceButtonIcon: {
-        fontSize: 14,
+    intentText: {
+        flex: 1,
+        fontSize: fontSize.sm,
         color: colors.textSecondary,
     },
 });

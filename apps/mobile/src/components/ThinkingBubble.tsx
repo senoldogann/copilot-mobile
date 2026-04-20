@@ -107,7 +107,6 @@ const styles = StyleSheet.create({
         alignItems: "center",
         paddingVertical: 6,
         paddingHorizontal: spacing.lg,
-        marginLeft: 40,
         gap: spacing.sm,
     },
     iconContainer: {

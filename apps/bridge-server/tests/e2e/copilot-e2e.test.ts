@@ -286,6 +286,8 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
                         model: effortModel.id,
                         reasoningEffort: effortLevel,
                         streaming: true,
+                        agentMode: "agent",
+                        permissionLevel: "default",
                     },
                 })
             );
@@ -359,6 +361,8 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
                     config: {
                         model: nonEffortModel.id,
                         streaming: true,
+                        agentMode: "agent",
+                        permissionLevel: "default",
                     },
                 })
             );

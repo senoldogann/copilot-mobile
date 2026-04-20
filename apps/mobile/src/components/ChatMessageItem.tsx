@@ -19,23 +19,7 @@ type Props = {
     item: ChatItem;
 };
 
-// Copilot ikon
-function CopilotIcon() {
-    return (
-        <View style={styles.copilotIcon}>
-            <Text style={styles.copilotIconText}>✦</Text>
-        </View>
-    );
-}
 
-// Kullanıcı avatarı
-function UserAvatar() {
-    return (
-        <View style={styles.userAvatar}>
-            <Text style={styles.userAvatarText}>U</Text>
-        </View>
-    );
-}
 
 // --- Lightweight Markdown Renderer ---
 
@@ -489,10 +473,6 @@ function UserBubble({
     return (
         <View style={styles.userRow}>
             <View style={styles.userBubble}>
-                <View style={styles.userHeader}>
-                    <UserAvatar />
-                    <Text style={styles.userLabel}>You</Text>
-                </View>
                 {attachments !== undefined && attachments.length > 0 && (
                     <View style={styles.userAttachmentsRow}>
                         {attachments.map((attachment, index) => (
@@ -526,13 +506,7 @@ function AssistantBubble({
     return (
         <View style={styles.assistantRow}>
             <View style={styles.assistantBubble}>
-                <View style={styles.assistantHeader}>
-                    <CopilotIcon />
-                    <Text style={styles.assistantLabel}>Copilot</Text>
-                </View>
-                <View style={styles.assistantContent}>
-                    <MarkdownContent content={content} isStreaming={isStreaming} />
-                </View>
+                <MarkdownContent content={content} isStreaming={isStreaming} />
             </View>
         </View>
     );
@@ -828,7 +802,6 @@ const styles = StyleSheet.create({
         flexWrap: "wrap",
         gap: spacing.xs,
         marginBottom: spacing.xs,
-        paddingLeft: 32,
     },
     userAttachmentChip: {
         maxWidth: 180,
@@ -847,7 +820,6 @@ const styles = StyleSheet.create({
         fontSize: fontSize.base,
         lineHeight: 22,
         color: colors.textPrimary,
-        paddingLeft: 32,
     },
 
     // Asistan mesajı
@@ -858,20 +830,6 @@ const styles = StyleSheet.create({
     assistantBubble: {
         paddingVertical: spacing.sm,
         paddingHorizontal: spacing.lg,
-    },
-    assistantHeader: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: spacing.sm,
-        marginBottom: spacing.sm,
-    },
-    assistantLabel: {
-        fontSize: fontSize.md,
-        fontWeight: "600",
-        color: colors.textPrimary,
-    },
-    assistantContent: {
-        paddingLeft: 32,
     },
     cursor: {
         color: colors.accent,

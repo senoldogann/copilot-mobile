@@ -448,10 +448,10 @@ export function createSessionManager(
                 sessionStates.set(session.id, {
                     agentMode: config.agentMode,
                     permissionLevel: config.permissionLevel,
-                    runtimeMode: config.permissionLevel === "autopilot"
-                        ? "autopilot"
-                        : config.agentMode === "plan"
-                            ? "plan"
+                    runtimeMode: config.agentMode === "plan"
+                        ? "plan"
+                        : config.permissionLevel === "autopilot"
+                            ? "autopilot"
                             : "interactive",
                 });
                 wireSessionEvents(session);

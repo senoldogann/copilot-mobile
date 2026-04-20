@@ -10,6 +10,8 @@ import type {
     AdaptedCopilotClient,
     AdaptedCopilotSession,
     AdaptedPermissionRequest,
+    AdaptedSessionState,
+    AdaptedUserInputRequest,
     SessionConfig,
     SessionHistoryItem,
     SessionInfo,
@@ -44,7 +46,7 @@ type HandlerMap = {
     onReasoning?: (content: string) => void;
     onReasoningDelta?: (delta: string, index: number) => void;
     onPermissionRequest?: (request: AdaptedPermissionRequest) => Promise<boolean>;
-    onUserInputRequest?: (prompt: string) => Promise<string>;
+    onUserInputRequest?: (request: AdaptedUserInputRequest) => Promise<string>;
     onToolStart?: (toolName: string, requestId: string) => void;
     onToolPartialResult?: (requestId: string, partialOutput: string) => void;
     onToolProgress?: (requestId: string, progressMessage: string) => void;
@@ -171,6 +173,11 @@ class FakeSession implements AdaptedCopilotSession {
     private handlers: HandlerMap = {};
     private historyItems: ReadonlyArray<SessionHistoryItem> = [];
     private historyResolver: (() => Promise<ReadonlyArray<SessionHistoryItem>>) | null = null;
+    private state: AdaptedSessionState = {
+        agentMode: "agent",
+        permissionLevel: "default",
+        runtimeMode: "interactive",
+    };
 
     async send(_message: SessionMessageInput): Promise<void> {
         return Promise.resolve();
@@ -198,7 +205,7 @@ class FakeSession implements AdaptedCopilotSession {
         this.handlers.onPermissionRequest = handler;
     }
 
-    onUserInputRequest(handler: (prompt: string) => Promise<string>): void {
+    onUserInputRequest(handler: (request: AdaptedUserInputRequest) => Promise<string>): void {
         this.handlers.onUserInputRequest = handler;
     }
 
@@ -233,6 +240,16 @@ class FakeSession implements AdaptedCopilotSession {
     onIntent(handler: (intent: string) => void): void {
         this.handlers.onIntent = handler;
     }
+
+    onRuntimeModeChanged(_handler: (runtimeMode: "interactive" | "plan" | "autopilot") => void): void { }
+
+    onPlanExitRequest(_handler: (request: {
+        requestId: string;
+        summary: string;
+        planContent: string;
+        actions: ReadonlyArray<string>;
+        recommendedAction: string;
+    }) => void): void { }
 
     async getHistory(): Promise<ReadonlyArray<SessionHistoryItem>> {
         if (this.historyResolver !== null) {
@@ -269,6 +286,24 @@ class FakeSession implements AdaptedCopilotSession {
 
     getCapabilities(): HostSessionCapabilities {
         return this.capabilities;
+    }
+
+    async applyState(state: AdaptedSessionState): Promise<AdaptedSessionState> {
+        this.state = state;
+        return this.state;
+    }
+
+    async getState(permissionLevel: "default" | "bypass" | "autopilot"): Promise<AdaptedSessionState> {
+        this.state = {
+            ...this.state,
+            permissionLevel,
+            runtimeMode: this.state.agentMode === "plan"
+                ? "plan"
+                : permissionLevel === "autopilot"
+                    ? "autopilot"
+                    : "interactive",
+        };
+        return this.state;
     }
 
     emitAssistantMessage(content: string): void {
@@ -406,7 +441,12 @@ describe("bridge reconnect and auth integration", () => {
             await clientA.waitForMessage("pairing.success");
 
             clientA.send(makeClientMessage("session.create", {
-                config: { model: "gpt-4.1", streaming: true },
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
             }));
             await clientA.waitForMessage("session.created");
 
@@ -438,7 +478,12 @@ describe("bridge reconnect and auth integration", () => {
             assert.equal(pairingMessage.type, "pairing.success");
 
             clientA.send(makeClientMessage("session.create", {
-                config: { model: "gpt-4.1", streaming: true },
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
             }));
             await clientA.waitForMessage("session.created");
 
@@ -479,7 +524,12 @@ describe("bridge reconnect and auth integration", () => {
             await client.waitForMessage("pairing.success");
 
             client.send(makeClientMessage("session.create", {
-                config: { model: "gpt-4.1", streaming: true },
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
             }));
             await client.waitForMessage("session.created");
 
@@ -558,7 +608,12 @@ describe("workspace explorer integration", () => {
             await client.waitForMessage("pairing.success");
 
             client.send(makeClientMessage("session.create", {
-                config: { model: "gpt-4.1", streaming: true },
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
             }));
             const sessionMsg = await client.waitForMessage("session.created");
             if (sessionMsg.type !== "session.created") {
@@ -602,7 +657,12 @@ describe("workspace explorer integration", () => {
             await client.waitForMessage("pairing.success");
 
             client.send(makeClientMessage("session.create", {
-                config: { model: "gpt-4.1", streaming: true },
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
             }));
             await client.waitForMessage("session.created");
 
@@ -675,7 +735,12 @@ describe("workspace explorer integration", () => {
             await client.waitForMessage("pairing.success");
 
             client.send(makeClientMessage("session.create", {
-                config: { model: "gpt-4.1", streaming: true },
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
             }));
             await client.waitForMessage("session.created");
 

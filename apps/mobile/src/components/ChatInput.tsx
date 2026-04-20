@@ -373,8 +373,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const [images, setImages] = useState<Array<ImageAttachment>>([]);
     const [showModelPicker, setShowModelPicker] = useState(false);
     const [showAgentPicker, setShowAgentPicker] = useState(false);
-    const [showPermissionPicker, setShowPermissionPicker] = useState(false);
-    const [showEffortPicker, setShowEffortPicker] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const agentMode = useSessionStore((s) => s.agentMode);
@@ -456,14 +454,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
         [setSelectedModel]
     );
 
-    const handleEffortSelect = useCallback(
-        (level: ReasoningEffortLevel) => {
-            setReasoningEffort(level);
-            setShowEffortPicker(false);
-        },
-        [setReasoningEffort]
-    );
-
     const handleAgentModeSelect = useCallback(
         async (mode: AgentMode) => {
             setAgentMode(mode);
@@ -478,7 +468,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const handlePermissionLevelSelect = useCallback(
         async (level: PermissionLevel) => {
             setPermissionLevel(level);
-            setShowPermissionPicker(false);
             if (activeSessionId !== null) {
                 await updatePermissionLevel(activeSessionId, level);
             }
@@ -580,63 +569,27 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     <Feather name="chevron-down" size={10} color={colors.textTertiary} />
                 </Pressable>
 
-                {/* Agent picker */}
+                {/* Session settings: agent + permission + effort */}
                 <Pressable
-                    style={toolbarStyles.selectorPill}
+                    style={toolbarStyles.toolBtn}
                     onPress={() => setShowAgentPicker(true)}
                     disabled={disabled}
-                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
-                    accessibilityLabel="Agent seç"
+                    hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                    accessibilityLabel="Session ayarları"
                 >
                     <Feather
                         name={agentModeConfig[agentMode].iconName}
-                        size={12}
+                        size={15}
                         color={agentModeConfig[agentMode].color}
                     />
-                    <Text
-                        style={[toolbarStyles.selectorPillText, { color: agentModeConfig[agentMode].color }]}
-                        numberOfLines={1}
-                    >
-                        {agentModeConfig[agentMode].label}
-                    </Text>
-                    <Feather name="chevron-down" size={10} color={colors.textTertiary} />
                 </Pressable>
-
-                {/* Permission picker */}
-                <Pressable
-                    style={toolbarStyles.selectorPill}
-                    onPress={() => setShowPermissionPicker(true)}
-                    disabled={disabled}
-                    hitSlop={{ top: 10, bottom: 10, left: 4, right: 4 }}
-                    accessibilityLabel="Permission seviyesi seç"
-                >
-                    <Ionicons
-                        name={permissionLevelConfig[permissionLevel].iconName}
-                        size={13}
-                        color={permissionLevelConfig[permissionLevel].color}
-                    />
-                    <Text
-                        style={[toolbarStyles.selectorPillText, { color: permissionLevelConfig[permissionLevel].color }]}
-                        numberOfLines={1}
-                    >
-                        {permissionLevelConfig[permissionLevel].label}
-                    </Text>
-                    <Feather name="chevron-down" size={10} color={colors.textTertiary} />
-                </Pressable>
-
-                {effortInfo.supported && effortInfo.listKnown && (
-                    <Pressable
-                        style={toolbarStyles.toolBtn}
-                        onPress={() => setShowEffortPicker(true)}
-                        disabled={disabled}
-                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                        accessibilityLabel="Thinking effort seç"
-                    >
-                        <Feather name="sliders" size={14} color={colors.textSecondary} />
-                    </Pressable>
-                )}
 
                 <View style={toolbarStyles.spacer} />
+
+                {/* Mic — visual placeholder */}
+                <View style={[toolbarStyles.toolBtn, toolbarStyles.toolBtnDimmed]}>
+                    <Feather name="mic" size={16} color={colors.textSecondary} />
+                </View>
 
                 {/* Send / Abort / Queue button */}
                 {isTyping && canSend ? (
@@ -696,12 +649,13 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 />
             </DropdownModal>
 
-            {/* Agent picker modal */}
+            {/* Combined session settings: agent + permission + effort */}
             <DropdownModal
                 visible={showAgentPicker}
                 onClose={() => setShowAgentPicker(false)}
-                title="Agents"
+                title="Session Settings"
             >
+                <Text style={dropdownStyles.sectionLabel}>Agent Mode</Text>
                 <View style={dropdownStyles.effortList}>
                     {(["agent", "plan", "ask"] as const).map((mode) => {
                         const cfg = agentModeConfig[mode];
@@ -730,19 +684,13 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                                         <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
                                     </View>
                                 </View>
-                                <Feather name={cfg.iconName} size={18} color={cfg.color} />
+                                <Feather name={cfg.iconName} size={18} color={isSelected ? cfg.color : colors.textTertiary} />
                             </Pressable>
                         );
                     })}
                 </View>
-            </DropdownModal>
-
-            {/* Permission picker modal */}
-            <DropdownModal
-                visible={showPermissionPicker}
-                onClose={() => setShowPermissionPicker(false)}
-                title="Permissions"
-            >
+                <View style={dropdownStyles.sectionDivider} />
+                <Text style={dropdownStyles.sectionLabel}>Permissions</Text>
                 <View style={dropdownStyles.effortList}>
                     {(["default", "bypass", "autopilot"] as const).map((level) => {
                         const cfg = permissionLevelConfig[level];
@@ -771,25 +719,26 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                                         <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
                                     </View>
                                 </View>
-                                <Ionicons name={cfg.iconName} size={18} color={cfg.color} />
+                                <Ionicons name={cfg.iconName} size={18} color={isSelected ? cfg.color : colors.textTertiary} />
                             </Pressable>
                         );
                     })}
                 </View>
-            </DropdownModal>
-
-            {/* Thinking effort picker modal */}
-            <DropdownModal
-                visible={showEffortPicker}
-                onClose={() => setShowEffortPicker(false)}
-                title="Thinking Effort"
-            >
-                <EffortSelectorContent
-                    options={effortInfo.options as ReasoningEffortLevel[]}
-                    current={reasoningEffort}
-                    defaultEffort={currentModel?.defaultReasoningEffort}
-                    onSelect={handleEffortSelect}
-                />
+                {effortInfo.supported && (
+                    <>
+                        <View style={dropdownStyles.sectionDivider} />
+                        <Text style={dropdownStyles.sectionLabel}>Thinking Effort</Text>
+                        <EffortSelectorContent
+                            options={effortInfo.options as ReasoningEffortLevel[]}
+                            current={reasoningEffort}
+                            defaultEffort={currentModel?.defaultReasoningEffort}
+                            onSelect={(level) => {
+                                setReasoningEffort(level);
+                                setShowAgentPicker(false);
+                            }}
+                        />
+                    </>
+                )}
             </DropdownModal>
 
             {/* Send mode menu */}
