@@ -1,5 +1,7 @@
 // Sesli dikte servisi — expo-speech-recognition ile çalışır, yoksa hata döndürür.
-// Modül dev build'e eklenmediyse runtime require hata verir ve UI bunu yakalar.
+// Expo Go'da native modül kayıtlı olmadığından sessizce devre dışı bırakılır.
+
+import { NativeModules } from "react-native";
 
 type VoiceModule = {
     ExpoSpeechRecognitionModule: {
@@ -14,12 +16,22 @@ type VoiceModule = {
     ) => { remove: () => void };
 };
 
+/** Native modül kayıtlı mı — Expo Go'da false döner. */
+export function isVoiceAvailable(): boolean {
+    // NativeModules üzerinden kayıt kontrolü — require tetiklemeden güvenli.
+    return Boolean(
+        (NativeModules as Record<string, unknown>)["ExpoSpeechRecognition"]
+    );
+}
+
 function loadVoiceModule(): VoiceModule {
-    // Runtime require: modül dev build'e eklenmemişse fırlatır.
+    if (!isVoiceAvailable()) {
+        throw new Error("Voice requires a development build (not available in Expo Go).");
+    }
     // eslint-disable-next-line @typescript-eslint/no-var-requires
     const mod = require("expo-speech-recognition") as unknown as VoiceModule;
     if (mod === undefined || mod.ExpoSpeechRecognitionModule === undefined) {
-        throw new Error("expo-speech-recognition not available");
+        throw new Error("expo-speech-recognition module failed to load.");
     }
     return mod;
 }

@@ -20,7 +20,7 @@ import type { WorkspaceTreeNode } from "@copilot-mobile/shared";
 import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
 import type { AgentMode, ModelInfo, PermissionLevel, ReasoningEffortLevel } from "@copilot-mobile/shared";
 import { updatePermissionLevel, updateSessionMode } from "../services/bridge";
-import { startVoiceDictation, type DictationHandle } from "../services/voice-dictation";
+import { startVoiceDictation, isVoiceAvailable, type DictationHandle } from "../services/voice-dictation";
 import {
     ProviderIcon,
     detectProvider,
@@ -490,6 +490,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const [showPlusMenu, setShowPlusMenu] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
     const [voiceHandle, setVoiceHandle] = useState<DictationHandle | null>(null);
+    const voiceSupported = isVoiceAvailable();
     const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
     const workspaceTree = useWorkspaceStore((s) => s.tree);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
@@ -832,16 +833,18 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         })()}
                     </Pressable>
 
-                    {/* Mic */}
-                    <Pressable
-                        style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
-                        onPress={handleToggleVoice}
-                        disabled={disabled}
-                        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-                        accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
-                    >
-                        <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
-                    </Pressable>
+                    {/* Mic — only shown when native module is registered (dev build) */}
+                    {voiceSupported && (
+                        <Pressable
+                            style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
+                            onPress={handleToggleVoice}
+                            disabled={disabled}
+                            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
+                            accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
+                        >
+                            <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
+                        </Pressable>
+                    )}
 
                     {/* Send / Abort / Queue */}
                     {isTyping && canSend ? (
