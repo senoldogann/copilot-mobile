@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { View, Text, Pressable, StyleSheet, Animated, ScrollView } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import Svg, { Path } from "react-native-svg";
 import type { ToolItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
 import { ToolIcon } from "./Icons";
@@ -197,7 +198,9 @@ function ToolCardComponent({ item }: Props) {
                     {displayArg}
                 </Text>
 
-                <Feather name="chevron-right" size={12} color={colors.textTertiary} />
+                <Svg width={12} height={12} viewBox="0 0 24 24" fill="none">
+                    <Path d="m9 6 6 6-6 6" stroke={colors.textTertiary} strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
             </Pressable>
 
             <BottomSheet

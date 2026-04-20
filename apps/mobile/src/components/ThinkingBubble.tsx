@@ -4,7 +4,7 @@ import React, { useState } from "react";
 import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
 import type { ThinkingItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
-import { Feather } from "@expo/vector-icons";
+import { SparklesIcon } from "./ProviderIcon";
 import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = {
@@ -56,7 +56,7 @@ function ThinkingBubbleComponent({ item }: Props) {
                     {item.isStreaming ? (
                         <SpinnerRing />
                     ) : (
-                        <Feather name="cpu" size={13} color={colors.textTertiary} />                    )}
+                        <SparklesIcon size={13} color={colors.textTertiary} />                    )}
                 </View>
                 <Text style={styles.label}>
                     {item.isStreaming ? "Thinking…" : "Thought"}

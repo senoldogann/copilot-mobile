@@ -235,3 +235,112 @@ export function SlidersIcon({ size = 15, color = "#a0a3a2" }: { size?: number; c
         </Svg>
     );
 }
+
+export function GitBranchIcon({ size = 13, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Circle cx="6" cy="3" r="2" />
+                <Circle cx="6" cy="21" r="2" />
+                <Circle cx="18" cy="9" r="2" />
+                <Path d="M6 5v14M18 11c0 3-3 5-6 5h-1a4 4 0 0 0-4 4" />
+            </G>
+        </Svg>
+    );
+}
+
+export function FolderIcon({ size = 17, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                fill="none"
+            />
+        </Svg>
+    );
+}
+
+export function MoreVerticalIcon({ size = 17, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G fill={color}>
+                <Circle cx="12" cy="5" r="1.8" />
+                <Circle cx="12" cy="12" r="1.8" />
+                <Circle cx="12" cy="19" r="1.8" />
+            </G>
+        </Svg>
+    );
+}
+
+export function TerminalIcon({ size = 13, color = "#f78166" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="m5 8 4 4-4 4M12 18h7" />
+            </G>
+        </Svg>
+    );
+}
+
+export function WrenchIcon({ size = 13, color = "#f78166" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M20 7a4 4 0 0 1-5 5l-7 7a2 2 0 0 1-3-3l7-7a4 4 0 0 1 5-5l-2 2 2 2 2 2 2-2Z"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinejoin="round"
+                fill="none"
+            />
+        </Svg>
+    );
+}
+
+export function CheckSquareIcon({ size = 13, color = "#f78166" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="m9 11 3 3 8-8" />
+                <Path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" />
+            </G>
+        </Svg>
+    );
+}
+
+export function CodeIcon({ size = 13, color = "#f78166" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="m8 6-6 6 6 6M16 6l6 6-6 6" />
+            </G>
+        </Svg>
+    );
+}
+
+export function WifiOffIcon({ size = 24, color = "#595B5B" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M1 1l22 22M8.5 16.5a5 5 0 0 1 7 0M2 8.8a15 15 0 0 1 4.2-2.7M10.7 5c4.1-.3 8.3 1 11.3 3.8M5 12.5a10 10 0 0 1 5.2-2.8M12 20h.01" />
+            </G>
+        </Svg>
+    );
+}
+
+export function SparklesIcon({ size = 28, color = "#a371f7" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M12 2.5c.4 0 .8.3.9.7l.8 2.4c.3.9.9 1.6 1.8 1.9l2.4.8c.4.1.7.5.7.9s-.3.8-.7.9l-2.4.8c-.9.3-1.6 1-1.9 1.9l-.8 2.4c-.1.4-.5.7-.9.7s-.8-.3-.9-.7l-.8-2.4a2.6 2.6 0 0 0-1.9-1.9l-2.3-.8a1 1 0 0 1-.7-.9c0-.4.3-.8.7-.9l2.3-.8c.9-.3 1.6-1 1.9-1.9l.8-2.4c.2-.4.6-.7 1-.7Z"
+                fill={color}
+            />
+            <Path
+                d="M18.5 14.5c.3 0 .5.2.6.4l.4 1.2c.2.6.6 1 1.2 1.2l1.2.4c.2.1.4.3.4.6s-.2.5-.4.6l-1.2.4c-.6.2-1 .6-1.2 1.2l-.4 1.2c-.1.2-.3.4-.6.4s-.5-.2-.6-.4l-.4-1.2a1.8 1.8 0 0 0-1.2-1.2l-1.2-.4a.6.6 0 0 1-.4-.6c0-.3.2-.5.4-.6l1.2-.4c.6-.2 1-.6 1.2-1.2l.4-1.2c.1-.2.3-.4.6-.4Z"
+                fill={color}
+            />
+        </Svg>
+    );
+}

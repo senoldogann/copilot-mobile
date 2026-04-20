@@ -15,7 +15,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useNavigation } from "expo-router";
 import type { DrawerNavigationProp } from "@react-navigation/drawer";
 import type { ParamListBase } from "@react-navigation/native";
-import { Feather } from "@expo/vector-icons";
+import { GitBranchIcon, FolderIcon, MoreVerticalIcon, ChevronDownIcon } from "../../src/components/ProviderIcon";
 import { useSessionStore } from "../../src/stores/session-store";
 import type { ChatItem } from "../../src/stores/session-store";
 import { useWorkspaceStore } from "../../src/stores/workspace-store";
@@ -74,7 +74,7 @@ function ChatHeader() {
 
                 <View style={headerStyles.branchContainer}>
                     <View style={headerStyles.branchRow}>
-                        <Feather name="git-branch" size={13} color={colors.textSecondary} />
+                        <GitBranchIcon size={12} color={colors.textTertiary} />
                         <Text style={headerStyles.branchText} numberOfLines={1}>{branchName}</Text>
                     </View>
                     <Text style={headerStyles.repoText} numberOfLines={1}>{repoName}</Text>
@@ -87,14 +87,14 @@ function ChatHeader() {
                         hitSlop={10}
                         accessibilityLabel="Open workspace"
                     >
-                        <Feather name="folder" size={17} color={colors.textSecondary} />
+                        <FolderIcon size={17} color={colors.textSecondary} />
                     </Pressable>
                     <Pressable
                         style={headerStyles.iconButton}
                         hitSlop={10}
                         accessibilityLabel="More options"
                     >
-                        <Feather name="more-vertical" size={17} color={colors.textSecondary} />
+                        <MoreVerticalIcon size={17} color={colors.textSecondary} />
                     </Pressable>
                 </View>
             </View>
@@ -103,7 +103,7 @@ function ChatHeader() {
                 <View style={headerStyles.intentBar}>
                     <ActivityDots active={isTyping} />
                     <Text style={headerStyles.intentText} numberOfLines={1}>{sessionTitle}</Text>
-                    <Feather name="chevron-down" size={13} color={colors.textTertiary} />
+                    <ChevronDownIcon size={12} color={colors.textTertiary} />
                 </View>
             )}
 

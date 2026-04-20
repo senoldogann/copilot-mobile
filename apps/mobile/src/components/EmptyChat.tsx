@@ -3,11 +3,17 @@
 import React from "react";
 import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
 import { useRouter } from "expo-router";
-import { Feather, Ionicons } from "@expo/vector-icons";
-import type { ComponentProps } from "react";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
+import {
+    SparklesIcon,
+    WifiOffIcon,
+    TerminalIcon,
+    WrenchIcon,
+    CheckSquareIcon,
+    CodeIcon,
+} from "./ProviderIcon";
 
-type FeatherIconName = ComponentProps<typeof Feather>["name"];
+type SuggestionIcon = "terminal" | "wrench" | "check" | "code";
 
 type Props = {
     isConnected: boolean;
@@ -73,7 +79,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
         return (
             <View style={styles.container}>
                 <View style={styles.disconnectIcon}>
-                    <Feather name="wifi-off" size={24} color={colors.textTertiary} />
+                    <WifiOffIcon size={24} color={colors.textTertiary} />
                 </View>
                 <Text style={styles.title}>Connect to VS Code</Text>
                 <Text style={styles.subtitle}>
@@ -97,7 +103,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
         <View style={styles.container}>
             <View style={styles.logoContainer}>
                 <View style={styles.logo}>
-                    <Ionicons name="sparkles" size={28} color={colors.copilotPurple} />
+                    <SparklesIcon size={32} color={colors.copilotPurple} />
                 </View>
             </View>
             <Text style={styles.title}>GitHub Copilot</Text>
@@ -106,23 +112,28 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
             </Text>
 
             <View style={styles.suggestions}>
-                <SuggestionChip iconName="terminal" text="Analyze project" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
-                <SuggestionChip iconName="tool" text="Fix a bug" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
-                <SuggestionChip iconName="check-square" text="Write tests" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
-                <SuggestionChip iconName="code" text="Explain code" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
+                <SuggestionChip icon="terminal" text="Analyze project" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
+                <SuggestionChip icon="wrench" text="Fix a bug" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
+                <SuggestionChip icon="check" text="Write tests" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
+                <SuggestionChip icon="code" text="Explain code" {...(onSuggestionPress !== undefined ? { onPress: onSuggestionPress } : {})} />
             </View>
         </View>
     );
 }
 
-function SuggestionChip({ iconName, text, onPress }: { iconName: FeatherIconName; text: string; onPress?: ((text: string) => void) | undefined }) {
+function SuggestionChip({ icon, text, onPress }: { icon: SuggestionIcon; text: string; onPress?: ((text: string) => void) | undefined }) {
+    const IconCmp =
+        icon === "terminal" ? TerminalIcon :
+        icon === "wrench" ? WrenchIcon :
+        icon === "check" ? CheckSquareIcon :
+        CodeIcon;
     return (
         <Pressable
             style={styles.chip}
             onPress={() => onPress?.(text)}
             accessibilityLabel={text}
         >
-            <Feather name={iconName} size={13} color={colors.accent} />
+            <IconCmp size={13} color={colors.accent} />
             <Text style={styles.chipText}>{text}</Text>
         </Pressable>
     );
