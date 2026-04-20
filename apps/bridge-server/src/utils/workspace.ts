@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
-import { readdir, lstat } from "node:fs/promises";
+import { readdir, lstat, readFile } from "node:fs/promises";
 import { promisify } from "node:util";
-import { basename, isAbsolute, relative, resolve, sep } from "node:path";
+import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
     GitCommitSummary,
     GitFileChange,
@@ -414,4 +414,87 @@ export async function performWorkspaceGitOperation(
         ? ["pull", "--ff-only", "--no-rebase"]
         : ["push"];
     return runGit(cwd, args);
+}
+
+const MAX_FILE_READ_BYTES = 256_000; // 256 KB
+
+const TEXT_EXTENSIONS = new Set([
+    ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+    ".json", ".jsonc", ".yaml", ".yml", ".toml",
+    ".md", ".mdx", ".txt", ".env", ".env.example",
+    ".sh", ".bash", ".zsh", ".fish",
+    ".html", ".css", ".scss", ".less",
+    ".py", ".rb", ".go", ".rs", ".java", ".kt", ".swift",
+    ".c", ".cpp", ".h", ".hpp",
+    ".graphql", ".gql", ".sql",
+    ".xml", ".svg",
+    ".gitignore", ".gitattributes", ".editorconfig",
+    ".eslintrc", ".prettierrc", ".babelrc",
+    "", // no extension — likely text
+]);
+
+function inferMimeType(filePath: string): string {
+    const ext = extname(filePath).toLowerCase();
+    const mimeMap: Record<string, string> = {
+        ".ts": "text/typescript", ".tsx": "text/typescript",
+        ".js": "text/javascript", ".jsx": "text/javascript",
+        ".json": "application/json", ".jsonc": "application/json",
+        ".yaml": "text/yaml", ".yml": "text/yaml",
+        ".md": "text/markdown", ".mdx": "text/markdown",
+        ".html": "text/html", ".css": "text/css",
+        ".svg": "image/svg+xml",
+        ".txt": "text/plain", ".sh": "text/x-sh",
+        ".py": "text/x-python", ".rb": "text/x-ruby",
+        ".go": "text/x-go", ".rs": "text/x-rust",
+    };
+    return mimeMap[ext] ?? "text/plain";
+}
+
+export async function readWorkspaceFile(
+    context: SessionContext,
+    requestedPath: string,
+    maxBytes = MAX_FILE_READ_BYTES
+): Promise<{ content: string; mimeType: string; truncated: boolean; error?: string }> {
+    const root = resolve(context.cwd);
+    const absPath = isAbsolute(requestedPath)
+        ? resolve(requestedPath)
+        : resolve(root, requestedPath);
+
+    if (!isWithinRoot(root, absPath)) {
+        return { content: "", mimeType: "text/plain", truncated: false, error: "Path is outside workspace root" };
+    }
+
+    const ext = extname(absPath).toLowerCase();
+    if (!TEXT_EXTENSIONS.has(ext)) {
+        return { content: "", mimeType: "application/octet-stream", truncated: false, error: "Binary file — content not available" };
+    }
+
+    try {
+        const stat = await lstat(absPath);
+        if (!stat.isFile()) {
+            return { content: "", mimeType: "text/plain", truncated: false, error: "Path is not a file" };
+        }
+
+        const limitedBytes = Math.min(maxBytes, MAX_FILE_READ_BYTES);
+        const truncated = stat.size > limitedBytes;
+
+        let content: string;
+        if (truncated) {
+            // Only read up to limitedBytes
+            const raw = await readFile(absPath);
+            const slice = raw.slice(0, limitedBytes);
+            content = slice.toString("utf-8");
+        } else {
+            content = await readFile(absPath, "utf-8");
+        }
+
+        return { content, mimeType: inferMimeType(absPath), truncated };
+    } catch (error) {
+        return {
+            content: "",
+            mimeType: "text/plain",
+            truncated: false,
+            error: error instanceof Error ? error.message : "Failed to read file",
+        };
+    }
 }

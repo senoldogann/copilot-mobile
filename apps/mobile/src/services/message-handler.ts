@@ -11,6 +11,7 @@ import {
     clearBackgroundCompletion,
     notifyIfBackgroundCompletion,
 } from "./app-runtime";
+import { dispatchWorkspaceFileResponse } from "./workspace-events";
 
 function collectPermissionDetails(metadata: Record<string, unknown>): Array<string> {
     const details: Array<string> = [];
@@ -519,6 +520,17 @@ export function handleServerMessage(message: ServerMessage): void {
             if (!isActiveSession(message.payload.sessionId)) break;
             const workspaceStore = useWorkspaceStore.getState();
             workspaceStore.setWorkspaceOperationResult(message.payload);
+            break;
+        }
+
+        case "workspace.file.response": {
+            const { path, content, mimeType, truncated, error } = message.payload;
+            dispatchWorkspaceFileResponse(path, {
+                content,
+                mimeType,
+                truncated,
+                ...(error !== undefined ? { error } : {}),
+            });
             break;
         }
 

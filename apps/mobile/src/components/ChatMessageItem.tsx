@@ -1,6 +1,6 @@
 // Sohbet mesaj öğesi — GitHub Copilot mobil tasarım diliyle markdown render
 
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useCallback } from "react";
 import {
     View,
     Text,
@@ -8,12 +8,15 @@ import {
     Modal,
     ScrollView,
     StyleSheet,
+    ActivityIndicator,
 } from "react-native";
 import type { SessionMessageAttachment } from "@copilot-mobile/shared";
 import type { ChatItem } from "../stores/session-store";
 import { ThinkingBubble } from "./ThinkingBubble";
 import { ToolCard } from "./ToolCard";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
+import { useSessionStore } from "../stores/session-store";
+import { requestWorkspaceFile, onWorkspaceFileResponse } from "../services/bridge";
 
 type Props = {
     item: ChatItem;
@@ -163,7 +166,7 @@ function FileLink({ path }: { path: string }) {
     );
 }
 
-// File content viewer — slide-in modal showing file path
+// File content viewer — slide-in modal showing file path and content from bridge
 function FileContentViewer({
     path,
     onClose,
@@ -179,6 +182,48 @@ function FileContentViewer({
             : `Line ${lineMatch[1]}`
         : null;
 
+    const [loading, setLoading] = useState(true);
+    const [content, setContent] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+    const [truncated, setTruncated] = useState(false);
+
+    const activeSessionId = useSessionStore((s) => s.activeSessionId);
+
+    const loadFile = useCallback(() => {
+        if (activeSessionId === null) {
+            setLoading(false);
+            setError("No active session. Connect to the bridge first.");
+            return;
+        }
+        setLoading(true);
+        setError(null);
+        const unsubscribe = onWorkspaceFileResponse(cleanPath, (payload) => {
+            unsubscribe();
+            setLoading(false);
+            if (payload.error !== undefined) {
+                setError(payload.error);
+            } else {
+                setContent(payload.content);
+                setTruncated(payload.truncated);
+            }
+        });
+        void requestWorkspaceFile(activeSessionId, cleanPath);
+        const timeout = setTimeout(() => {
+            unsubscribe();
+            setLoading(false);
+            setError("Timed out waiting for file content.");
+        }, 10_000);
+        return () => {
+            clearTimeout(timeout);
+            unsubscribe();
+        };
+    }, [activeSessionId, cleanPath]);
+
+    useEffect(() => {
+        const cleanup = loadFile();
+        return cleanup;
+    }, [loadFile]);
+
     return (
         <Modal
             visible
@@ -190,7 +235,7 @@ function FileContentViewer({
                 <View style={viewerStyles.header}>
                     <View style={viewerStyles.headerLeft}>
                         <Text style={viewerStyles.fileIcon}>📄</Text>
-                        <View>
+                        <View style={viewerStyles.headerText}>
                             <Text style={viewerStyles.fileName} numberOfLines={1}>
                                 {cleanPath.split("/").pop()}
                             </Text>
@@ -199,10 +244,7 @@ function FileContentViewer({
                             </Text>
                         </View>
                     </View>
-                    <Pressable
-                        style={viewerStyles.closeButton}
-                        onPress={onClose}
-                    >
+                    <Pressable style={viewerStyles.closeButton} onPress={onClose}>
                         <Text style={viewerStyles.closeText}>✕</Text>
                     </Pressable>
                 </View>
@@ -211,12 +253,29 @@ function FileContentViewer({
                         <Text style={viewerStyles.lineInfoText}>{lineInfo}</Text>
                     </View>
                 )}
-                <ScrollView style={viewerStyles.body}>
-                    <Text style={viewerStyles.placeholder}>
-                        File content is available on the connected VS Code instance.
-                        {"\n\n"}Path: {cleanPath}
-                        {lineInfo !== null ? `\n${lineInfo}` : ""}
-                    </Text>
+                {truncated && (
+                    <View style={viewerStyles.truncatedBanner}>
+                        <Text style={viewerStyles.truncatedText}>File truncated — showing first 256 KB</Text>
+                    </View>
+                )}
+                <ScrollView style={viewerStyles.body} contentContainerStyle={viewerStyles.bodyContent}>
+                    {loading ? (
+                        <View style={viewerStyles.centered}>
+                            <ActivityIndicator color={colors.accent} size="small" />
+                            <Text style={viewerStyles.loadingText}>Loading…</Text>
+                        </View>
+                    ) : error !== null ? (
+                        <View style={viewerStyles.centered}>
+                            <Text style={viewerStyles.errorText}>{error}</Text>
+                            <Pressable style={viewerStyles.retryBtn} onPress={loadFile}>
+                                <Text style={viewerStyles.retryText}>Retry</Text>
+                            </Pressable>
+                        </View>
+                    ) : (
+                        <Text style={viewerStyles.codeText} selectable>
+                            {content ?? ""}
+                        </Text>
+                    )}
                 </ScrollView>
             </View>
         </Modal>
@@ -559,6 +618,9 @@ const viewerStyles = StyleSheet.create({
         gap: 10,
         flex: 1,
     },
+    headerText: {
+        flex: 1,
+    },
     fileIcon: {
         fontSize: 18,
     },
@@ -586,22 +648,63 @@ const viewerStyles = StyleSheet.create({
     lineInfo: {
         paddingHorizontal: spacing.lg,
         paddingVertical: 6,
-        backgroundColor: colors.lineHighlightBg,
+        backgroundColor: colors.accentMuted,
         borderBottomWidth: 1,
-        borderBottomColor: colors.lineHighlightBorder,
+        borderBottomColor: colors.border,
     },
     lineInfoText: {
         fontSize: fontSize.sm,
-        color: colors.lineHighlightText,
+        color: colors.accent,
+    },
+    truncatedBanner: {
+        paddingHorizontal: spacing.lg,
+        paddingVertical: 6,
+        backgroundColor: colors.bgElevated,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border,
+    },
+    truncatedText: {
+        fontSize: fontSize.sm,
+        color: colors.textTertiary,
     },
     body: {
         flex: 1,
-        padding: spacing.lg,
     },
-    placeholder: {
-        fontSize: fontSize.md,
-        lineHeight: 20,
-        color: colors.textSecondary,
+    bodyContent: {
+        padding: spacing.lg,
+        paddingBottom: 40,
+    },
+    centered: {
+        alignItems: "center",
+        justifyContent: "center",
+        paddingVertical: 40,
+        gap: 12,
+    },
+    loadingText: {
+        fontSize: fontSize.sm,
+        color: colors.textTertiary,
+    },
+    errorText: {
+        fontSize: fontSize.sm,
+        color: colors.error,
+        textAlign: "center",
+    },
+    retryBtn: {
+        paddingHorizontal: spacing.lg,
+        paddingVertical: 8,
+        borderRadius: borderRadius.md,
+        backgroundColor: colors.bgElevated,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    retryText: {
+        fontSize: fontSize.sm,
+        color: colors.textPrimary,
+    },
+    codeText: {
+        fontSize: 12,
+        lineHeight: 18,
+        color: colors.textPrimary,
         fontFamily: "monospace",
     },
 });

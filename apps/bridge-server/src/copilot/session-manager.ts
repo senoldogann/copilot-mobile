@@ -26,6 +26,7 @@ import {
     buildWorkspaceGitSummary,
     buildWorkspaceTree,
     performWorkspaceGitOperation,
+    readWorkspaceFile,
 } from "../utils/workspace.js";
 
 type SendFn = (message: ServerMessage) => void;
@@ -860,6 +861,43 @@ export function createSessionManager(
                     },
                 });
             }
+        },
+
+        async readWorkspaceFile(
+            sessionId: string,
+            requestedPath: string,
+            maxBytes?: number
+        ): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                send({
+                    ...makeBase(),
+                    type: "workspace.file.response",
+                    payload: {
+                        sessionId,
+                        path: requestedPath,
+                        content: "",
+                        mimeType: "text/plain",
+                        truncated: false,
+                        error: "SESSION_NOT_FOUND",
+                    },
+                });
+                return;
+            }
+
+            const result = await readWorkspaceFile(context, requestedPath, maxBytes);
+            send({
+                ...makeBase(),
+                type: "workspace.file.response",
+                payload: {
+                    sessionId,
+                    path: requestedPath,
+                    content: result.content,
+                    mimeType: result.mimeType,
+                    truncated: result.truncated,
+                    ...(result.error !== undefined ? { error: result.error } : {}),
+                },
+            });
         },
 
         async updateSessionMode(sessionId: string, agentMode: AgentMode): Promise<void> {

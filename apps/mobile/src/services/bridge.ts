@@ -15,6 +15,9 @@ import { handleServerMessage } from "./message-handler";
 import { useConnectionStore } from "../stores/connection-store";
 import { useSessionStore } from "../stores/session-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
+import { dispatchWorkspaceFileResponse, onWorkspaceFileResponse } from "./workspace-events";
+
+export { onWorkspaceFileResponse };
 
 let client: ReturnType<typeof createWSClient> | null = null;
 
@@ -360,6 +363,28 @@ export function resumeBridgeConnection(): boolean {
         return false;
     }
     return client.resume();
+}
+
+export async function requestWorkspaceFile(
+    sessionId: string,
+    path: string,
+    maxBytes?: number
+): Promise<void> {
+    const c = getClient();
+    try {
+        await c.sendMessage("workspace.file.request", {
+            sessionId,
+            path,
+            ...(maxBytes !== undefined ? { maxBytes } : {}),
+        });
+    } catch (error) {
+        dispatchWorkspaceFileResponse(path, {
+            content: "",
+            mimeType: "text/plain",
+            truncated: false,
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
 }
 
 // Disconnect

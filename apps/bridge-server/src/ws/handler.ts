@@ -216,6 +216,13 @@ export function createMessageHandler(
                 case "workspace.push":
                     return sessionManager.pushWorkspace(message.payload.sessionId);
 
+                case "workspace.file.request":
+                    return sessionManager.readWorkspaceFile(
+                        message.payload.sessionId,
+                        message.payload.path,
+                        message.payload.maxBytes
+                    );
+
                 case "reconnect": {
                     // Reconnect — replay messages after lastSeenSeq
                     const lastSeenSeq = message.payload.lastSeenSeq;

@@ -443,6 +443,18 @@ const workspacePushResultSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceFileResponseSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.file.response"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        path: z.string().min(1),
+        content: z.string(),
+        mimeType: z.string(),
+        truncated: z.boolean(),
+        error: z.string().optional(),
+    }),
+});
+
 export const serverMessageSchema = z.discriminatedUnion("type", [
     pairingSuccessSchema,
     sessionCreatedSchema,
@@ -475,6 +487,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     workspaceGitSummarySchema,
     workspacePullResultSchema,
     workspacePushResultSchema,
+    workspaceFileResponseSchema,
 ]);
 
 // --- Client → Server Message Schemas ---
@@ -598,6 +611,15 @@ const workspacePushSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceFileRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.file.request"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        path: z.string().min(1),
+        maxBytes: z.number().int().positive().optional(),
+    }),
+});
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
     authPairSchema,
     sessionCreateSchema,
@@ -618,6 +640,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     workspaceGitSummaryRequestSchema,
     workspacePullSchema,
     workspacePushSchema,
+    workspaceFileRequestSchema,
 ]);
 
 // --- QR Payload Schema ---

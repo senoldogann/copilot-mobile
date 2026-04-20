@@ -85,10 +85,13 @@ export function BottomSheet({
                         </Pressable>
                     </View>
 
-                    {/* İçerik */}
+                    {/* İçerik — flex: 1 so it fills remaining sheet space and scrolls properly */}
                     <ScrollView
                         style={[styles.content, contentStyle]}
-                        showsVerticalScrollIndicator={false}
+                        contentContainerStyle={styles.contentContainer}
+                        showsVerticalScrollIndicator={true}
+                        scrollIndicatorInsets={{ right: 1 }}
+                        keyboardShouldPersistTaps="handled"
                     >
                         {children}
                     </ScrollView>
@@ -105,14 +108,15 @@ const styles = StyleSheet.create({
         justifyContent: "flex-end",
     },
     sheet: {
-        maxHeight: "65%",
+        maxHeight: "80%",
         minHeight: 200,
-        backgroundColor: colors.bgSecondary,
+        backgroundColor: colors.bg,
         borderTopLeftRadius: borderRadius.xl,
         borderTopRightRadius: borderRadius.xl,
         borderWidth: 1,
         borderBottomWidth: 0,
         borderColor: colors.border,
+        overflow: "hidden",
     },
     grabHandleContainer: {
         alignItems: "center",
@@ -180,7 +184,11 @@ const styles = StyleSheet.create({
         borderColor: colors.border,
     },
     content: {
+        flex: 1,
         paddingHorizontal: spacing.lg,
+    },
+    contentContainer: {
         paddingVertical: spacing.md,
+        paddingBottom: 34,
     },
 });

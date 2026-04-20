@@ -9,7 +9,6 @@ import {
     StyleSheet,
     Platform,
     Modal,
-    FlatList,
     Image,
     ScrollView,
 } from "react-native";
@@ -125,58 +124,6 @@ function ModelSelectorContent({
         )
         : models;
 
-    const renderModel = useCallback(
-        ({ item }: { item: ModelInfo }) => {
-            const isSelected = item.id === selectedModel;
-            const isDisabled = item.policyState === "disabled";
-
-            const badges: Array<string> = [];
-            if (item.defaultReasoningEffort !== undefined) {
-                badges.push(effortLabels[item.defaultReasoningEffort]?.label ?? item.defaultReasoningEffort);
-            }
-            if (item.billingMultiplier !== undefined && item.billingMultiplier !== 1) {
-                badges.push(`${item.billingMultiplier}×`);
-            }
-            if (item.supportsReasoningEffort === true) {
-                badges.push("›");
-            }
-
-            return (
-                <Pressable
-                    style={[
-                        dropdownStyles.item,
-                        isSelected && dropdownStyles.itemSelected,
-                        isDisabled && dropdownStyles.itemDisabled,
-                    ]}
-                    onPress={() => {
-                        if (!isDisabled) onSelect(item.id);
-                    }}
-                    disabled={isDisabled}
-                >
-                    <View style={dropdownStyles.itemLeft}>
-                        {isSelected && <Text style={dropdownStyles.checkmark}>✓</Text>}
-                        <Text
-                            style={[
-                                dropdownStyles.itemText,
-                                isSelected && dropdownStyles.itemTextSelected,
-                                isDisabled && dropdownStyles.itemTextDisabled,
-                            ]}
-                            numberOfLines={1}
-                        >
-                            {item.name}
-                        </Text>
-                    </View>
-                    {badges.length > 0 && (
-                        <Text style={dropdownStyles.badgeText}>
-                            {badges.join(" · ")}
-                        </Text>
-                    )}
-                </Pressable>
-            );
-        },
-        [selectedModel, onSelect]
-    );
-
     return (
         <View>
             <View style={dropdownStyles.searchContainer}>
@@ -190,13 +137,60 @@ function ModelSelectorContent({
                     autoCorrect={false}
                 />
             </View>
-            <FlatList
-                data={filtered as ModelInfo[]}
-                renderItem={renderModel}
-                keyExtractor={(item) => item.id}
+            <ScrollView
                 style={dropdownStyles.list}
                 keyboardShouldPersistTaps="handled"
-            />
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+            >
+                {(filtered as ModelInfo[]).map((item) => {
+                    const isSelected = item.id === selectedModel;
+                    const isDisabled = item.policyState === "disabled";
+                    const badges: Array<string> = [];
+                    if (item.defaultReasoningEffort !== undefined) {
+                        badges.push(effortLabels[item.defaultReasoningEffort]?.label ?? item.defaultReasoningEffort);
+                    }
+                    if (item.billingMultiplier !== undefined && item.billingMultiplier !== 1) {
+                        badges.push(`${item.billingMultiplier}×`);
+                    }
+                    if (item.supportsReasoningEffort === true) {
+                        badges.push("›");
+                    }
+                    return (
+                        <Pressable
+                            key={item.id}
+                            style={[
+                                dropdownStyles.item,
+                                isSelected && dropdownStyles.itemSelected,
+                                isDisabled && dropdownStyles.itemDisabled,
+                            ]}
+                            onPress={() => {
+                                if (!isDisabled) onSelect(item.id);
+                            }}
+                            disabled={isDisabled}
+                        >
+                            <View style={dropdownStyles.itemLeft}>
+                                {isSelected && <Text style={dropdownStyles.checkmark}>✓</Text>}
+                                <Text
+                                    style={[
+                                        dropdownStyles.itemText,
+                                        isSelected && dropdownStyles.itemTextSelected,
+                                        isDisabled && dropdownStyles.itemTextDisabled,
+                                    ]}
+                                    numberOfLines={1}
+                                >
+                                    {item.name}
+                                </Text>
+                            </View>
+                            {badges.length > 0 && (
+                                <Text style={dropdownStyles.badgeText}>
+                                    {badges.join(" · ")}
+                                </Text>
+                            )}
+                        </Pressable>
+                    );
+                })}
+            </ScrollView>
         </View>
     );
 }

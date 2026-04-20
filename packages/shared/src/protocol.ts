@@ -150,6 +150,27 @@ export type WorkspaceOperationRequestMessage = BaseBridgeMessage & {
     };
 };
 
+export type WorkspaceFileRequestMessage = BaseBridgeMessage & {
+    type: "workspace.file.request";
+    payload: {
+        sessionId: string;
+        path: string;
+        maxBytes?: number;
+    };
+};
+
+export type WorkspaceFileResponseMessage = BaseBridgeMessage & {
+    type: "workspace.file.response";
+    payload: {
+        sessionId: string;
+        path: string;
+        content: string;
+        mimeType: string;
+        truncated: boolean;
+        error?: string;
+    };
+};
+
 export type WorkspaceOperationResultPayload = {
     sessionId: string;
     context: SessionContext;
@@ -487,7 +508,8 @@ export type ServerMessage =
     | WorkspaceTreeMessage
     | WorkspaceGitSummaryMessage
     | WorkspacePullResultMessage
-    | WorkspacePushResultMessage;
+    | WorkspacePushResultMessage
+    | WorkspaceFileResponseMessage;
 
 // --- Client → Server Messages (Discriminated Union) ---
 
@@ -594,7 +616,8 @@ export type ClientMessage =
     | CapabilitiesRequestMessage
     | WorkspaceTreeRequestMessage
     | WorkspaceGitSummaryRequestMessage
-    | WorkspaceOperationRequestMessage;
+    | WorkspaceOperationRequestMessage
+    | WorkspaceFileRequestMessage;
 
 // --- QR Code Content ---
 

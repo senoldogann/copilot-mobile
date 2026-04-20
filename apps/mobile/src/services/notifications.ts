@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import * as Notifications from "expo-notifications";
+import Constants from "expo-constants";
 import { useConnectionStore } from "../stores/connection-store";
 
 const SESSION_EVENTS_CHANNEL_ID = "session-events";
@@ -7,12 +8,20 @@ const SESSION_EVENTS_CHANNEL_ID = "session-events";
 let initialized = false;
 let permissionRequested = false;
 
+// expo-notifications remote-push functionality was removed from Expo Go in SDK 53.
+// Only initialize when running as a real dev-build or production build.
+function isExpoGo(): boolean {
+    return (Constants.appOwnership === "expo") || (Constants.executionEnvironment === "storeClient");
+}
+
 function hasNotificationPermission(settings: Notifications.NotificationPermissionsStatus): boolean {
     return settings.granted
         || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
 }
 
 export async function initializeNotifications(): Promise<void> {
+    if (isExpoGo()) return;
+
     if (!initialized) {
         Notifications.setNotificationHandler({
             handleNotification: async () => ({
@@ -36,6 +45,7 @@ export async function initializeNotifications(): Promise<void> {
 }
 
 async function ensureNotificationPermission(options: { allowPrompt: boolean }): Promise<boolean> {
+    if (isExpoGo()) return false;
     await initializeNotifications();
 
     const currentSettings = await Notifications.getPermissionsAsync();
@@ -92,6 +102,7 @@ export async function notifySessionCompleted(input: {
 }
 
 export async function dismissCompletionNotifications(): Promise<void> {
+    if (isExpoGo()) return;
     try {
         await Notifications.dismissAllNotificationsAsync();
     } catch (error) {
