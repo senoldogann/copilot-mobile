@@ -506,7 +506,9 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const reasoningEffort = useSessionStore((s) => s.reasoningEffort);
     const setReasoningEffort = useSessionStore((s) => s.setReasoningEffort);
     const skills = useSessionStore((s) => s.skills);
-
+    const sessionUsage = useSessionStore((s) =>
+        s.activeSessionId !== null ? s.sessionUsage[s.activeSessionId] : undefined
+    );
     const currentModel = models.find((m) => m.id === selectedModel);
     const effortInfo = deriveAvailableReasoningEfforts(currentModel);
 
@@ -723,6 +725,17 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
         : "";
 
     const supportsVision = currentModel?.supportsVision === true;
+    // Live context usage takes priority over static model limit.
+    const contextUsageLabel: { primary: string; percent: number } | null = (() => {
+        if (sessionUsage !== undefined && sessionUsage.tokenLimit > 0) {
+            const pct = Math.min(100, Math.round((sessionUsage.currentTokens / sessionUsage.tokenLimit) * 100));
+            return {
+                primary: `${formatCtxWindow(sessionUsage.currentTokens)} / ${formatCtxWindow(sessionUsage.tokenLimit)}`,
+                percent: pct,
+            };
+        }
+        return null;
+    })();
     const contextWindowLabel = currentModel?.contextWindowTokens !== undefined
         ? formatCtxWindow(currentModel.contextWindowTokens)
         : null;
@@ -846,13 +859,26 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         <ChevronDownIcon size={10} color={colors.textTertiary} />
                     </Pressable>
 
-                    {contextWindowLabel !== null && (
+                    {contextUsageLabel !== null ? (
+                        <View
+                            style={[
+                                toolbarStyles.ctxBadge,
+                                contextUsageLabel.percent >= 90 && toolbarStyles.ctxBadgeDanger,
+                                contextUsageLabel.percent >= 75 && contextUsageLabel.percent < 90 && toolbarStyles.ctxBadgeWarn,
+                            ]}
+                            accessibilityLabel={`Bağlam penceresi kullanımı ${contextUsageLabel.percent} yüzde`}
+                        >
+                            <Text style={toolbarStyles.ctxBadgeText}>
+                                {contextUsageLabel.primary} · {contextUsageLabel.percent}%
+                            </Text>
+                        </View>
+                    ) : contextWindowLabel !== null ? (
                         <View style={toolbarStyles.ctxBadge}>
                             <Text style={toolbarStyles.ctxBadgeText}>
                                 {contextWindowLabel} ctx
                             </Text>
                         </View>
-                    )}
+                    ) : null}
 
                     {/* Thinking effort */}
                     {effortInfo.supported && (
@@ -1375,6 +1401,13 @@ const toolbarStyles = StyleSheet.create({
         borderWidth: 1,
         borderColor: colors.border,
         backgroundColor: colors.bgElevated,
+    },
+    ctxBadgeWarn: {
+        borderColor: colors.warning,
+    },
+    ctxBadgeDanger: {
+        borderColor: colors.error,
+        backgroundColor: colors.errorMuted,
     },
     ctxBadgeText: {
         color: colors.textTertiary,

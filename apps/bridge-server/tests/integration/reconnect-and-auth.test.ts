@@ -243,6 +243,15 @@ class FakeSession implements AdaptedCopilotSession {
         this.handlers.onIntent = handler;
     }
 
+    onUsage(_handler: (usage: {
+        tokenLimit: number;
+        currentTokens: number;
+        systemTokens?: number;
+        conversationTokens?: number;
+        toolDefinitionsTokens?: number;
+        messagesLength?: number;
+    }) => void): void { }
+
     onRuntimeModeChanged(_handler: (runtimeMode: "interactive" | "plan" | "autopilot") => void): void { }
 
     onPlanExitRequest(_handler: (request: {

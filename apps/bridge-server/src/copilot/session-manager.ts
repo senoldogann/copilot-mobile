@@ -19,6 +19,7 @@ import type {
     SessionMessageAttachment,
     SessionHistoryItem,
     SessionInfo,
+    SessionUsagePayload,
 } from "@copilot-mobile/shared";
 import { MAX_SESSIONS, PERMISSION_TIMEOUT_MS, PROTOCOL_VERSION, SDKError } from "@copilot-mobile/shared";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
@@ -436,6 +437,27 @@ export function createSessionManager(
                 ...makeBase(),
                 type: "assistant.intent",
                 payload: { sessionId, intent },
+            });
+        });
+
+        session.onUsage((usage: { tokenLimit: number; currentTokens: number; systemTokens?: number; conversationTokens?: number; toolDefinitionsTokens?: number; messagesLength?: number }) => {
+            const payload: SessionUsagePayload = {
+                sessionId,
+                tokenLimit: usage.tokenLimit,
+                currentTokens: usage.currentTokens,
+                ...(usage.systemTokens !== undefined ? { systemTokens: usage.systemTokens } : {}),
+                ...(usage.conversationTokens !== undefined
+                    ? { conversationTokens: usage.conversationTokens }
+                    : {}),
+                ...(usage.toolDefinitionsTokens !== undefined
+                    ? { toolDefinitionsTokens: usage.toolDefinitionsTokens }
+                    : {}),
+                ...(usage.messagesLength !== undefined ? { messagesLength: usage.messagesLength } : {}),
+            };
+            emit({
+                ...makeBase(),
+                type: "session.usage",
+                payload,
             });
         });
     }
