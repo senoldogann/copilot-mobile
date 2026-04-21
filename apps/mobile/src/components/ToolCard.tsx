@@ -218,20 +218,78 @@ function CreateView({ path, content }: { path: string | undefined; content: stri
     );
 }
 
-function TerminalBlock({ command, output }: { command: string | null; output: string | undefined }) {
+function TerminalBlock({ command, output, exitOk }: { command: string | null; output: string | undefined; exitOk?: boolean }) {
+    const outputLines = (output ?? "").trim().split("\n").filter((l) => l.length > 0 || output?.trim().length === 0);
     return (
         <View style={terminalStyles.container}>
+            {/* Command line */}
             {command !== null && (
                 <View style={terminalStyles.promptRow}>
                     <Text style={terminalStyles.prompt}>$</Text>
                     <Text style={terminalStyles.command} selectable>{command}</Text>
                 </View>
             )}
-            {output !== undefined && output.trim().length > 0 && (
+
+            {/* Separator line between command and output */}
+            {command !== null && outputLines.length > 0 && (
+                <View style={terminalStyles.divider} />
+            )}
+
+            {/* Output */}
+            {outputLines.length > 0 && (
                 <View style={terminalStyles.outputBlock}>
-                    {output.trim().split("\n").map((line, i) => (
-                        <Text key={i} style={terminalStyles.outputLine} selectable>{line}</Text>
+                    {outputLines.slice(0, 200).map((line, i) => (
+                        <Text key={i} style={[
+                            terminalStyles.outputLine,
+                            // Highlight lines that look like errors
+                            /error|fail|exception|traceback/i.test(line) && terminalStyles.outputError,
+                            // Highlight lines that look like success
+                            /success|done|ok\b|passed|complete/i.test(line) && terminalStyles.outputSuccess,
+                        ]} selectable>{line}</Text>
                     ))}
+                    {outputLines.length > 200 && (
+                        <Text style={terminalStyles.truncated}>… {outputLines.length - 200} more lines</Text>
+                    )}
+                </View>
+            )}
+
+            {/* Exit status badge */}
+            {exitOk !== undefined && (
+                <View style={[terminalStyles.exitBadge, exitOk ? terminalStyles.exitOk : terminalStyles.exitFail]}>
+                    <Text style={terminalStyles.exitText}>{exitOk ? "exit 0" : "exit ≠ 0"}</Text>
+                </View>
+            )}
+        </View>
+    );
+}
+
+function FileReadView({ path, content }: { path: string | undefined; content: string }) {
+    const lines = content.split("\n");
+    const lineNumWidth = String(lines.length).length;
+    return (
+        <View style={diffStyles.container}>
+            {/* File path header */}
+            {path !== undefined && (
+                <View style={diffStyles.fileHeader}>
+                    <Text style={[diffStyles.fileHeaderText, { color: "#79c0ff" }]}>
+                        {path}
+                    </Text>
+                </View>
+            )}
+            {/* Content with line numbers */}
+            {lines.slice(0, 300).map((line, i) => (
+                <View key={i} style={diffStyles.line}>
+                    <Text style={fileReadStyles.lineNum}>
+                        {String(i + 1).padStart(lineNumWidth, " ")}
+                    </Text>
+                    <Text style={fileReadStyles.lineText} selectable>
+                        {line}
+                    </Text>
+                </View>
+            ))}
+            {lines.length > 300 && (
+                <View style={[diffStyles.line, { paddingVertical: 4 }]}>
+                    <Text style={diffStyles.textSkip}>… {lines.length - 300} more lines</Text>
                 </View>
             )}
         </View>
@@ -314,6 +372,7 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
                     <TerminalBlock
                         command={args.command ?? item.progressMessage ?? null}
                         output={item.partialOutput ?? item.progressMessage}
+                        {...(item.status === "completed" ? { exitOk: true } : item.status === "failed" ? { exitOk: false } : {})}
                     />
                 </View>
             )}
@@ -322,33 +381,38 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
                 <ThoughtBlock text={args.thought} />
             )}
 
-            {kind === "read" && item.partialOutput !== undefined && item.partialOutput.trim().length > 0 && (
+            {kind === "read" && (
                 <View style={styles.diffSection}>
-                    <Text style={styles.sectionTitle}>CONTENT</Text>
-                    <View style={terminalStyles.container}>
-                        <Text style={terminalStyles.outputLine} selectable>{item.partialOutput.trim()}</Text>
-                    </View>
+                    <Text style={styles.sectionTitle}>FILE CONTENT</Text>
+                    {(item.partialOutput !== undefined && item.partialOutput.trim().length > 0) ? (
+                        <FileReadView path={args.path} content={item.partialOutput.trim()} />
+                    ) : (
+                        <View style={diffStyles.container}>
+                            <Text style={diffStyles.empty}>
+                                {item.status === "running" ? "Reading…" : "No content captured"}
+                            </Text>
+                        </View>
+                    )}
                 </View>
             )}
 
             {kind === "search" && (
                 <View style={styles.diffSection}>
                     <Text style={styles.sectionTitle}>RESULTS</Text>
-                    <View style={terminalStyles.container}>
-                        {args.query !== undefined && (
-                            <View style={terminalStyles.promptRow}>
-                                <Text style={terminalStyles.prompt}>~</Text>
-                                <Text style={terminalStyles.command} selectable>{args.query}</Text>
-                            </View>
-                        )}
-                        {item.partialOutput !== undefined && item.partialOutput.trim().length > 0 && (
-                            <View style={terminalStyles.outputBlock}>
-                                {item.partialOutput.trim().split("\n").slice(0, 80).map((line, i) => (
-                                    <Text key={i} style={terminalStyles.outputLine} selectable>{line}</Text>
-                                ))}
-                            </View>
-                        )}
-                    </View>
+                    <TerminalBlock
+                        command={args.query !== undefined ? `search: ${args.query}` : null}
+                        output={item.partialOutput}
+                    />
+                </View>
+            )}
+
+            {kind === "fetch" && (
+                <View style={styles.diffSection}>
+                    <Text style={styles.sectionTitle}>RESPONSE</Text>
+                    <TerminalBlock
+                        command={args.path ?? args.query ?? null}
+                        output={item.partialOutput}
+                    />
                 </View>
             )}
 
@@ -356,11 +420,7 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
             {kind === "other" && item.argumentsText !== undefined && (
                 <View style={styles.diffSection}>
                     <Text style={styles.sectionTitle}>ARGUMENTS</Text>
-                    <View style={terminalStyles.container}>
-                        <Text style={[terminalStyles.outputLine, { color: colors.textSecondary }]} selectable>
-                            {item.argumentsText}
-                        </Text>
-                    </View>
+                    <TerminalBlock command={null} output={item.argumentsText} />
                 </View>
             )}
         </View>
@@ -517,13 +577,17 @@ const terminalStyles = StyleSheet.create({
         borderRadius: 6,
         borderWidth: 1,
         borderColor: colors.border,
-        padding: spacing.md,
-        gap: 4,
+        overflow: "hidden",
     },
     promptRow: {
         flexDirection: "row",
         alignItems: "flex-start",
         gap: 8,
+        paddingHorizontal: spacing.md,
+        paddingVertical: 8,
+        backgroundColor: "#161b22",
+        borderBottomWidth: 1,
+        borderBottomColor: "#21262d",
     },
     prompt: {
         color: colors.success,
@@ -531,6 +595,7 @@ const terminalStyles = StyleSheet.create({
         fontSize: fontSize.sm,
         lineHeight: 18,
         fontWeight: "700",
+        flexShrink: 0,
     },
     command: {
         flex: 1,
@@ -539,12 +604,76 @@ const terminalStyles = StyleSheet.create({
         fontSize: fontSize.sm,
         lineHeight: 18,
     },
-    outputBlock: { marginTop: 6, gap: 2 },
+    divider: {
+        height: 1,
+        backgroundColor: "#21262d",
+    },
+    outputBlock: {
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+        gap: 1,
+    },
     outputLine: {
         color: "#8b949e",
         fontFamily: "monospace",
         fontSize: fontSize.xs,
         lineHeight: 16,
+    },
+    outputError: {
+        color: "#ffa198",
+    },
+    outputSuccess: {
+        color: "#56d364",
+    },
+    truncated: {
+        color: colors.textTertiary,
+        fontFamily: "monospace",
+        fontSize: fontSize.xs,
+        fontStyle: "italic",
+        paddingHorizontal: spacing.md,
+        paddingBottom: spacing.sm,
+    },
+    exitBadge: {
+        alignSelf: "flex-end",
+        margin: spacing.sm,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 4,
+        borderWidth: 1,
+    },
+    exitOk: {
+        borderColor: "#238636",
+        backgroundColor: "rgba(35,134,54,0.12)",
+    },
+    exitFail: {
+        borderColor: "#da3633",
+        backgroundColor: "rgba(218,54,51,0.12)",
+    },
+    exitText: {
+        color: colors.textSecondary,
+        fontFamily: "monospace",
+        fontSize: fontSize.xs,
+        fontWeight: "600",
+    },
+});
+
+const fileReadStyles = StyleSheet.create({
+    lineNum: {
+        color: "#484f58",
+        fontFamily: "monospace",
+        fontSize: fontSize.xs,
+        lineHeight: 17,
+        textAlign: "right",
+        marginRight: 10,
+        flexShrink: 0,
+        userSelect: "none",
+    } as const,
+    lineText: {
+        flex: 1,
+        color: "#c9d1d9",
+        fontFamily: "monospace",
+        fontSize: fontSize.xs,
+        lineHeight: 17,
     },
 });
 
