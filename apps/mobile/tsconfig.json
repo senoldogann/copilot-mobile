@@ -7,9 +7,6 @@
         "paths": {
             "@/*": [
                 "./src/*"
-            ],
-            "@copilot-mobile/shared": [
-                "../../packages/shared/src"
             ]
         }
     },

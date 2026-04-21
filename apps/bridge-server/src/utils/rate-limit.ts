@@ -9,6 +9,8 @@ import {
 } from "@copilot-mobile/shared";
 
 const REPLAY_CLEANUP_INTERVAL_MS = 60_000;
+const MAX_TRACKED_WINDOW_KEYS = 4_096;
+const MAX_REPLAY_IDS = 20_000;
 
 type WindowEntry = {
     timestamps: number[];
@@ -21,24 +23,97 @@ const seenMessageIds = new Map<string, number>();
 // Periodic cleanup — prevents memory leaks
 let cleanupTimer: ReturnType<typeof setInterval> | null = null;
 
+function pruneWindowEntry(entry: WindowEntry, windowMs: number, now: number): void {
+    entry.timestamps = entry.timestamps.filter((timestamp) => now - timestamp < windowMs);
+}
+
+function pruneWindowMap(
+    windows: Map<string, WindowEntry>,
+    windowMs: number,
+    now: number
+): void {
+    for (const [key, entry] of windows) {
+        pruneWindowEntry(entry, windowMs, now);
+        if (entry.timestamps.length === 0) {
+            windows.delete(key);
+        }
+    }
+}
+
+function evictOldestWindowEntries(
+    windows: Map<string, WindowEntry>,
+    maxKeys: number
+): void {
+    while (windows.size > maxKeys) {
+        let oldestKey: string | null = null;
+        let oldestTimestamp = Number.POSITIVE_INFINITY;
+
+        for (const [key, entry] of windows) {
+            const firstTimestamp = entry.timestamps[0];
+            if (firstTimestamp !== undefined && firstTimestamp < oldestTimestamp) {
+                oldestTimestamp = firstTimestamp;
+                oldestKey = key;
+            }
+        }
+
+        if (oldestKey === null) {
+            break;
+        }
+
+        windows.delete(oldestKey);
+    }
+}
+
+function enforceWindowCapacity(
+    windows: Map<string, WindowEntry>,
+    windowMs: number,
+    now: number
+): void {
+    if (windows.size <= MAX_TRACKED_WINDOW_KEYS) {
+        return;
+    }
+
+    pruneWindowMap(windows, windowMs, now);
+
+    if (windows.size <= MAX_TRACKED_WINDOW_KEYS) {
+        return;
+    }
+
+    evictOldestWindowEntries(windows, MAX_TRACKED_WINDOW_KEYS);
+}
+
+function pruneReplayMap(now: number): void {
+    for (const [id, timestamp] of seenMessageIds) {
+        if (now - timestamp > REPLAY_WINDOW_MS) {
+            seenMessageIds.delete(id);
+        }
+    }
+}
+
+function enforceReplayCapacity(now: number): void {
+    if (seenMessageIds.size < MAX_REPLAY_IDS) {
+        return;
+    }
+
+    pruneReplayMap(now);
+
+    while (seenMessageIds.size >= MAX_REPLAY_IDS) {
+        const oldestKey = seenMessageIds.keys().next().value;
+        if (oldestKey === undefined) {
+            break;
+        }
+
+        seenMessageIds.delete(oldestKey);
+    }
+}
+
 function startReplayCleanup(): void {
     if (cleanupTimer !== null) return;
     cleanupTimer = setInterval(() => {
         const now = Date.now();
-        for (const [id, timestamp] of seenMessageIds) {
-            if (now - timestamp > REPLAY_WINDOW_MS) {
-                seenMessageIds.delete(id);
-            }
-        }
-        // Rate limit penceresi temizliği
-        for (const [key, entry] of pairingWindows) {
-            entry.timestamps = entry.timestamps.filter((t) => now - t < RATE_LIMIT_PAIRING_WINDOW_MS);
-            if (entry.timestamps.length === 0) pairingWindows.delete(key);
-        }
-        for (const [key, entry] of messageWindows) {
-            entry.timestamps = entry.timestamps.filter((t) => now - t < RATE_LIMIT_MESSAGE_WINDOW_MS);
-            if (entry.timestamps.length === 0) messageWindows.delete(key);
-        }
+        pruneReplayMap(now);
+        pruneWindowMap(pairingWindows, RATE_LIMIT_PAIRING_WINDOW_MS, now);
+        pruneWindowMap(messageWindows, RATE_LIMIT_MESSAGE_WINDOW_MS, now);
     }, REPLAY_CLEANUP_INTERVAL_MS);
     // Don't let timer keep the process alive
     cleanupTimer.unref();
@@ -50,6 +125,8 @@ function checkLimit(
     maxCount: number,
     windowMs: number
 ): boolean {
+    startReplayCleanup();
+
     const now = Date.now();
     let entry = windows.get(key);
 
@@ -58,14 +135,15 @@ function checkLimit(
         windows.set(key, entry);
     }
 
-    // Clean up old records
-    entry.timestamps = entry.timestamps.filter((t) => now - t < windowMs);
+    pruneWindowEntry(entry, windowMs, now);
 
     if (entry.timestamps.length >= maxCount) {
+        enforceWindowCapacity(windows, windowMs, now);
         return false;
     }
 
     entry.timestamps.push(now);
+    enforceWindowCapacity(windows, windowMs, now);
     return true;
 }
 
@@ -97,6 +175,7 @@ export function checkReplayProtection(messageId: string): boolean {
         return false;
     }
 
+    enforceReplayCapacity(now);
     seenMessageIds.set(messageId, now);
     return true;
 }

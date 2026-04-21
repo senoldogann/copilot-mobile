@@ -13,30 +13,53 @@ type DiffResponsePayload = {
     error?: string;
 };
 
+type ResolveResponsePayload = {
+    rawPath: string;
+    resolvedWorkspaceRelativePath?: string;
+    matches?: ReadonlyArray<string>;
+    error?: string;
+};
+
 type FileResponseListener = (payload: FileResponsePayload) => void;
 type DiffResponseListener = (payload: DiffResponsePayload) => void;
+type ResolveResponseListener = (payload: ResolveResponsePayload) => void;
 
 const fileListeners = new Map<string, Array<FileResponseListener>>();
 const diffListeners = new Map<string, Array<DiffResponseListener>>();
+const resolveListeners = new Map<string, Array<ResolveResponseListener>>();
 
 export type WorkspaceFilePayload = FileResponsePayload;
 export type WorkspaceDiffPayload = DiffResponsePayload;
+export type WorkspaceResolvePayload = ResolveResponsePayload;
 
-export function onWorkspaceFileResponse(path: string, cb: FileResponseListener): () => void {
-    const list = fileListeners.get(path) ?? [];
+function createWorkspaceEventKey(sessionId: string, workspaceRelativePath: string): string {
+    return `${sessionId}\u0000${workspaceRelativePath}`;
+}
+
+export function onWorkspaceFileResponse(
+    sessionId: string,
+    workspaceRelativePath: string,
+    cb: FileResponseListener
+): () => void {
+    const key = createWorkspaceEventKey(sessionId, workspaceRelativePath);
+    const list = fileListeners.get(key) ?? [];
     list.push(cb);
-    fileListeners.set(path, list);
+    fileListeners.set(key, list);
     return () => {
-        const current = fileListeners.get(path);
+        const current = fileListeners.get(key);
         if (current !== undefined) {
             const updated = current.filter((fn) => fn !== cb);
-            updated.length === 0 ? fileListeners.delete(path) : fileListeners.set(path, updated);
+            updated.length === 0 ? fileListeners.delete(key) : fileListeners.set(key, updated);
         }
     };
 }
 
-export function dispatchWorkspaceFileResponse(path: string, payload: FileResponsePayload): void {
-    const list = fileListeners.get(path);
+export function dispatchWorkspaceFileResponse(
+    sessionId: string,
+    workspaceRelativePath: string,
+    payload: FileResponsePayload
+): void {
+    const list = fileListeners.get(createWorkspaceEventKey(sessionId, workspaceRelativePath));
     if (list !== undefined) {
         for (const cb of list) {
             cb(payload);
@@ -44,21 +67,61 @@ export function dispatchWorkspaceFileResponse(path: string, payload: FileRespons
     }
 }
 
-export function onWorkspaceDiffResponse(path: string, cb: DiffResponseListener): () => void {
-    const list = diffListeners.get(path) ?? [];
+export function onWorkspaceDiffResponse(
+    sessionId: string,
+    workspaceRelativePath: string,
+    cb: DiffResponseListener
+): () => void {
+    const key = createWorkspaceEventKey(sessionId, workspaceRelativePath);
+    const list = diffListeners.get(key) ?? [];
     list.push(cb);
-    diffListeners.set(path, list);
+    diffListeners.set(key, list);
     return () => {
-        const current = diffListeners.get(path);
+        const current = diffListeners.get(key);
         if (current !== undefined) {
             const updated = current.filter((fn) => fn !== cb);
-            updated.length === 0 ? diffListeners.delete(path) : diffListeners.set(path, updated);
+            updated.length === 0 ? diffListeners.delete(key) : diffListeners.set(key, updated);
         }
     };
 }
 
-export function dispatchWorkspaceDiffResponse(path: string, payload: DiffResponsePayload): void {
-    const list = diffListeners.get(path);
+export function dispatchWorkspaceDiffResponse(
+    sessionId: string,
+    workspaceRelativePath: string,
+    payload: DiffResponsePayload
+): void {
+    const list = diffListeners.get(createWorkspaceEventKey(sessionId, workspaceRelativePath));
+    if (list !== undefined) {
+        for (const cb of list) {
+            cb(payload);
+        }
+    }
+}
+
+export function onWorkspaceResolveResponse(
+    sessionId: string,
+    rawPath: string,
+    cb: ResolveResponseListener
+): () => void {
+    const key = createWorkspaceEventKey(sessionId, rawPath);
+    const list = resolveListeners.get(key) ?? [];
+    list.push(cb);
+    resolveListeners.set(key, list);
+    return () => {
+        const current = resolveListeners.get(key);
+        if (current !== undefined) {
+            const updated = current.filter((fn) => fn !== cb);
+            updated.length === 0 ? resolveListeners.delete(key) : resolveListeners.set(key, updated);
+        }
+    };
+}
+
+export function dispatchWorkspaceResolveResponse(
+    sessionId: string,
+    rawPath: string,
+    payload: ResolveResponsePayload
+): void {
+    const list = resolveListeners.get(createWorkspaceEventKey(sessionId, rawPath));
     if (list !== undefined) {
         for (const cb of list) {
             cb(payload);

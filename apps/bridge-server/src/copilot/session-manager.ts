@@ -3,6 +3,7 @@
 import type {
     AdaptedCopilotClient,
     AdaptedCopilotSession,
+    AdaptedToolCompletionDetails,
     AdaptedPermissionRequest,
     AdaptedPlanExitRequest,
     AdaptedSessionState,
@@ -20,6 +21,7 @@ import type {
     SessionHistoryItem,
     SessionInfo,
     SessionUsagePayload,
+    ToolExecutionStatus,
 } from "@copilot-mobile/shared";
 import { MAX_SESSIONS, PERMISSION_TIMEOUT_MS, PROTOCOL_VERSION, SDKError } from "@copilot-mobile/shared";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
@@ -29,6 +31,8 @@ import {
     performWorkspaceGitOperation,
     readWorkspaceDiff,
     readWorkspaceFile,
+    resolveWorkspaceReference as resolveWorkspaceReferenceInContext,
+    resolveWorkspaceRoot,
 } from "../utils/workspace.js";
 
 type SendFn = (message: ServerMessage) => void;
@@ -49,7 +53,66 @@ type SessionBehaviorState = {
     agentMode: AgentMode;
     permissionLevel: PermissionLevel;
     runtimeMode: RuntimeMode;
+    // True while the SDK is actively processing a turn. Tracked here (not in the SDK
+    // state) so that reconnecting clients can see "agent is working" after restart.
+    busy: boolean;
 };
+
+function readToolTelemetryCount(toolTelemetry: Record<string, unknown> | undefined): number | null {
+    if (toolTelemetry === undefined) {
+        return null;
+    }
+
+    const directCount = toolTelemetry["matchCount"];
+    if (typeof directCount === "number" && Number.isFinite(directCount)) {
+        return directCount;
+    }
+
+    const nestedCount = toolTelemetry["matches"];
+    if (typeof nestedCount === "number" && Number.isFinite(nestedCount)) {
+        return nestedCount;
+    }
+
+    return null;
+}
+
+function isSearchLikeToolName(toolName: string): boolean {
+    const normalized = toolName.trim().toLowerCase();
+    return normalized.includes("rg")
+        || normalized.includes("grep")
+        || normalized.includes("search")
+        || normalized.includes("find")
+        || normalized.includes("glob");
+}
+
+function normalizeToolCompletionStatus(
+    toolName: string,
+    success: boolean,
+    details: AdaptedToolCompletionDetails | undefined
+): Exclude<ToolExecutionStatus, "running"> {
+    if (success) {
+        return "completed";
+    }
+
+    const exitCode = details?.exitCode;
+    const matchCount = readToolTelemetryCount(details?.toolTelemetry);
+    const errorMessage = details?.errorMessage?.toLowerCase() ?? "";
+
+    if (
+        isSearchLikeToolName(toolName)
+        && (
+            exitCode === 1
+            || matchCount === 0
+            || errorMessage.includes("no matches")
+            || errorMessage.includes("0 results")
+            || errorMessage.includes("not found")
+        )
+    ) {
+        return "no_results";
+    }
+
+    return "failed";
+}
 
 export function createSessionManager(
     copilotClient: AdaptedCopilotClient,
@@ -124,15 +187,32 @@ export function createSessionManager(
                 agentMode: state.agentMode,
                 permissionLevel: state.permissionLevel,
                 runtimeMode: state.runtimeMode,
+                busy: state.busy,
             },
         });
     }
 
-    function adaptSessionState(nextState: AdaptedSessionState): SessionBehaviorState {
+    function setSessionBusy(sessionId: string, busy: boolean): void {
+        const state = sessionStates.get(sessionId);
+        if (state === undefined || state.busy === busy) {
+            return;
+        }
+        state.busy = busy;
+        emitSessionState(sessionId);
+    }
+
+    function adaptSessionState(
+        nextState: AdaptedSessionState,
+        sessionId?: string
+    ): SessionBehaviorState {
+        const existingBusy = sessionId !== undefined
+            ? (sessionStates.get(sessionId)?.busy ?? false)
+            : false;
         return {
             agentMode: nextState.agentMode,
             permissionLevel: nextState.permissionLevel,
             runtimeMode: nextState.runtimeMode,
+            busy: existingBusy,
         };
     }
 
@@ -223,6 +303,7 @@ export function createSessionManager(
                 agentMode: "agent",
                 permissionLevel: "default",
                 runtimeMode: "interactive",
+                busy: false,
             };
 
         session.onMessage((content: string) => {
@@ -289,16 +370,27 @@ export function createSessionManager(
             });
         });
 
-        session.onToolComplete((toolName: string, requestId: string, success: boolean, resultContent?: string) => {
+        session.onToolComplete((
+            toolName: string,
+            requestId: string,
+            success: boolean,
+            details?: AdaptedToolCompletionDetails
+        ) => {
             const normalizedToolName =
                 toolNamesByRequestId.get(requestId)
                 ?? (toolName.trim().length > 0 ? toolName : "tool");
+            const completionStatus = normalizeToolCompletionStatus(
+                normalizedToolName,
+                success,
+                details
+            );
 
             toolNamesByRequestId.delete(requestId);
 
             // If the tool has result content (e.g. file read output) and no
             // partial output was streamed, forward it as a partial result so
             // the mobile app can display it in the tool detail panel.
+            const resultContent = details?.resultContent;
             if (resultContent !== undefined && resultContent.trim().length > 0) {
                 emit({
                     ...makeBase(),
@@ -310,7 +402,16 @@ export function createSessionManager(
             emit({
                 ...makeBase(),
                 type: "tool.execution_complete",
-                payload: { sessionId, toolName: normalizedToolName, requestId, success },
+                payload: {
+                    sessionId,
+                    toolName: normalizedToolName,
+                    requestId,
+                    success,
+                    completionStatus,
+                    ...(details?.errorMessage !== undefined ? { errorMessage: details.errorMessage } : {}),
+                    ...(details?.exitCode !== undefined ? { exitCode: details.exitCode } : {}),
+                    ...(details?.toolTelemetry !== undefined ? { toolTelemetry: details.toolTelemetry } : {}),
+                },
             });
         });
 
@@ -409,6 +510,7 @@ export function createSessionManager(
         });
 
         session.onIdle(() => {
+            setSessionBusy(sessionId, false);
             emit({
                 ...makeBase(),
                 type: "session.idle",
@@ -417,6 +519,7 @@ export function createSessionManager(
         });
 
         session.onSessionError((errorType: string, message: string) => {
+            setSessionBusy(sessionId, false);
             emit({
                 ...makeBase(),
                 type: "session.error",
@@ -488,6 +591,7 @@ export function createSessionManager(
                         : config.permissionLevel === "autopilot"
                             ? "autopilot"
                             : "interactive",
+                    busy: false,
                 });
                 wireSessionEvents(session);
 
@@ -565,7 +669,7 @@ export function createSessionManager(
                 const resumedState = await session.getState(
                     sessionStates.get(session.id)?.permissionLevel ?? "default"
                 );
-                sessionStates.set(session.id, adaptSessionState(resumedState));
+                sessionStates.set(session.id, adaptSessionState(resumedState, session.id));
 
                 send({
                     ...makeBase(),
@@ -675,12 +779,14 @@ export function createSessionManager(
             }
 
             try {
+                setSessionBusy(sessionId, true);
                 await session.send(
                     attachments !== undefined && attachments.length > 0
                         ? { prompt: content, attachments }
                         : { prompt: content }
                 );
             } catch (err) {
+                setSessionBusy(sessionId, false);
                 const message = err instanceof Error ? err.message : "Message send failed";
                 send({
                     ...makeBase(),
@@ -699,6 +805,7 @@ export function createSessionManager(
             if (session !== undefined) {
                 session.abort();
             }
+            setSessionBusy(sessionId, false);
         },
 
         respondToPermission(requestId: string, approved: boolean): void {
@@ -793,7 +900,7 @@ export function createSessionManager(
 
         async listWorkspaceTree(
             sessionId: string,
-            requestedPath = ".",
+            requestedWorkspaceRelativePath = ".",
             maxDepth = 3
         ): Promise<void> {
             const context = getSessionContext(sessionId);
@@ -803,15 +910,19 @@ export function createSessionManager(
             }
 
             try {
-                const tree = await buildWorkspaceTree(context.cwd, requestedPath, maxDepth);
+                const tree = await buildWorkspaceTree(
+                    resolveWorkspaceRoot(context),
+                    requestedWorkspaceRelativePath,
+                    maxDepth
+                );
                 send({
                     ...makeBase(),
                     type: "workspace.tree",
                     payload: {
                         sessionId,
                         context,
-                        rootPath: tree.rootPath,
-                        requestedPath: tree.requestedPath,
+                        workspaceRoot: tree.workspaceRoot,
+                        requestedWorkspaceRelativePath: tree.requestedWorkspaceRelativePath,
                         tree: tree.tree,
                         truncated: tree.truncated,
                     },
@@ -843,7 +954,7 @@ export function createSessionManager(
                     payload: {
                         sessionId,
                         context,
-                        rootPath: summary.rootPath,
+                        workspaceRoot: summary.workspaceRoot,
                         gitRoot: summary.gitRoot,
                         ...(summary.repository !== undefined ? { repository: summary.repository } : {}),
                         ...(summary.branch !== undefined ? { branch: summary.branch } : {}),
@@ -941,7 +1052,7 @@ export function createSessionManager(
 
         async readWorkspaceFile(
             sessionId: string,
-            requestedPath: string,
+            workspaceRelativePath: string,
             maxBytes?: number
         ): Promise<void> {
             const context = getSessionContext(sessionId);
@@ -951,7 +1062,7 @@ export function createSessionManager(
                     type: "workspace.file.response",
                     payload: {
                         sessionId,
-                        path: requestedPath,
+                        workspaceRelativePath,
                         content: "",
                         mimeType: "text/plain",
                         truncated: false,
@@ -961,13 +1072,13 @@ export function createSessionManager(
                 return;
             }
 
-            const result = await readWorkspaceFile(context, requestedPath, maxBytes);
+            const result = await readWorkspaceFile(context, workspaceRelativePath, maxBytes);
             send({
                 ...makeBase(),
                 type: "workspace.file.response",
                 payload: {
                     sessionId,
-                    path: requestedPath,
+                    workspaceRelativePath,
                     content: result.content,
                     mimeType: result.mimeType,
                     truncated: result.truncated,
@@ -978,7 +1089,7 @@ export function createSessionManager(
 
         async readWorkspaceDiff(
             sessionId: string,
-            requestedPath: string
+            workspaceRelativePath: string
         ): Promise<void> {
             const context = getSessionContext(sessionId);
             if (context === undefined) {
@@ -987,7 +1098,7 @@ export function createSessionManager(
                     type: "workspace.diff.response",
                     payload: {
                         sessionId,
-                        path: requestedPath,
+                        workspaceRelativePath,
                         diff: "",
                         error: "SESSION_NOT_FOUND",
                     },
@@ -995,14 +1106,48 @@ export function createSessionManager(
                 return;
             }
 
-            const result = await readWorkspaceDiff(context, requestedPath);
+            const result = await readWorkspaceDiff(context, workspaceRelativePath);
             send({
                 ...makeBase(),
                 type: "workspace.diff.response",
                 payload: {
                     sessionId,
-                    path: requestedPath,
+                    workspaceRelativePath,
                     diff: result.diff,
+                    ...(result.error !== undefined ? { error: result.error } : {}),
+                },
+            });
+        },
+
+        async resolveWorkspaceReference(
+            sessionId: string,
+            rawPath: string
+        ): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                send({
+                    ...makeBase(),
+                    type: "workspace.resolve.response",
+                    payload: {
+                        sessionId,
+                        rawPath,
+                        error: "SESSION_NOT_FOUND",
+                    },
+                });
+                return;
+            }
+
+            const result = await resolveWorkspaceReferenceInContext(context, rawPath);
+            send({
+                ...makeBase(),
+                type: "workspace.resolve.response",
+                payload: {
+                    sessionId,
+                    rawPath,
+                    ...(result.workspaceRelativePath !== undefined
+                        ? { resolvedWorkspaceRelativePath: result.workspaceRelativePath }
+                        : {}),
+                    ...(result.matches !== undefined ? { matches: result.matches } : {}),
                     ...(result.error !== undefined ? { error: result.error } : {}),
                 },
             });
@@ -1022,7 +1167,7 @@ export function createSessionManager(
                     ...currentState,
                     agentMode,
                 });
-                sessionStates.set(sessionId, adaptSessionState(nextState));
+                sessionStates.set(sessionId, adaptSessionState(nextState, sessionId));
                 emitSessionState(sessionId);
             } catch (error) {
                 sendWorkspaceError(
@@ -1047,7 +1192,7 @@ export function createSessionManager(
                     ...currentState,
                     permissionLevel,
                 });
-                sessionStates.set(sessionId, adaptSessionState(nextState));
+                sessionStates.set(sessionId, adaptSessionState(nextState, sessionId));
                 emitSessionState(sessionId);
             } catch (error) {
                 sendWorkspaceError(

@@ -1,22 +1,24 @@
 // Araç yürütme kartı — kompakt tek satır terminal stili ile SVG ikonlar
 
 import React, { useState, useMemo } from "react";
-import { View, Text, Pressable, StyleSheet, Animated, ScrollView } from "react-native";
+import { View, Text, Pressable, StyleSheet } from "react-native";
 import type { ToolItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
-import { ToolIcon } from "./Icons";
+import { ToolIcon, SubagentIcon, SkillIcon } from "./Icons";
 import type { FeatherName } from "./Icons";
-import { ShimmerText } from "./ShimmerHighlight";
+import { SunshineText } from "./ShimmerHighlight";
 import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = { item: ToolItem };
 
 // ─── Tool classification ──────────────────────────────────────────────────────
 
-type ToolKind = "edit" | "create" | "shell" | "read" | "search" | "think" | "git" | "fetch" | "other";
+type ToolKind = "edit" | "create" | "shell" | "read" | "search" | "think" | "git" | "fetch" | "agent" | "skill" | "other";
 
 function classifyTool(toolName: string): ToolKind {
     const t = toolName.toLowerCase();
+    if (t === "task" || t.includes("subagent")) return "agent";
+    if (t === "skill") return "skill";
     if (t.includes("edit") || t.includes("str_replace")) return "edit";
     if (t.includes("create") || t.includes("write")) return "create";
     if (t.includes("shell") || t.includes("bash") || t.includes("exec") || t.includes("run")) return "shell";
@@ -30,12 +32,12 @@ function classifyTool(toolName: string): ToolKind {
 
 const KIND_LABELS: Record<ToolKind, string> = {
     edit: "Edit", create: "Create", shell: "Shell", read: "Read",
-    search: "Search", think: "Thought", git: "Git", fetch: "Fetch", other: "Tool",
+    search: "Search", think: "Thought", git: "Git", fetch: "Fetch", agent: "Subagent", skill: "Skill", other: "Tool",
 };
 
 const KIND_ICONS: Record<ToolKind, FeatherName> = {
     edit: "edit-2", create: "file-plus", shell: "terminal", read: "eye",
-    search: "search", think: "cpu", git: "git-branch", fetch: "globe", other: "tool",
+    search: "search", think: "cpu", git: "git-branch", fetch: "globe", agent: "cpu", skill: "tool", other: "tool",
 };
 
 // ─── Argument parsing ─────────────────────────────────────────────────────────
@@ -49,6 +51,11 @@ interface ParsedArgs {
     query?: string;
     pattern?: string;
     thought?: string;
+    description?: string;
+    prompt?: string;
+    agentName?: string;
+    agentType?: string;
+    skill?: string;
     raw?: Record<string, unknown>;
 }
 
@@ -73,6 +80,16 @@ function parseArgs(text: string | undefined): ParsedArgs {
         if (pt !== undefined) result.pattern = pt;
         const th = str(obj.thought ?? obj.thinking);
         if (th !== undefined) result.thought = th;
+        const description = str(obj.description ?? obj.title ?? obj.summary);
+        if (description !== undefined) result.description = description;
+        const prompt = str(obj.prompt ?? obj.initialPrompt);
+        if (prompt !== undefined) result.prompt = prompt;
+        const agentName = str(obj.name ?? obj.agent_name ?? obj.agent);
+        if (agentName !== undefined) result.agentName = agentName;
+        const agentType = str(obj.agent_type ?? obj.agentType ?? obj.provider);
+        if (agentType !== undefined) result.agentType = agentType;
+        const skill = str(obj.skill);
+        if (skill !== undefined) result.skill = skill;
         return result;
     } catch { return {}; }
 }
@@ -242,9 +259,9 @@ function TerminalBlock({ command, output, exitOk }: { command: string | null; ou
                         <Text key={i} style={[
                             terminalStyles.outputLine,
                             // Highlight lines that look like errors
-                            /error|fail|exception|traceback/i.test(line) && terminalStyles.outputError,
+                            /^(error|fatal|failed|exception|traceback)\b/i.test(line.trim()) && terminalStyles.outputError,
                             // Highlight lines that look like success
-                            /success|done|ok\b|passed|complete/i.test(line) && terminalStyles.outputSuccess,
+                            /^(success|done|ok\b|passed|complete)\b/i.test(line.trim()) && terminalStyles.outputSuccess,
                         ]} selectable>{line}</Text>
                     ))}
                     {outputLines.length > 200 && (
@@ -271,7 +288,7 @@ function FileReadView({ path, content }: { path: string | undefined; content: st
             {/* File path header */}
             {path !== undefined && (
                 <View style={diffStyles.fileHeader}>
-                    <Text style={[diffStyles.fileHeaderText, { color: "#79c0ff" }]}>
+                    <Text style={diffStyles.fileHeaderText}>
                         {path}
                     </Text>
                 </View>
@@ -305,6 +322,39 @@ function ThoughtBlock({ text }: { text: string }) {
     );
 }
 
+function AgentBlock({
+    title,
+    subtitle,
+    prompt,
+    output,
+}: {
+    title: string;
+    subtitle?: string;
+    prompt?: string;
+    output?: string;
+}) {
+    return (
+        <View style={thoughtStyles.container}>
+            <Text style={thoughtStyles.label}>{title}</Text>
+            {subtitle !== undefined && subtitle.length > 0 && (
+                <Text style={agentStyles.subtitle}>{subtitle}</Text>
+            )}
+            {prompt !== undefined && prompt.trim().length > 0 && (
+                <>
+                    <Text style={styles.sectionTitle}>PROMPT</Text>
+                    <Text style={agentStyles.prompt} selectable>{prompt}</Text>
+                </>
+            )}
+            {output !== undefined && output.trim().length > 0 && (
+                <>
+                    <Text style={styles.sectionTitle}>OUTPUT</Text>
+                    <TerminalBlock command={null} output={output} />
+                </>
+            )}
+        </View>
+    );
+}
+
 function MetaRow({ label, value, accent }: { label: string; value: string; accent?: string }) {
     return (
         <View style={styles.metaRow}>
@@ -316,25 +366,16 @@ function MetaRow({ label, value, accent }: { label: string; value: string; accen
     );
 }
 
-// ─── Spinner ──────────────────────────────────────────────────────────────────
-
-function ToolSpinner() {
-    const spinAnim = React.useRef(new Animated.Value(0)).current;
-    React.useEffect(() => {
-        const loop = Animated.loop(Animated.timing(spinAnim, { toValue: 1, duration: 900, useNativeDriver: true }));
-        loop.start();
-        return () => loop.stop();
-    }, [spinAnim]);
-    const rotation = spinAnim.interpolate({ inputRange: [0, 1], outputRange: ["0deg", "360deg"] });
-    return <Animated.View style={[spinnerStyles.ring, { transform: [{ rotate: rotation }] }]} />;
-}
-
 // ─── Detail sheet content ─────────────────────────────────────────────────────
 
 function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args: ParsedArgs }) {
-    const statusColor = item.status === "failed" ? colors.error
-        : item.status === "running" ? colors.accent
-        : colors.success;
+    const statusColor = item.status === "failed"
+        ? colors.error
+        : item.status === "running"
+            ? colors.textSecondary
+            : item.status === "no_results"
+                ? colors.textTertiary
+                : colors.success;
 
     return (
         <View style={styles.detailContainer}>
@@ -343,11 +384,22 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
                 <MetaRow label="Tool" value={item.toolName} />
                 <MetaRow
                     label="Status"
-                    value={item.status === "running" ? "Running…" : item.status === "failed" ? "Failed" : "Completed"}
+                    value={
+                        item.status === "running"
+                            ? "Running…"
+                            : item.status === "failed"
+                                ? "Failed"
+                                : item.status === "no_results"
+                                    ? "No Results"
+                                    : "Completed"
+                    }
                     accent={statusColor}
                 />
                 {args.path !== undefined && (
                     <MetaRow label="File" value={args.path} />
+                )}
+                {item.errorMessage !== undefined && item.errorMessage.trim().length > 0 && item.status === "failed" && (
+                    <MetaRow label="Error" value={item.errorMessage} accent={colors.error} />
                 )}
             </View>
 
@@ -371,14 +423,36 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
                     <Text style={styles.sectionTitle}>COMMAND</Text>
                     <TerminalBlock
                         command={args.command ?? item.progressMessage ?? null}
-                        output={item.partialOutput ?? item.progressMessage}
-                        {...(item.status === "completed" ? { exitOk: true } : item.status === "failed" ? { exitOk: false } : {})}
+                        output={item.partialOutput ?? item.errorMessage ?? item.progressMessage}
+                        {...(item.status === "completed"
+                            ? { exitOk: true }
+                            : item.status === "failed"
+                                ? { exitOk: false }
+                                : {})}
                     />
                 </View>
             )}
 
             {kind === "think" && args.thought !== undefined && (
                 <ThoughtBlock text={args.thought} />
+            )}
+
+            {kind === "agent" && (
+                <AgentBlock
+                    title={args.agentName ?? args.agentType ?? "Subagent"}
+                    {...(args.description !== undefined ? { subtitle: args.description } : {})}
+                    {...(args.prompt !== undefined ? { prompt: args.prompt } : {})}
+                    {...(item.partialOutput !== undefined ? { output: item.partialOutput } : {})}
+                />
+            )}
+
+            {kind === "skill" && (
+                <AgentBlock
+                    title={args.skill ?? "Skill"}
+                    {...(args.description !== undefined ? { subtitle: args.description } : {})}
+                    {...(args.prompt !== undefined ? { prompt: args.prompt } : {})}
+                    {...(item.partialOutput !== undefined ? { output: item.partialOutput } : {})}
+                />
             )}
 
             {kind === "read" && (
@@ -389,7 +463,11 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
                     ) : (
                         <View style={diffStyles.container}>
                             <Text style={diffStyles.empty}>
-                                {item.status === "running" ? "Reading…" : "No content captured"}
+                                {item.status === "running"
+                                    ? "Reading…"
+                                    : item.status === "failed" && item.errorMessage !== undefined
+                                        ? item.errorMessage
+                                        : "No content captured"}
                             </Text>
                         </View>
                     )}
@@ -401,7 +479,7 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
                     <Text style={styles.sectionTitle}>RESULTS</Text>
                     <TerminalBlock
                         command={args.query !== undefined ? `search: ${args.query}` : null}
-                        output={item.partialOutput}
+                        output={item.partialOutput ?? item.errorMessage}
                     />
                 </View>
             )}
@@ -430,15 +508,23 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
 // ─── Compact row ──────────────────────────────────────────────────────────────
 
 function getRowSummary(kind: ToolKind, args: ParsedArgs, item: ToolItem): string {
-    if (item.status === "running" && item.progressMessage !== undefined) return item.progressMessage;
+    if (item.status === "running" && item.progressMessage !== undefined && item.progressMessage.length > 0) {
+        return item.progressMessage;
+    }
     switch (kind) {
+        case "agent":
+            return args.description ?? args.agentName ?? args.agentType ?? "Subagent run";
+        case "skill":
+            return args.description ?? args.skill ?? "Skill run";
         case "edit":
+            return shortPath(args.path) || (args.oldStr ?? "").slice(0, 40) || "";
         case "create":
+            return shortPath(args.path) || (args.content ?? "").split("\n")[0]?.slice(0, 40) || "";
         case "read":
             return shortPath(args.path) || args.query || "";
         case "shell":
         case "git":
-            return args.command ?? "";
+            return args.command ?? item.progressMessage ?? "";
         case "search":
             return args.query ?? args.pattern ?? "";
         case "think":
@@ -446,8 +532,14 @@ function getRowSummary(kind: ToolKind, args: ParsedArgs, item: ToolItem): string
         case "fetch":
             return args.query ?? args.path ?? "";
         default: {
-            const first = args.path ?? args.command ?? args.query ?? args.content ?? "";
-            return first.slice(0, 60);
+            const first = args.path ?? args.command ?? args.query ?? args.content ?? item.progressMessage ?? "";
+            if (first.length > 0) return first.slice(0, 60);
+            // Fallback: extract first meaningful string from raw args
+            if (args.raw !== undefined) {
+                const rawEntry = Object.values(args.raw).find((v) => typeof v === "string" && v.length > 0);
+                if (rawEntry !== undefined) return (rawEntry as string).slice(0, 60);
+            }
+            return "";
         }
     }
 }
@@ -458,12 +550,14 @@ function ToolCardComponent({ item }: Props) {
     const [showSheet, setShowSheet] = useState(false);
     const isRunning = item.status === "running";
     const isFailed = item.status === "failed";
+    const isNoResults = item.status === "no_results";
     const kind = classifyTool(item.toolName);
     const label = KIND_LABELS[kind];
     const iconName = KIND_ICONS[kind];
     const args = useMemo(() => parseArgs(item.argumentsText), [item.argumentsText]);
     const rowSummary = getRowSummary(kind, args, item);
-    const statusText = isRunning ? "running" : isFailed ? "failed" : "completed";
+    const statusText = isRunning ? "running" : isFailed ? "failed" : isNoResults ? "no results" : "completed";
+    const iconColor = isFailed ? colors.error : colors.textTertiary;
 
     return (
         <>
@@ -474,16 +568,33 @@ function ToolCardComponent({ item }: Props) {
                     hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 >
                     <View style={[styles.iconBox, isFailed && styles.iconBoxFailed]}>
-                        {isRunning ? <ToolSpinner /> : (
-                            <ToolIcon toolName={item.toolName} size={11} color={isFailed ? colors.error : colors.textTertiary} />
-                        )}
+                        <ToolIcon toolName={item.toolName} size={11} color={iconColor} />
                     </View>
-                    <ShimmerText active={isRunning}>
-                        <Text style={[styles.label, isFailed && styles.labelFailed]} numberOfLines={1}>
-                            {label}
-                        </Text>
-                    </ShimmerText>
-                    <Text style={styles.argText} numberOfLines={1}>{rowSummary}</Text>
+                    {isRunning ? (
+                        <SunshineText
+                            active
+                            text={rowSummary.length > 0 ? `${label}  ${rowSummary}` : label}
+                            textStyle={styles.sunshineRow}
+                            style={styles.shimmerFlex}
+                            numberOfLines={1}
+                        />
+                    ) : (
+                        <View style={[styles.contentWrap, styles.shimmerFlex]}>
+                            <View style={styles.labelWrap}>
+                                <Text style={[styles.label, isFailed && styles.labelFailed]} numberOfLines={1}>
+                                    {label}
+                                </Text>
+                            </View>
+                            <View style={styles.argWrap}>
+                                <Text
+                                    style={[styles.argText, isNoResults && styles.argTextMuted]}
+                                    numberOfLines={1}
+                                >
+                                    {isNoResults && rowSummary.length === 0 ? "No results" : rowSummary}
+                                </Text>
+                            </View>
+                        </View>
+                    )}
                     <Text style={styles.chevron}>›</Text>
                 </Pressable>
             </View>
@@ -491,7 +602,12 @@ function ToolCardComponent({ item }: Props) {
             <BottomSheet
                 visible={showSheet}
                 onClose={() => setShowSheet(false)}
-                iconName={iconName}
+                {...(kind === "agent"
+                    ? { iconNode: <SubagentIcon size={14} color={colors.textSecondary} /> }
+                    : kind === "skill"
+                        ? { iconNode: <SkillIcon size={14} color={colors.textSecondary} /> }
+                        : { iconName }
+                )}
                 title={label}
                 subtitle={statusText}
             >
@@ -505,32 +621,25 @@ export const ToolCard = React.memo(ToolCardComponent);
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
-const spinnerStyles = StyleSheet.create({
-    ring: {
-        width: 10, height: 10, borderRadius: 5,
-        borderWidth: 1.5, borderColor: "transparent",
-        borderTopColor: colors.accent, borderRightColor: colors.accentMuted,
-    },
-});
-
 const diffStyles = StyleSheet.create({
     container: {
         borderRadius: 6,
         borderWidth: 1,
-        borderColor: colors.border,
+        borderColor: colors.codeBorder,
+        backgroundColor: colors.codeBg,
         overflow: "hidden",
     },
     fileHeader: {
-        backgroundColor: "#1c2128",
+        backgroundColor: colors.bgTertiary,
         paddingHorizontal: 10,
         paddingVertical: 4,
         borderBottomWidth: 1,
-        borderBottomColor: colors.border,
+        borderBottomColor: colors.codeBorder,
     },
     fileHeaderText: {
         fontSize: fontSize.xs,
         fontFamily: "monospace",
-        color: "#57ab5a",
+        color: colors.textSecondary,
         fontWeight: "600",
     },
     line: {
@@ -539,8 +648,8 @@ const diffStyles = StyleSheet.create({
         paddingVertical: 1,
         minHeight: 18,
     },
-    lineAdd: { backgroundColor: "rgba(87,171,90,0.12)" },
-    lineRemove: { backgroundColor: "rgba(229,83,75,0.12)" },
+    lineAdd: { backgroundColor: colors.successMuted },
+    lineRemove: { backgroundColor: colors.errorMuted },
     prefix: {
         width: 14,
         fontSize: fontSize.xs,
@@ -549,8 +658,8 @@ const diffStyles = StyleSheet.create({
         fontWeight: "700",
         flexShrink: 0,
     },
-    prefixAdd: { color: "#57ab5a" },
-    prefixRemove: { color: "#e5534b" },
+    prefixAdd: { color: colors.success },
+    prefixRemove: { color: colors.error },
     prefixContext: { color: colors.textTertiary },
     text: {
         flex: 1,
@@ -558,8 +667,8 @@ const diffStyles = StyleSheet.create({
         lineHeight: 17,
         fontFamily: "monospace",
     },
-    textAdd: { color: "#aff5b4" },
-    textRemove: { color: "#ffdcd7" },
+    textAdd: { color: colors.textPrimary },
+    textRemove: { color: colors.textPrimary },
     textContext: { color: colors.textSecondary },
     textSkip: { color: colors.textTertiary, fontStyle: "italic" },
     empty: {
@@ -573,10 +682,10 @@ const diffStyles = StyleSheet.create({
 
 const terminalStyles = StyleSheet.create({
     container: {
-        backgroundColor: "#0d1117",
+        backgroundColor: colors.codeBg,
         borderRadius: 6,
         borderWidth: 1,
-        borderColor: colors.border,
+        borderColor: colors.codeBorder,
         overflow: "hidden",
     },
     promptRow: {
@@ -585,9 +694,9 @@ const terminalStyles = StyleSheet.create({
         gap: 8,
         paddingHorizontal: spacing.md,
         paddingVertical: 8,
-        backgroundColor: "#161b22",
+        backgroundColor: colors.bgTertiary,
         borderBottomWidth: 1,
-        borderBottomColor: "#21262d",
+        borderBottomColor: colors.codeBorder,
     },
     prompt: {
         color: colors.success,
@@ -599,14 +708,14 @@ const terminalStyles = StyleSheet.create({
     },
     command: {
         flex: 1,
-        color: "#e6edf3",
+        color: colors.textPrimary,
         fontFamily: "monospace",
         fontSize: fontSize.sm,
         lineHeight: 18,
     },
     divider: {
         height: 1,
-        backgroundColor: "#21262d",
+        backgroundColor: colors.codeBorder,
     },
     outputBlock: {
         paddingHorizontal: spacing.md,
@@ -614,16 +723,16 @@ const terminalStyles = StyleSheet.create({
         gap: 1,
     },
     outputLine: {
-        color: "#8b949e",
+        color: colors.textSecondary,
         fontFamily: "monospace",
         fontSize: fontSize.xs,
         lineHeight: 16,
     },
     outputError: {
-        color: "#ffa198",
+        color: colors.error,
     },
     outputSuccess: {
-        color: "#56d364",
+        color: colors.success,
     },
     truncated: {
         color: colors.textTertiary,
@@ -642,12 +751,12 @@ const terminalStyles = StyleSheet.create({
         borderWidth: 1,
     },
     exitOk: {
-        borderColor: "#238636",
-        backgroundColor: "rgba(35,134,54,0.12)",
+        borderColor: colors.success,
+        backgroundColor: colors.successMuted,
     },
     exitFail: {
-        borderColor: "#da3633",
-        backgroundColor: "rgba(218,54,51,0.12)",
+        borderColor: colors.error,
+        backgroundColor: colors.errorMuted,
     },
     exitText: {
         color: colors.textSecondary,
@@ -659,7 +768,7 @@ const terminalStyles = StyleSheet.create({
 
 const fileReadStyles = StyleSheet.create({
     lineNum: {
-        color: "#484f58",
+        color: colors.textTertiary,
         fontFamily: "monospace",
         fontSize: fontSize.xs,
         lineHeight: 17,
@@ -670,7 +779,7 @@ const fileReadStyles = StyleSheet.create({
     } as const,
     lineText: {
         flex: 1,
-        color: "#c9d1d9",
+        color: colors.codeText,
         fontFamily: "monospace",
         fontSize: fontSize.xs,
         lineHeight: 17,
@@ -683,15 +792,13 @@ const thoughtStyles = StyleSheet.create({
         borderRadius: 6,
         borderWidth: 1,
         borderColor: colors.border,
-        borderLeftWidth: 3,
-        borderLeftColor: colors.accent,
         padding: spacing.md,
         gap: 4,
     },
     label: {
         fontSize: fontSize.xs,
         fontWeight: "600",
-        color: colors.accent,
+        color: colors.textSecondary,
         textTransform: "uppercase",
         letterSpacing: 0.4,
     },
@@ -702,9 +809,34 @@ const thoughtStyles = StyleSheet.create({
     },
 });
 
+const agentStyles = StyleSheet.create({
+    subtitle: {
+        fontSize: fontSize.sm,
+        color: colors.textSecondary,
+        lineHeight: 18,
+        marginBottom: 10,
+    },
+    prompt: {
+        fontSize: fontSize.sm,
+        color: colors.textPrimary,
+        lineHeight: 20,
+        marginBottom: 10,
+    },
+});
+
 const styles = StyleSheet.create({
     rowWrap: {
         overflow: "hidden",
+    },
+    shimmerFlex: {
+        flex: 1,
+        minWidth: 0,
+    },
+    sunshineRow: {
+        fontSize: fontSize.sm,
+        color: colors.textTertiary,
+        fontWeight: "500",
+        lineHeight: 18,
     },
     row: {
         flexDirection: "row",
@@ -719,19 +851,35 @@ const styles = StyleSheet.create({
         justifyContent: "center", alignItems: "center", flexShrink: 0,
     },
     iconBoxFailed: { opacity: 0.5 },
+    contentWrap: {
+        flex: 1,
+        minWidth: 0,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 4,
+    },
+    labelWrap: {
+        flexShrink: 0,
+    },
     label: {
         fontSize: fontSize.sm,
         color: colors.textTertiary,
         fontWeight: "500",
-        flexShrink: 0,
-        minWidth: 36,
+        lineHeight: 18,
     },
     labelFailed: { color: colors.error },
-    argText: {
+    argWrap: {
         flex: 1,
+        minWidth: 0,
+    },
+    argText: {
         fontSize: fontSize.sm,
         color: colors.textTertiary,
         fontFamily: "monospace",
+        lineHeight: 18,
+    },
+    argTextMuted: {
+        color: colors.textSecondary,
     },
     chevron: {
         fontSize: 16,
@@ -779,4 +927,3 @@ const styles = StyleSheet.create({
         letterSpacing: 0.6,
     },
 });
-

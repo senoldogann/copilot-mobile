@@ -13,7 +13,7 @@ import {
     JWT_SECRET_FILENAME,
 } from "@copilot-mobile/shared";
 
-function getConfigDir(): string {
+export function getConfigDir(): string {
     const dir = join(homedir(), CONFIG_DIR_NAME);
     if (!existsSync(dir)) {
         mkdirSync(dir, { mode: 0o700, recursive: true });

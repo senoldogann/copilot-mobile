@@ -13,16 +13,20 @@ export type Conversation = {
     createdAt: number;
     updatedAt: number;
     sessionId: string | null;
+    archived: boolean;
+    workspaceRoot: string | null;
 };
 
 export type ChatHistoryStore = {
     conversations: ReadonlyArray<Conversation>;
     activeConversationId: string | null;
 
-    createConversation: (sessionId: string | null) => string;
+    createConversation: (sessionId: string | null, workspaceRoot: string | null) => string;
     setActiveConversation: (id: string | null) => void;
     updateConversation: (id: string, title: string, preview: string) => void;
     deleteConversation: (id: string) => void;
+    archiveConversation: (id: string) => void;
+    unarchiveConversation: (id: string) => void;
     linkConversationToSession: (conversationId: string, sessionId: string) => void;
     removeBySessionId: (sessionId: string) => void;
     hydrate: () => Promise<void>;
@@ -56,6 +60,12 @@ function sanitizeConversation(input: unknown): Conversation | null {
         return null;
     }
 
+    const workspaceRootRaw = raw["workspaceRoot"];
+    const workspaceRoot =
+        typeof workspaceRootRaw === "string" && workspaceRootRaw.length > 0
+            ? workspaceRootRaw
+            : null;
+
     return {
         id: raw["id"],
         title: raw["title"],
@@ -63,6 +73,8 @@ function sanitizeConversation(input: unknown): Conversation | null {
         createdAt: raw["createdAt"],
         updatedAt: raw["updatedAt"],
         sessionId,
+        archived: raw["archived"] === true,
+        workspaceRoot,
     };
 }
 
@@ -115,7 +127,7 @@ export const useChatHistoryStore = create<ChatHistoryStore>((set, get) => ({
     conversations: [],
     activeConversationId: null,
 
-    createConversation: (sessionId) => {
+    createConversation: (sessionId, workspaceRoot) => {
         convCounter += 1;
         const id = `conv-${Date.now()}-${convCounter}`;
         const conv: Conversation = {
@@ -125,6 +137,8 @@ export const useChatHistoryStore = create<ChatHistoryStore>((set, get) => ({
             createdAt: Date.now(),
             updatedAt: Date.now(),
             sessionId,
+            archived: false,
+            workspaceRoot,
         };
         set((s) => ({
             conversations: [conv, ...s.conversations].slice(0, MAX_CONVERSATIONS),
@@ -155,6 +169,26 @@ export const useChatHistoryStore = create<ChatHistoryStore>((set, get) => ({
             conversations: s.conversations.filter((c) => c.id !== id),
             activeConversationId:
                 s.activeConversationId === id ? null : s.activeConversationId,
+        }));
+        void persistChatHistory(get());
+    },
+
+    archiveConversation: (id) => {
+        set((s) => ({
+            conversations: s.conversations.map((c) =>
+                c.id === id ? { ...c, archived: true, updatedAt: Date.now() } : c
+            ),
+            activeConversationId:
+                s.activeConversationId === id ? null : s.activeConversationId,
+        }));
+        void persistChatHistory(get());
+    },
+
+    unarchiveConversation: (id) => {
+        set((s) => ({
+            conversations: s.conversations.map((c) =>
+                c.id === id ? { ...c, archived: false, updatedAt: Date.now() } : c
+            ),
         }));
         void persistChatHistory(get());
     },

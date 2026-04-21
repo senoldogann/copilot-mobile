@@ -176,9 +176,12 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
 
         try {
             // 1. Pairing
-            client.send(makeClientMsg("auth.pair", { pairingToken: token }));
-            const pairingMsg = await client.waitForMessage("pairing.success");
-            assert.equal(pairingMsg.type, "pairing.success");
+            client.send(makeClientMsg("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            const pairingMsg = await client.waitForMessage("auth.authenticated");
+            assert.equal(pairingMsg.type, "auth.authenticated");
 
             // 2. capabilities.state should be emitted after pairing
             const capsMsg = await client.waitForMessage("capabilities.state");
@@ -256,8 +259,11 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
 
         try {
             // Pair
-            client.send(makeClientMsg("auth.pair", { pairingToken: token }));
-            await client.waitForMessage("pairing.success");
+            client.send(makeClientMsg("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
 
             // Find an effort-supporting model from the real model list
             client.send(makeClientMsg("models.request", {}));
@@ -338,8 +344,11 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
         const client = await connectToServer(E2E_PORT);
 
         try {
-            client.send(makeClientMsg("auth.pair", { pairingToken: token }));
-            await client.waitForMessage("pairing.success");
+            client.send(makeClientMsg("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
 
             client.send(makeClientMsg("models.request", {}));
             const modelsMsg = await client.waitForMessage("models.list");
@@ -387,8 +396,11 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
 
         try {
             // Pair
-            client.send(makeClientMsg("auth.pair", { pairingToken: token }));
-            await client.waitForMessage("pairing.success");
+            client.send(makeClientMsg("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
 
             // List sessions
             client.send(makeClientMsg("session.list", {}));

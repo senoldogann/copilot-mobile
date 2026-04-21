@@ -1,6 +1,6 @@
 // Ana sohbet ekranı — mesaj akışı, düşünme, araçlar, izin ve giriş yönetimi
 
-import React, { useRef, useEffect, useCallback, useState } from "react";
+import React, { useRef, useEffect, useCallback, useState, useMemo } from "react";
 import {
     View,
     Text,
@@ -25,7 +25,7 @@ import { useConnectionStore } from "../../src/stores/connection-store";
 import { useChatHistoryStore } from "../../src/stores/chat-history-store";
 import { ChatMessageItem } from "../../src/components/ChatMessageItem";
 import { ChatInput } from "../../src/components/ChatInput";
-import type { ImageAttachment, SendMode } from "../../src/components/ChatInput";
+import type { ImageAttachment, SendMode, QueuedDraft } from "../../src/components/ChatInput";
 import { EmptyChat } from "../../src/components/EmptyChat";
 import { ActivityDots } from "../../src/components/ActivityDots";
 import { TodoPanel } from "../../src/components/TodoPanel";
@@ -47,24 +47,28 @@ import {
 } from "../../src/services/bridge";
 import { startDraftConversation } from "../../src/services/new-chat";
 
+function basename(path: string): string {
+    const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
+    const segments = normalized.split("/").filter(Boolean);
+    return segments[segments.length - 1] ?? path;
+}
+
 // Özel başlık — GitHub Copilot mobil stili üst bar
 function ChatHeader() {
     const navigation = useNavigation<DrawerNavigationProp<ParamListBase>>("/(drawer)");
     const router = useRouter();
-    const isTyping = useSessionStore((s) => s.isAssistantTyping);
-    const isSessionLoading = useSessionStore((s) => s.isSessionLoading);
     const sessions = useSessionStore((s) => s.sessions);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
-    const currentIntent = useSessionStore((s) => s.currentIntent);
     const branch = useWorkspaceStore((s) => s.branch);
     const repository = useWorkspaceStore((s) => s.repository);
+    const workspaceRoot = useWorkspaceStore((s) => s.workspaceRoot);
     const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
     const handleCloseWorkspace = React.useCallback(() => setWorkspaceOpen(false), []);
 
     const handleNewChat = React.useCallback(() => {
         setMenuOpen(false);
-        startDraftConversation();
+        startDraftConversation(null);
     }, []);
 
     const handleOpenSettings = React.useCallback(() => {
@@ -79,11 +83,12 @@ function ChatHeader() {
     }, [router]);
 
     const activeSession = sessions.find((s) => s.id === activeSessionId);
-    const sessionTitle = currentIntent
-        ?? activeSession?.title
-        ?? (activeSessionId !== null && isSessionLoading ? "Syncing session..." : null);
     const branchName = branch ?? "main";
-    const repoName = repository ?? "copilot-mobile";
+    const repoName = workspaceRoot !== null
+        ? basename(workspaceRoot)
+        : activeSession?.context?.workspaceRoot !== undefined
+            ? basename(activeSession.context.workspaceRoot)
+            : repository ?? "copilot-mobile";
 
     return (
         <>
@@ -126,14 +131,6 @@ function ChatHeader() {
                 </View>
             </View>
 
-            {sessionTitle !== null && (
-                <View style={headerStyles.intentBar}>
-                    <ActivityDots active={isTyping} />
-                    <Text style={headerStyles.intentText} numberOfLines={1}>{sessionTitle}</Text>
-                    <ChevronDownIcon size={12} color={colors.textTertiary} />
-                </View>
-            )}
-
             <WorkspacePanel
                 visible={workspaceOpen}
                 onClose={handleCloseWorkspace}
@@ -174,6 +171,8 @@ type QueuedMessage = {
     content: string;
     targetSessionId: string | null;
     attachments?: ReadonlyArray<SessionMessageAttachment>;
+    /** Locally-echoed item ID — set when message was pre-added as pending before session existed */
+    localItemId?: string;
 };
 
 const MAX_TOTAL_ATTACHMENT_BASE64_CHARS = 700_000;
@@ -199,6 +198,8 @@ export default function ChatScreen() {
     const sessionRequestInFlightRef = useRef(false);
     const isNearBottomRef = useRef(true);
     const [showScrollToBottom, setShowScrollToBottom] = useState(false);
+    const [queuedDrafts, setQueuedDrafts] = useState<Array<QueuedDraft>>([]);
+    const [editingDraft, setEditingDraft] = useState<QueuedDraft | null>(null);
     const prevSessionIdRef = useRef<string | null>(null);
 
     // Store'lardan state
@@ -222,6 +223,8 @@ export default function ChatScreen() {
     const isConnected = connectionState === "authenticated";
     const isConnecting =
         connectionState === "connecting" || connectionState === "connected";
+    const inputDisabled = !isConnected || isSessionLoading;
+    const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
 
     useEffect(() => {
         if (isConnected) {
@@ -278,32 +281,41 @@ export default function ChatScreen() {
         );
 
         void (async () => {
-            await sendQueuedMessage(
-                activeSessionId,
-                nextQueuedMessage.content,
-                nextQueuedMessage.attachments
-            );
+            const { localItemId } = nextQueuedMessage;
+            try {
+                await sendQueuedMessage(
+                    activeSessionId,
+                    nextQueuedMessage.content,
+                    nextQueuedMessage.attachments
+                );
+                if (localItemId !== undefined) {
+                    useSessionStore.getState().updateUserMessageDeliveryState(localItemId, "sent");
+                }
+            } catch {
+                if (localItemId !== undefined) {
+                    useSessionStore.getState().updateUserMessageDeliveryState(localItemId, "failed");
+                }
+            }
         })();
     }, [activeSessionId, isTyping]);
 
-    // Oturum değişince en alta scroll reset yap
+    // Oturum değişince en alta scroll yap: önce bayrak koy, sonra gecikmeyle FlatList'e scroll et
     useEffect(() => {
         if (prevSessionIdRef.current !== activeSessionId) {
             prevSessionIdRef.current = activeSessionId;
             isNearBottomRef.current = true;
             setShowScrollToBottom(false);
+            // FlatList öğeleri render etmesi için yeterli süre bekle
+            const tid = setTimeout(() => {
+                flatListRef.current?.scrollToEnd({ animated: false });
+            }, 200);
+            return () => clearTimeout(tid);
         }
     }, [activeSessionId]);
 
-    // Kullanıcı sohbetin sonuna yakınsa otomatik kaydır
-    useEffect(() => {
-        if (chatItems.length > 0 && isNearBottomRef.current) {
-            const timerId = setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: chatItems.length <= 2 });
-            }, 80);
-            return () => clearTimeout(timerId);
-        }
-    }, [chatItems]);
+    // Kullanıcı sohbetin sonuna yakınsa otomatik kaydır — DEVRE DIŞI.
+    // Sadece oturuma ilk girildiğinde (activeSessionId değişince) scroll yapılır.
+    // useEffect(() => { ... }, [chatItems]);
 
     // Scroll konumunu takip et
     const handleScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
@@ -342,18 +354,16 @@ export default function ChatScreen() {
                 return;
             }
 
-            // "queue" mode adds message to the queue to be sent after current turn
-            if (mode === "queue" && activeSessionId !== null) {
-                const store = useSessionStore.getState();
-                store.addUserMessage(content, attachments);
-                queuedMessagesRef.current = [
-                    ...queuedMessagesRef.current,
+            if (mode === "queue") {
+                setQueuedDrafts((prev) => [
+                    ...prev,
                     {
+                        id: `queued-${Date.now()}-${prev.length + 1}`,
+                        sessionId: activeSessionId,
                         content,
-                        targetSessionId: activeSessionId,
-                        ...(attachments !== undefined ? { attachments } : {}),
+                        images: [...images],
                     },
-                ];
+                ]);
                 return;
             }
 
@@ -365,7 +375,7 @@ export default function ChatScreen() {
             const historyStore = useChatHistoryStore.getState();
             const previousActiveConversationId = historyStore.activeConversationId;
             const activeConversationId =
-                previousActiveConversationId ?? historyStore.createConversation(activeSessionId);
+                previousActiveConversationId ?? historyStore.createConversation(activeSessionId, null);
             const conversation = previousActiveConversationId === null
                 ? undefined
                 : historyStore.conversations.find(
@@ -389,13 +399,14 @@ export default function ChatScreen() {
                     ? selectedModel
                     : models[0]?.id ?? selectedModel;
                 const requestedModel = models.find((m) => m.id === requestedModelId);
-                store.addUserMessage(content, attachments);
+                const localItemId = store.addUserMessage(content, attachments);
                 store.setSessionLoading(true);
                 queuedMessagesRef.current = [
                     ...queuedMessagesRef.current,
                     {
                         content,
                         targetSessionId: null,
+                        localItemId,
                         ...(attachments !== undefined ? { attachments } : {}),
                     },
                 ];
@@ -433,6 +444,28 @@ export default function ChatScreen() {
         }
     }, [activeSessionId]);
 
+    const handleEditQueuedDraft = useCallback((draftId: string) => {
+        const draft = queuedDrafts.find((item) => item.id === draftId) ?? null;
+        if (draft !== null) {
+            setEditingDraft(draft);
+        }
+        setQueuedDrafts((prev) => prev.filter((item) => item.id !== draftId));
+    }, [queuedDrafts]);
+
+    const handleRemoveQueuedDraft = useCallback((draftId: string) => {
+        setQueuedDrafts((prev) => prev.filter((item) => item.id !== draftId));
+    }, []);
+
+    const handleSteerQueuedDraft = useCallback((draftId: string) => {
+        const draft = queuedDrafts.find((item) => item.id === draftId);
+        if (draft === undefined || inputDisabled || draft.sessionId !== activeSessionId) {
+            return;
+        }
+
+        handleSend(draft.content, draft.images, "steer");
+        setQueuedDrafts((prev) => prev.filter((item) => item.id !== draftId));
+    }, [activeSessionId, handleSend, inputDisabled, queuedDrafts]);
+
     // Respond to permission
     const handlePermissionRespond = useCallback(
         (requestId: string, approved: boolean) => {
@@ -447,6 +480,11 @@ export default function ChatScreen() {
             respondUserInput(requestId, value);
         },
         []
+    );
+
+    const activityFooter = useMemo(
+        () => <ActivityDots active={isTyping} intent={chatCurrentIntent} />,
+        [chatCurrentIntent, isTyping]
     );
 
     // FlatList renders
@@ -483,15 +521,15 @@ export default function ChatScreen() {
                             keyExtractor={keyExtractor}
                             style={styles.messageList}
                             contentContainerStyle={styles.messageListContent}
-                            removeClippedSubviews={false}
-                            maxToRenderPerBatch={15}
-                            windowSize={21}
+                            removeClippedSubviews={true}
+                            initialNumToRender={8}
+                            maxToRenderPerBatch={4}
+                            updateCellsBatchingPeriod={50}
+                            windowSize={5}
                             onScroll={handleScroll}
                             scrollEventThrottle={80}
-                            maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
-                            ListFooterComponent={
-                                <ActivityDots active={isTyping} intent={chatCurrentIntent} />
-                            }
+                            keyboardShouldPersistTaps="handled"
+                            ListFooterComponent={activityFooter}
                         />
                         {showScrollToBottom && (
                             <Pressable
@@ -537,7 +575,13 @@ export default function ChatScreen() {
                     onSend={handleSend}
                     onAbort={handleAbort}
                     isTyping={isTyping}
-                    disabled={!isConnected || isSessionLoading}
+                    disabled={inputDisabled}
+                    queuedDrafts={visibleQueuedDrafts}
+                    editingDraft={editingDraft}
+                    onEditingDraftConsumed={() => setEditingDraft(null)}
+                    onEditQueuedDraft={handleEditQueuedDraft}
+                    onRemoveQueuedDraft={handleRemoveQueuedDraft}
+                    onSteerQueuedDraft={handleSteerQueuedDraft}
                 />
             </KeyboardAvoidingView>
         </SafeAreaView>
@@ -600,21 +644,6 @@ const headerStyles = StyleSheet.create({
         height: 34,
         justifyContent: "center",
         alignItems: "center",
-    },
-    intentBar: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 7,
-        backgroundColor: colors.bg,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: colors.borderMuted,
-        gap: spacing.sm,
-    },
-    intentText: {
-        flex: 1,
-        fontSize: fontSize.sm,
-        color: colors.textSecondary,
     },
     menuOverlay: {
         flex: 1,

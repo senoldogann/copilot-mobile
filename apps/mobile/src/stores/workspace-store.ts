@@ -17,8 +17,8 @@ export type WorkspaceTab = "changes" | "files";
 export type WorkspaceStore = {
     sessionId: string | null;
     context: SessionContext | null;
-    rootPath: string | null;
-    requestedPath: string | null;
+    workspaceRoot: string | null;
+    requestedWorkspaceRelativePath: string | null;
     tree: WorkspaceTreeNode | null;
     treeTruncated: boolean;
     gitRoot: string | null;
@@ -42,6 +42,7 @@ export type WorkspaceStore = {
     toggleExpanded: (path: string) => void;
     setTreeLoading: (path: string, loading: boolean) => void;
     setGitLoading: (loading: boolean) => void;
+    clearRequestLoadingState: () => void;
     setWorkspaceTree: (payload: WorkspaceTreeMessage["payload"]) => void;
     setWorkspaceGitSummary: (payload: WorkspaceGitSummaryMessage["payload"]) => void;
     setWorkspaceOperationState: (
@@ -57,8 +58,8 @@ type WorkspaceState = Pick<
     WorkspaceStore,
     | "sessionId"
     | "context"
-    | "rootPath"
-    | "requestedPath"
+    | "workspaceRoot"
+    | "requestedWorkspaceRelativePath"
     | "tree"
     | "treeTruncated"
     | "gitRoot"
@@ -80,8 +81,8 @@ type WorkspaceState = Pick<
 const initialState: WorkspaceState = {
     sessionId: null,
     context: null,
-    rootPath: null,
-    requestedPath: null,
+    workspaceRoot: null,
+    requestedWorkspaceRelativePath: null,
     tree: null,
     treeTruncated: false,
     gitRoot: null,
@@ -134,14 +135,14 @@ function replaceTreeNode(
 
 function mergeWorkspaceTree(
     currentTree: WorkspaceTreeNode | null,
-    requestedPath: string,
+    requestedWorkspaceRelativePath: string,
     nextTree: WorkspaceTreeNode
 ): WorkspaceTreeNode {
-    if (currentTree === null || currentTree.path === requestedPath) {
+    if (currentTree === null || currentTree.path === requestedWorkspaceRelativePath) {
         return nextTree;
     }
 
-    return replaceTreeNode(currentTree, requestedPath, nextTree);
+    return replaceTreeNode(currentTree, requestedWorkspaceRelativePath, nextTree);
 }
 
 function setPathFlag(
@@ -195,21 +196,34 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         })),
 
     setGitLoading: (loading) => set({ isLoadingGit: loading }),
+    clearRequestLoadingState: () =>
+        set({
+            loadingTreePaths: {},
+            isLoadingGit: false,
+        }),
 
     setWorkspaceTree: (payload) =>
         set((state) => ({
             sessionId: payload.sessionId,
             context: payload.context,
-            rootPath: payload.rootPath,
-            requestedPath: payload.requestedPath,
-            tree: mergeWorkspaceTree(state.tree, payload.requestedPath, payload.tree),
+            workspaceRoot: payload.workspaceRoot,
+            requestedWorkspaceRelativePath: payload.requestedWorkspaceRelativePath,
+            tree: mergeWorkspaceTree(
+                state.tree,
+                payload.requestedWorkspaceRelativePath,
+                payload.tree
+            ),
             treeTruncated: payload.truncated,
             expandedPaths: {
                 ...state.expandedPaths,
-                [payload.rootPath]: true,
-                [payload.requestedPath]: true,
+                [payload.workspaceRoot]: true,
+                [payload.requestedWorkspaceRelativePath]: true,
             },
-            loadingTreePaths: setPathFlag(state.loadingTreePaths, payload.requestedPath, false),
+            loadingTreePaths: setPathFlag(
+                state.loadingTreePaths,
+                payload.requestedWorkspaceRelativePath,
+                false
+            ),
             error: null,
         })),
 
@@ -217,7 +231,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         set((state) => ({
             sessionId: payload.sessionId,
             context: payload.context,
-            rootPath: payload.rootPath,
+            workspaceRoot: payload.workspaceRoot,
             gitRoot: payload.gitRoot,
             repository: payload.repository ?? null,
             branch: payload.branch ?? null,
@@ -228,7 +242,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
             error: null,
             expandedPaths: {
                 ...state.expandedPaths,
-                [payload.rootPath]: true,
+                [payload.workspaceRoot]: true,
             },
         })),
 

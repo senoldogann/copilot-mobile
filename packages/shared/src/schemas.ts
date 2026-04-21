@@ -23,11 +23,14 @@ const sessionConfigSchema = z.object({
 });
 
 const sessionContextSchema = z.object({
-    cwd: z.string().min(1),
+    sessionCwd: z.string().min(1),
+    workspaceRoot: z.string().min(1),
     gitRoot: z.string().min(1).optional(),
     repository: z.string().min(1).optional(),
     branch: z.string().min(1).optional(),
 });
+
+const transportModeSchema = z.enum(["direct", "relay"]);
 
 let workspaceTreeNodeSchema: z.ZodType<import("./protocol").WorkspaceTreeNode>;
 workspaceTreeNodeSchema = z.lazy(() => z.object({
@@ -87,6 +90,7 @@ const sessionMessageAttachmentSchema = z.object({
 });
 
 const toolArgumentsSchema = z.record(z.unknown());
+const toolExecutionStatusSchema = z.enum(["running", "completed", "failed", "no_results"]);
 
 const sessionHistoryItemSchema = z.discriminatedUnion("type", [
     z.object({
@@ -114,10 +118,11 @@ const sessionHistoryItemSchema = z.discriminatedUnion("type", [
         type: z.literal("tool"),
         toolName: z.string().min(1),
         requestId: z.string().min(1),
-        status: z.enum(["running", "completed", "failed"]),
+        status: toolExecutionStatusSchema,
         argumentsText: z.string().optional(),
         progressMessage: z.string().optional(),
         partialOutput: z.string().optional(),
+        errorMessage: z.string().optional(),
     }),
 ]);
 
@@ -188,6 +193,7 @@ const sessionStatePayloadSchema = z.object({
     agentMode: z.enum(["agent", "plan", "ask"]),
     permissionLevel: z.enum(["default", "bypass", "autopilot"]),
     runtimeMode: z.enum(["interactive", "plan", "autopilot"]),
+    busy: z.boolean().optional(),
 });
 
 const userInputRequestPayloadSchema = z.object({
@@ -221,12 +227,17 @@ const workspaceOperationResultPayloadSchema = z.object({
 
 // --- Server → Client Message Schemas ---
 
-const pairingSuccessSchema = baseBridgeMessageSchema.extend({
-    type: z.literal("pairing.success"),
+const authAuthenticatedSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("auth.authenticated"),
     payload: z.object({
-        jwt: z.string().min(1),
+        authMethod: z.enum(["pair", "resume"]),
         deviceId: z.string().min(1),
+        deviceCredential: z.string().min(1),
+        sessionToken: z.string().min(1),
+        sessionTokenExpiresAt: z.number().int().positive(),
+        transportMode: transportModeSchema,
         certFingerprint: z.string().regex(CERT_FINGERPRINT_PATTERN).nullable(),
+        replayedCount: z.number().int().nonnegative(),
     }),
 });
 
@@ -321,6 +332,10 @@ const toolExecutionCompleteSchema = baseBridgeMessageSchema.extend({
         toolName: z.string().min(1),
         requestId: z.string().min(1),
         success: z.boolean(),
+        completionStatus: z.enum(["completed", "failed", "no_results"]).optional(),
+        errorMessage: z.string().optional(),
+        exitCode: z.number().int().optional(),
+        toolTelemetry: z.record(z.unknown()).optional(),
     }),
 });
 
@@ -353,14 +368,12 @@ const connectionStatusSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
-const tokenRefreshSchema = baseBridgeMessageSchema.extend({
-    type: z.literal("token.refresh"),
-    payload: z.object({ jwt: z.string().min(1) }),
-});
-
-const reconnectReadySchema = baseBridgeMessageSchema.extend({
-    type: z.literal("reconnect.ready"),
-    payload: z.object({}).strict(),
+const authSessionTokenSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("auth.session_token"),
+    payload: z.object({
+        sessionToken: z.string().min(1),
+        sessionTokenExpiresAt: z.number().int().positive(),
+    }),
 });
 
 const capabilitiesStateSchema = baseBridgeMessageSchema.extend({
@@ -398,6 +411,19 @@ const assistantIntentSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const sessionUsageSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("session.usage"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        tokenLimit: z.number().int().nonnegative(),
+        currentTokens: z.number().int().nonnegative(),
+        systemTokens: z.number().int().nonnegative().optional(),
+        conversationTokens: z.number().int().nonnegative().optional(),
+        toolDefinitionsTokens: z.number().int().nonnegative().optional(),
+        messagesLength: z.number().int().nonnegative().optional(),
+    }),
+});
+
 const planExitRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("plan.exit.request"),
     payload: planExitRequestPayloadSchema,
@@ -408,8 +434,8 @@ const workspaceTreeSchema = baseBridgeMessageSchema.extend({
     payload: z.object({
         sessionId: z.string().min(1),
         context: sessionContextSchema,
-        rootPath: z.string().min(1),
-        requestedPath: z.string(),
+        workspaceRoot: z.string().min(1),
+        requestedWorkspaceRelativePath: z.string(),
         tree: workspaceTreeNodeSchema,
         truncated: z.boolean(),
     }),
@@ -420,7 +446,7 @@ const workspaceGitSummarySchema = baseBridgeMessageSchema.extend({
     payload: z.object({
         sessionId: z.string().min(1),
         context: sessionContextSchema,
-        rootPath: z.string().min(1),
+        workspaceRoot: z.string().min(1),
         gitRoot: z.string().min(1).nullable(),
         repository: z.string().optional(),
         branch: z.string().optional(),
@@ -448,10 +474,21 @@ const workspaceFileResponseSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.file.response"),
     payload: z.object({
         sessionId: z.string().min(1),
-        path: z.string().min(1),
+        workspaceRelativePath: z.string().min(1),
         content: z.string(),
         mimeType: z.string(),
         truncated: z.boolean(),
+        error: z.string().optional(),
+    }),
+});
+
+const workspaceResolveResponseSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.resolve.response"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        rawPath: z.string().min(1),
+        resolvedWorkspaceRelativePath: z.string().min(1).optional(),
+        matches: z.array(z.string().min(1)).readonly().optional(),
         error: z.string().optional(),
     }),
 });
@@ -460,7 +497,7 @@ const workspaceDiffResponseSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.diff.response"),
     payload: z.object({
         sessionId: z.string().min(1),
-        path: z.string().min(1),
+        workspaceRelativePath: z.string().min(1),
         diff: z.string(),
         error: z.string().optional(),
     }),
@@ -476,7 +513,7 @@ const skillsListResponseSchema = baseBridgeMessageSchema.extend({
 });
 
 export const serverMessageSchema = z.discriminatedUnion("type", [
-    pairingSuccessSchema,
+    authAuthenticatedSchema,
     sessionCreatedSchema,
     sessionResumedSchema,
     sessionIdleSchema,
@@ -495,18 +532,19 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     modelsListSchema,
     errorMessageSchema,
     connectionStatusSchema,
-    tokenRefreshSchema,
-    reconnectReadySchema,
+    authSessionTokenSchema,
     capabilitiesStateSchema,
     sessionStateSchema,
     sessionErrorSchema,
     sessionTitleChangedSchema,
     assistantIntentSchema,
+    sessionUsageSchema,
     planExitRequestSchema,
     workspaceTreeSchema,
     workspaceGitSummarySchema,
     workspacePullResultSchema,
     workspacePushResultSchema,
+    workspaceResolveResponseSchema,
     workspaceFileResponseSchema,
     workspaceDiffResponseSchema,
     skillsListResponseSchema,
@@ -516,7 +554,20 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
 
 const authPairSchema = baseBridgeMessageSchema.extend({
     type: z.literal("auth.pair"),
-    payload: z.object({ pairingToken: z.string().min(1) }),
+    payload: z.object({
+        pairingToken: z.string().min(1),
+        transportMode: transportModeSchema,
+    }),
+});
+
+const authResumeSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("auth.resume"),
+    payload: z.object({
+        deviceCredential: z.string().min(1),
+        sessionToken: z.string().min(1).optional(),
+        lastSeenSeq: z.number().int().nonnegative(),
+        transportMode: transportModeSchema,
+    }),
 });
 
 const sessionCreateSchema = baseBridgeMessageSchema.extend({
@@ -592,11 +643,6 @@ const modelsRequestSchema = baseBridgeMessageSchema.extend({
     payload: z.object({}).strict(),
 });
 
-const reconnectSchema = baseBridgeMessageSchema.extend({
-    type: z.literal("reconnect"),
-    payload: z.object({ lastSeenSeq: z.number().int().nonnegative() }),
-});
-
 const capabilitiesRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("capabilities.request"),
     payload: z.object({}).strict(),
@@ -606,7 +652,7 @@ const workspaceTreeRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.tree.request"),
     payload: z.object({
         sessionId: z.string().min(1),
-        path: z.string().optional(),
+        workspaceRelativePath: z.string().optional(),
         maxDepth: z.number().int().positive().optional(),
     }),
 });
@@ -637,8 +683,16 @@ const workspaceFileRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.file.request"),
     payload: z.object({
         sessionId: z.string().min(1),
-        path: z.string().min(1),
+        workspaceRelativePath: z.string().min(1),
         maxBytes: z.number().int().positive().optional(),
+    }),
+});
+
+const workspaceResolveRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.resolve.request"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        rawPath: z.string().min(1),
     }),
 });
 
@@ -646,7 +700,7 @@ const workspaceDiffRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.diff.request"),
     payload: z.object({
         sessionId: z.string().min(1),
-        path: z.string().min(1),
+        workspaceRelativePath: z.string().min(1),
     }),
 });
 
@@ -657,6 +711,7 @@ const skillsListRequestSchema = baseBridgeMessageSchema.extend({
 
 export const clientMessageSchema = z.discriminatedUnion("type", [
     authPairSchema,
+    authResumeSchema,
     sessionCreateSchema,
     sessionResumeSchema,
     sessionListRequestSchema,
@@ -669,12 +724,12 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     sessionModeUpdateSchema,
     permissionLevelUpdateSchema,
     modelsRequestSchema,
-    reconnectSchema,
     capabilitiesRequestSchema,
     workspaceTreeRequestSchema,
     workspaceGitSummaryRequestSchema,
     workspacePullSchema,
     workspacePushSchema,
+    workspaceResolveRequestSchema,
     workspaceFileRequestSchema,
     workspaceDiffRequestSchema,
     skillsListRequestSchema,
@@ -692,13 +747,32 @@ export const qrPayloadSchema = z.object({
         ),
     token: z.string().min(32),
     certFingerprint: z.string().regex(CERT_FINGERPRINT_PATTERN).nullable(),
+    transportMode: transportModeSchema,
+    companionId: z.string().min(1).optional(),
+    relayAccessToken: z.string().min(1).optional(),
     version: z.number().int().positive(),
 }).superRefine((value, context) => {
-    if (value.url.startsWith("wss://") && value.certFingerprint === null) {
+    if (value.url.startsWith("wss://") && value.transportMode === "direct" && value.certFingerprint === null) {
         context.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["certFingerprint"],
             message: "A secure WebSocket QR payload requires a certificate fingerprint",
+        });
+    }
+
+    if (value.transportMode === "relay" && value.relayAccessToken === undefined) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["relayAccessToken"],
+            message: "Relay QR payloads must include a relay access token",
+        });
+    }
+
+    if (value.transportMode === "direct" && value.relayAccessToken !== undefined) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["relayAccessToken"],
+            message: "Direct QR payloads must not include a relay access token",
         });
     }
 });
@@ -721,7 +795,7 @@ import type {
     GitFileChange,
     GitCommitSummary,
     WorkspaceOperationResultPayload,
-} from "./protocol";
+} from "./protocol.js";
 
 type _AssertServerTypes = z.infer<typeof serverMessageSchema>["type"] extends ServerMessage["type"] ? true : never;
 type _AssertServerTypesReverse = ServerMessage["type"] extends z.infer<typeof serverMessageSchema>["type"] ? true : never;

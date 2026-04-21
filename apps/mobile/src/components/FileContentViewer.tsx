@@ -10,15 +10,19 @@ import {
     View,
 } from "react-native";
 import { useSessionStore } from "../stores/session-store";
-import { useWorkspaceStore } from "../stores/workspace-store";
 import {
     onWorkspaceDiffResponse,
     onWorkspaceFileResponse,
+    onWorkspaceResolveResponse,
     requestWorkspaceDiff,
     requestWorkspaceFile,
+    requestWorkspaceResolve,
 } from "../services/bridge";
-import type { WorkspaceDiffPayload, WorkspaceFilePayload } from "../services/workspace-events";
-import type { WorkspaceTreeNode } from "@copilot-mobile/shared";
+import type {
+    WorkspaceDiffPayload,
+    WorkspaceFilePayload,
+    WorkspaceResolvePayload,
+} from "../services/workspace-events";
 import { borderRadius, colors, fontSize, spacing } from "../theme/colors";
 import { BottomSheet } from "./BottomSheet";
 
@@ -31,9 +35,18 @@ type Props = {
 };
 
 type LoadState =
-    | { readonly status: "loading" }
-    | { readonly status: "ready"; readonly body: string; readonly truncated: boolean }
-    | { readonly status: "error"; readonly message: string };
+    | { readonly status: "loading"; readonly resolvedPath?: string }
+    | {
+        readonly status: "ready";
+        readonly resolvedPath: string;
+        readonly body: string;
+        readonly truncated: boolean;
+    }
+    | {
+        readonly status: "error";
+        readonly message: string;
+        readonly resolvedPath?: string;
+    };
 
 const LOAD_TIMEOUT_MS = 10_000;
 
@@ -51,46 +64,19 @@ function parseLineInfo(raw: string): { readonly clean: string; readonly info: st
     };
 }
 
-// Search workspace tree for a node whose name matches the bare filename.
-// Returns the full relative path if found, or the original path otherwise.
-function resolvePathFromTree(
-    rawPath: string,
-    tree: WorkspaceTreeNode | null
-): string {
-    if (tree === null) return rawPath;
-    // Only search if the path looks like a bare filename (no slashes)
-    const hasDirComponent = rawPath.includes("/") || rawPath.includes("\\");
-    if (hasDirComponent) return rawPath;
-    const needle = rawPath.toLowerCase().replace(/:\d+(-\d+)?$/, "");
-
-    function search(node: WorkspaceTreeNode): string | null {
-        if (node.type === "file" && node.name.toLowerCase() === needle) {
-            return node.path;
-        }
-        if (node.children !== undefined) {
-            for (const child of node.children) {
-                const found = search(child);
-                if (found !== null) return found;
-            }
-        }
-        return null;
+function formatResolveError(payload: WorkspaceResolvePayload): string {
+    if (payload.matches !== undefined && payload.matches.length > 0) {
+        const preview = payload.matches.slice(0, 3).join(", ");
+        return `${payload.error ?? "Ambiguous file reference"} (${preview})`;
     }
 
-    return search(tree) ?? rawPath;
+    return payload.error ?? `Could not resolve ${payload.rawPath}`;
 }
 
 export function FileContentViewer(props: Props): React.JSX.Element {
     const { path, mode = "file", onClose } = props;
     const { clean, info } = parseLineInfo(path);
-
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
-    const workspaceTree = useWorkspaceStore((s) => s.tree);
-
-    // Resolve bare filenames (e.g. "bridge.ts") to their full tree path
-    const resolvedPath = useMemo(
-        () => resolvePathFromTree(clean, workspaceTree),
-        [clean, workspaceTree]
-    );
 
     const [state, setState] = useState<LoadState>({ status: "loading" });
 
@@ -99,63 +85,117 @@ export function FileContentViewer(props: Props): React.JSX.Element {
             setState({ status: "error", message: "No active session. Connect to the bridge first." });
             return undefined;
         }
+
         setState({ status: "loading" });
 
-        const unsubscribe =
-            mode === "diff"
-                ? onWorkspaceDiffResponse(resolvedPath, (payload: WorkspaceDiffPayload) => {
+        const cleanupFns: Array<() => void> = [];
+        let finished = false;
+
+        const finish = (): void => {
+            if (finished) {
+                return;
+            }
+            finished = true;
+            clearTimeout(timeout);
+            while (cleanupFns.length > 0) {
+                const cleanup = cleanupFns.pop();
+                cleanup?.();
+            }
+        };
+
+        const timeout = setTimeout(() => {
+            finish();
+            setState({ status: "error", message: "Timed out waiting for response." });
+        }, LOAD_TIMEOUT_MS);
+
+        const unsubscribeResolve = onWorkspaceResolveResponse(
+            activeSessionId,
+            clean,
+            (resolvePayload: WorkspaceResolvePayload) => {
+                unsubscribeResolve();
+
+                const resolvedPath = resolvePayload.resolvedWorkspaceRelativePath;
+                if (resolvedPath === undefined) {
                     finish();
-                    if (payload.error !== undefined) {
-                        setState({ status: "error", message: payload.error });
-                    } else {
+                    setState({
+                        status: "error",
+                        message: formatResolveError(resolvePayload),
+                    });
+                    return;
+                }
+
+                setState({ status: "loading", resolvedPath });
+
+                if (mode === "diff") {
+                    const unsubscribeDiff = onWorkspaceDiffResponse(
+                        activeSessionId,
+                        resolvedPath,
+                        (payload: WorkspaceDiffPayload) => {
+                            finish();
+                            if (payload.error !== undefined) {
+                                setState({
+                                    status: "error",
+                                    message: payload.error,
+                                    resolvedPath,
+                                });
+                                return;
+                            }
+
+                            setState({
+                                status: "ready",
+                                resolvedPath,
+                                body: payload.diff.length > 0 ? payload.diff : "(No changes)",
+                                truncated: false,
+                            });
+                        }
+                    );
+                    cleanupFns.push(unsubscribeDiff);
+                    void requestWorkspaceDiff(activeSessionId, resolvedPath);
+                    return;
+                }
+
+                const unsubscribeFile = onWorkspaceFileResponse(
+                    activeSessionId,
+                    resolvedPath,
+                    (payload: WorkspaceFilePayload) => {
+                        finish();
+                        if (payload.error !== undefined) {
+                            setState({
+                                status: "error",
+                                message: payload.error,
+                                resolvedPath,
+                            });
+                            return;
+                        }
+
                         setState({
                             status: "ready",
-                            body: payload.diff.length > 0 ? payload.diff : "(No changes)",
-                            truncated: false,
-                        });
-                    }
-                })
-                : onWorkspaceFileResponse(resolvedPath, (payload: WorkspaceFilePayload) => {
-                    finish();
-                    if (payload.error !== undefined) {
-                        setState({ status: "error", message: payload.error });
-                    } else {
-                        setState({
-                            status: "ready",
+                            resolvedPath,
                             body: payload.content,
                             truncated: payload.truncated,
                         });
                     }
-                });
+                );
+                cleanupFns.push(unsubscribeFile);
+                void requestWorkspaceFile(activeSessionId, resolvedPath);
+            }
+        );
 
-        const timeout = setTimeout(() => {
-            unsubscribe();
-            setState({ status: "error", message: "Timed out waiting for response." });
-        }, LOAD_TIMEOUT_MS);
-
-        const finish = (): void => {
-            clearTimeout(timeout);
-            unsubscribe();
-        };
-
-        if (mode === "diff") {
-            void requestWorkspaceDiff(activeSessionId, resolvedPath);
-        } else {
-            void requestWorkspaceFile(activeSessionId, resolvedPath);
-        }
+        cleanupFns.push(unsubscribeResolve);
+        void requestWorkspaceResolve(activeSessionId, clean);
 
         return () => {
-            clearTimeout(timeout);
-            unsubscribe();
+            finish();
         };
-    }, [activeSessionId, resolvedPath, mode]);
+    }, [activeSessionId, clean, mode]);
 
-    useEffect(() => {
-        return load();
-    }, [load]);
+    useEffect(() => load(), [load]);
 
-    const fileName = resolvedPath.split("/").pop() ?? resolvedPath;
-    const titleIcon = mode === "diff" ? "git-branch" : "file-text";
+    const resolvedPath = state.resolvedPath;
+    const fileName = useMemo(() => {
+        const source = resolvedPath ?? clean;
+        return source.split("/").pop() ?? source;
+    }, [clean, resolvedPath]);
 
     const stickyHeader = (info !== null || (state.status === "ready" && state.truncated)) ? (
         <View style={viewerStyles.metaBanner}>
@@ -172,14 +212,14 @@ export function FileContentViewer(props: Props): React.JSX.Element {
         <BottomSheet
             visible
             onClose={onClose}
-            icon={titleIcon === "file-text" ? "📄" : "±"}
+            iconName={mode === "diff" ? "git-branch" : "file-text"}
             title={fileName}
-            {...(resolvedPath !== fileName ? { subtitle: resolvedPath } : {})}
+            {...(resolvedPath !== undefined && resolvedPath !== fileName ? { subtitle: resolvedPath } : {})}
             stickyHeader={stickyHeader}
         >
             {state.status === "loading" && (
                 <View style={viewerStyles.centered}>
-                    <ActivityIndicator color={colors.accent} size="small" />
+                    <ActivityIndicator color={colors.textSecondary} size="small" />
                     <Text style={viewerStyles.loadingText}>Loading…</Text>
                 </View>
             )}
@@ -206,7 +246,7 @@ function classifyDiffLine(line: string): { readonly color: string; readonly bg: 
         return { color: colors.textTertiary, bg: null };
     }
     if (line.startsWith("@@")) {
-        return { color: colors.accent, bg: null };
+        return { color: colors.textSecondary, bg: null };
     }
     if (line.startsWith("+")) {
         return { color: "#3fb950", bg: "rgba(63,185,80,0.10)" };
@@ -271,7 +311,7 @@ const viewerStyles = StyleSheet.create({
     },
     lineInfoText: {
         fontSize: fontSize.xs,
-        color: colors.accent,
+        color: colors.textSecondary,
     },
     truncatedText: {
         fontSize: fontSize.xs,
@@ -306,11 +346,13 @@ const viewerStyles = StyleSheet.create({
         color: colors.textPrimary,
     },
     codeBlock: {
+        backgroundColor: colors.bg,
         paddingHorizontal: 8,
         paddingVertical: spacing.sm,
     },
     codeLine: {
         flexDirection: "row",
+        backgroundColor: colors.bg,
     },
     lineNum: {
         width: 36,
