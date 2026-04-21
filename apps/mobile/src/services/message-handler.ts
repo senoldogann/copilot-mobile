@@ -260,13 +260,13 @@ function parseTodoWriteArguments(args: Record<string, unknown>): ReadonlyArray<i
         const rawStatus = String(entry["status"] ?? "pending").toLowerCase();
         const status: import("../stores/session-store").TodoItemStatus =
             rawStatus === "completed" || rawStatus === "done" ? "completed"
-            : rawStatus === "in_progress" || rawStatus === "in progress" ? "in_progress"
-            : "pending";
+                : rawStatus === "in_progress" || rawStatus === "in progress" ? "in_progress"
+                    : "pending";
         const rawPriority = String(entry["priority"] ?? "").toLowerCase();
         const priority = rawPriority === "high" ? "high" as const
             : rawPriority === "low" ? "low" as const
-            : rawPriority === "medium" ? "medium" as const
-            : undefined;
+                : rawPriority === "medium" ? "medium" as const
+                    : undefined;
         todos.push({ id, content, status, ...(priority !== undefined ? { priority } : {}) });
     }
     return todos.length > 0 ? todos : null;
@@ -313,6 +313,14 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.upsertSession(message.payload.session);
             clearBackgroundCompletion(message.payload.session.id);
+
+            const chatHistoryStore = useChatHistoryStore.getState();
+            const linkedConversation = chatHistoryStore.conversations.find(
+                (item) => item.sessionId === message.payload.session.id
+            );
+            if (linkedConversation !== undefined) {
+                chatHistoryStore.setActiveConversation(linkedConversation.id);
+            }
             break;
         }
 
@@ -504,6 +512,9 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "session.error": {
             clearBackgroundCompletion(message.payload.sessionId);
+            if (sessionStore.activeSessionId === message.payload.sessionId) {
+                sessionStore.setActiveSession(null);
+            }
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
             sessionStore.setPermissionPrompt(null);

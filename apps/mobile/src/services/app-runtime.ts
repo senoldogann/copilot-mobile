@@ -3,10 +3,10 @@ import type { AppStateStatus } from "react-native";
 import {
     listSessions,
     requestCapabilities,
-    resumeBridgeConnection,
     resumeSession,
     tryResumeFromStoredCredentials,
 } from "./bridge";
+import { loadActiveSessionId } from "./credentials";
 import {
     dismissCompletionNotifications,
     initializeNotifications,
@@ -14,6 +14,7 @@ import {
     prepareNotificationPermissions,
 } from "./notifications";
 import { useConnectionStore } from "../stores/connection-store";
+import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useSessionStore } from "../stores/session-store";
 
 let currentAppState: AppStateStatus = AppState.currentState;
@@ -50,7 +51,21 @@ function syncOnForeground(): void {
     }
 
     if (connectionStore.state === "disconnected") {
-        resumeBridgeConnection();
+        void tryResumeFromStoredCredentials();
+    }
+}
+
+async function hydrateMobileState(): Promise<void> {
+    await useChatHistoryStore.getState().hydrate();
+
+    const sessionStore = useSessionStore.getState();
+    if (sessionStore.activeSessionId !== null) {
+        return;
+    }
+
+    const storedActiveSessionId = await loadActiveSessionId();
+    if (storedActiveSessionId !== null) {
+        sessionStore.setActiveSession(storedActiveSessionId);
     }
 }
 
@@ -125,8 +140,10 @@ export function initializeAppRuntime(): () => void {
     if (currentAppState === "active") {
         void prepareNotificationPermissions();
     }
-    // SecureStore'da kimlik bilgileri varsa otomatik reconnect et.
-    void tryResumeFromStoredCredentials();
+    void (async () => {
+        await hydrateMobileState();
+        await tryResumeFromStoredCredentials();
+    })();
     const subscription = AppState.addEventListener("change", handleAppStateChange);
 
     return () => {

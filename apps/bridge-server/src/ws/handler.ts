@@ -8,7 +8,7 @@ import { validatePairingToken, clearPairingToken } from "../auth/pairing.js";
 import { createJWT, verifyJWT } from "../auth/jwt.js";
 import { checkMessageRateLimit, checkReplayProtection } from "../utils/rate-limit.js";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
-import { JWT_REFRESH_THRESHOLD_MS } from "@copilot-mobile/shared";
+import { JWT_REFRESH_THRESHOLD_MS, PROTOCOL_VERSION } from "@copilot-mobile/shared";
 import type { createSessionManager } from "../copilot/session-manager.js";
 
 type SessionManager = ReturnType<typeof createSessionManager>;
@@ -36,7 +36,7 @@ export function createMessageHandler(
     };
 
     function makeBase() {
-        return { id: generateMessageId(), timestamp: nowMs(), seq: nextSeq() };
+        return { id: generateMessageId(), timestamp: nowMs(), seq: nextSeq(), protocolVersion: PROTOCOL_VERSION };
     }
 
     function sendError(code: string, message: string, retry: boolean): void {

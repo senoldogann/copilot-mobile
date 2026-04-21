@@ -7,7 +7,7 @@ import type {
     ClientMessage,
     QRPayload,
 } from "@copilot-mobile/shared";
-import { serverMessageSchema } from "@copilot-mobile/shared";
+import { serverMessageSchema, PROTOCOL_VERSION } from "@copilot-mobile/shared";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "authenticated";
 
@@ -104,6 +104,7 @@ export function createWSClient(config: WSClientConfig) {
             id: generateId(),
             timestamp: Date.now(),
             seq: nextSeq(),
+            protocolVersion: PROTOCOL_VERSION,
             type,
             payload,
         } as ClientMessage;

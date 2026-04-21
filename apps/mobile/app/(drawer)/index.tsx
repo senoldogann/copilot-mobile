@@ -45,6 +45,7 @@ import {
     requestSkillsList,
     disconnect,
 } from "../../src/services/bridge";
+import { startDraftConversation } from "../../src/services/new-chat";
 
 // Özel başlık — GitHub Copilot mobil stili üst bar
 function ChatHeader() {
@@ -63,19 +64,7 @@ function ChatHeader() {
 
     const handleNewChat = React.useCallback(() => {
         setMenuOpen(false);
-        const sessionStore = useSessionStore.getState();
-        if (sessionStore.permissionPrompt !== null) {
-            void respondPermission(sessionStore.permissionPrompt.requestId, false);
-        }
-        if (sessionStore.userInputPrompt !== null) {
-            void respondUserInput(sessionStore.userInputPrompt.requestId, "");
-        }
-        sessionStore.clearChatItems();
-        sessionStore.setActiveSession(null);
-        sessionStore.setSessionLoading(false);
-        sessionStore.setPermissionPrompt(null);
-        sessionStore.setUserInputPrompt(null);
-        useConnectionStore.getState().setError(null);
+        startDraftConversation();
     }, []);
 
     const handleOpenSettings = React.useCallback(() => {
@@ -376,7 +365,7 @@ export default function ChatScreen() {
             const historyStore = useChatHistoryStore.getState();
             const previousActiveConversationId = historyStore.activeConversationId;
             const activeConversationId =
-                previousActiveConversationId ?? historyStore.createConversation(null);
+                previousActiveConversationId ?? historyStore.createConversation(activeSessionId);
             const conversation = previousActiveConversationId === null
                 ? undefined
                 : historyStore.conversations.find(

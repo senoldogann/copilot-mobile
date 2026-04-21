@@ -39,6 +39,14 @@
                     "cameraPermission": "Camera permission is required for QR code scanning"
                 }
             ],
+            [
+                "expo-image-picker",
+                {
+                    "photosPermission": "Photo library access is required to attach images to Copilot chats",
+                    "cameraPermission": "Camera access is required to capture images for Copilot chats",
+                    "microphonePermission": false
+                }
+            ],
             "expo-secure-store",
             [
                 "expo-notifications",

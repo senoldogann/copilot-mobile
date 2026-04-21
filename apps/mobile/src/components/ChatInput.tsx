@@ -1469,11 +1469,9 @@ const autocompleteStyles = StyleSheet.create({
         borderRadius: borderRadius.md,
         marginBottom: 6,
         overflow: "hidden",
-        // Fixed height so keyboard stays visible and menu is scrollable
         maxHeight: 220,
     },
     list: {
-        // Makes the list area scrollable when items overflow maxHeight
         flexShrink: 1,
     },
     ctxHeader: {
@@ -1484,10 +1482,6 @@ const autocompleteStyles = StyleSheet.create({
         paddingVertical: 7,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: colors.border,
-    },
-    list: {
-        maxHeight: 240,
-    },
     },
     ctxModelName: {
         fontSize: fs.xs,

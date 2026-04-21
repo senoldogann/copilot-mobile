@@ -16,6 +16,7 @@ import type { DrawerContentComponentProps } from "@react-navigation/drawer";
 import type { SessionInfo } from "@copilot-mobile/shared";
 import { MODEL_UNKNOWN } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
+import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useSessionStore } from "../stores/session-store";
 import {
     deleteSession,
@@ -23,6 +24,7 @@ import {
     respondPermission,
     respondUserInput,
 } from "../services/bridge";
+import { startDraftConversation } from "../services/new-chat";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
 
 // Workspace grouping — sessions grouped by cwd folder
@@ -136,10 +138,18 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     const router = useRouter();
     const sessions = useSessionStore((s) => s.sessions);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
+    const conversations = useChatHistoryStore((s) => s.conversations);
+    const activeConversationId = useChatHistoryStore((s) => s.activeConversationId);
     const connectionState = useConnectionStore((s) => s.state);
     const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set());
 
     const groups = useMemo(() => groupByWorkspace(sessions), [sessions]);
+    const draftConversations = useMemo(
+        () => conversations
+            .filter((conversation) => conversation.sessionId === null)
+            .sort((left, right) => right.updatedAt - left.updatedAt),
+        [conversations],
+    );
 
     const toggleWorkspace = (workspace: string) => {
         setExpandedWorkspaces((prev) => {
@@ -154,6 +164,11 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     };
 
     const handleNewChat = () => {
+        startDraftConversation();
+        props.navigation.closeDrawer();
+    };
+
+    const handleSelectDraft = (conversationId: string) => {
         const sessionStore = useSessionStore.getState();
         if (sessionStore.permissionPrompt !== null) {
             void respondPermission(sessionStore.permissionPrompt.requestId, false);
@@ -161,12 +176,15 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         if (sessionStore.userInputPrompt !== null) {
             void respondUserInput(sessionStore.userInputPrompt.requestId, "");
         }
+
         sessionStore.clearChatItems();
         sessionStore.setActiveSession(null);
         sessionStore.setSessionLoading(false);
         sessionStore.setPermissionPrompt(null);
         sessionStore.setUserInputPrompt(null);
+        sessionStore.setPlanExitPrompt(null);
         useConnectionStore.getState().setError(null);
+        useChatHistoryStore.getState().setActiveConversation(conversationId);
         props.navigation.closeDrawer();
     };
 
@@ -183,7 +201,17 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         sessionStore.setSessionLoading(true);
         sessionStore.setPermissionPrompt(null);
         sessionStore.setUserInputPrompt(null);
+        sessionStore.setPlanExitPrompt(null);
         useConnectionStore.getState().setError(null);
+
+        const historyStore = useChatHistoryStore.getState();
+        const linkedConversation = historyStore.conversations.find((item) => item.sessionId === sessionId);
+        if (linkedConversation !== undefined) {
+            historyStore.setActiveConversation(linkedConversation.id);
+        } else {
+            historyStore.createConversation(sessionId);
+        }
+
         void resumeSession(sessionId);
         props.navigation.closeDrawer();
     };
@@ -200,6 +228,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     onPress: () => {
                         const sessionStore = useSessionStore.getState();
                         sessionStore.removeSession(sessionId);
+                        useChatHistoryStore.getState().removeBySessionId(sessionId);
                         if (sessionStore.activeSessionId === sessionId) {
                             sessionStore.clearChatItems();
                             sessionStore.setSessionLoading(false);
@@ -244,6 +273,40 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                         <Text style={styles.emptyText}>
                             No Copilot sessions yet
                         </Text>
+                    </View>
+                )}
+
+                {draftConversations.length > 0 && (
+                    <View style={styles.workspaceGroup}>
+                        <View style={styles.sectionHeader}>
+                            <Text style={styles.sectionHeaderText}>Drafts</Text>
+                        </View>
+                        {draftConversations.map((conversation) => (
+                            <Pressable
+                                key={conversation.id}
+                                style={({ pressed }) => [
+                                    styles.conversationItem,
+                                    activeSessionId === null && activeConversationId === conversation.id && styles.conversationItemActive,
+                                    pressed && styles.conversationItemPressed,
+                                ]}
+                                onPress={() => handleSelectDraft(conversation.id)}
+                                onLongPress={() => useChatHistoryStore.getState().deleteConversation(conversation.id)}
+                                accessibilityLabel={conversation.title}
+                            >
+                                <Text
+                                    style={[
+                                        styles.conversationTitle,
+                                        activeSessionId === null && activeConversationId === conversation.id && styles.conversationTitleActive,
+                                    ]}
+                                    numberOfLines={1}
+                                >
+                                    {conversation.title}
+                                </Text>
+                                <Text style={styles.conversationPreview} numberOfLines={1}>
+                                    {conversation.preview.length > 0 ? conversation.preview : "Empty draft"}
+                                </Text>
+                            </Pressable>
+                        ))}
                     </View>
                 )}
 
@@ -418,6 +481,18 @@ const styles = StyleSheet.create({
     },
     workspaceGroup: {
         marginBottom: spacing.xs,
+    },
+    sectionHeader: {
+        paddingHorizontal: spacing.md,
+        paddingTop: spacing.xs,
+        paddingBottom: 6,
+    },
+    sectionHeaderText: {
+        fontSize: fontSize.xs,
+        fontWeight: "700",
+        color: colors.textTertiary,
+        textTransform: "uppercase",
+        letterSpacing: 0.5,
     },
     workspaceHeader: {
         flexDirection: "row",

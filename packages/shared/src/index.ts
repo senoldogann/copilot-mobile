@@ -135,5 +135,6 @@ export {
     KEY_FILENAME,
     JWT_SECRET_FILENAME,
     QR_PAYLOAD_VERSION,
+    PROTOCOL_VERSION,
     MODEL_UNKNOWN,
 } from "./constants";

@@ -2,6 +2,7 @@
 // Unified ChatItem timeline with thinking, tool and messages in a single stream
 
 import { create } from "zustand";
+import { saveActiveSessionId } from "../services/credentials";
 import type {
     AgentMode,
     PermissionLevel,
@@ -269,7 +270,10 @@ export const useSessionStore = create<SessionStore>((set) => ({
     userInputPrompt: null,
     planExitPrompt: null,
 
-    setActiveSession: (sessionId) => set({ activeSessionId: sessionId }),
+    setActiveSession: (sessionId) => {
+        void saveActiveSessionId(sessionId);
+        set({ activeSessionId: sessionId });
+    },
 
     setSessionLoading: (loading) => set({ isSessionLoading: loading }),
 
@@ -289,11 +293,18 @@ export const useSessionStore = create<SessionStore>((set) => ({
         }),
 
     removeSession: (sessionId) =>
-        set((state) => ({
-            sessions: state.sessions.filter((session) => session.id !== sessionId),
-            activeSessionId:
-                state.activeSessionId === sessionId ? null : state.activeSessionId,
-        })),
+        set((state) => {
+            const nextActiveSessionId =
+                state.activeSessionId === sessionId ? null : state.activeSessionId;
+            if (nextActiveSessionId !== state.activeSessionId) {
+                void saveActiveSessionId(nextActiveSessionId);
+            }
+
+            return {
+                sessions: state.sessions.filter((session) => session.id !== sessionId),
+                activeSessionId: nextActiveSessionId,
+            };
+        }),
 
     setModels: (models) =>
         set((state) => {
@@ -534,6 +545,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     reset: () => {
         itemCounter = 0;
+        void saveActiveSessionId(null);
         set({
             activeSessionId: null,
             isSessionLoading: false,

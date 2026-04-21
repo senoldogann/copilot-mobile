@@ -4,7 +4,7 @@ import { createServer as createHttpServer } from "node:http";
 import { WebSocketServer, WebSocket } from "ws";
 import type { IncomingMessage } from "node:http";
 import type { ServerMessage, AdaptedCopilotClient } from "@copilot-mobile/shared";
-import { DEFAULT_WS_PORT, HEARTBEAT_INTERVAL_MS, MAX_MESSAGE_BUFFER } from "@copilot-mobile/shared";
+import { DEFAULT_WS_PORT, HEARTBEAT_INTERVAL_MS, MAX_MESSAGE_BUFFER, PROTOCOL_VERSION } from "@copilot-mobile/shared";
 import { createSessionManager } from "../copilot/session-manager.js";
 import { createMessageHandler } from "./handler.js";
 import { checkPairingRateLimit } from "../utils/rate-limit.js";
@@ -130,6 +130,7 @@ export function createBridgeServer(copilotClient: AdaptedCopilotClient) {
                     id: generateMessageId(),
                     timestamp: nowMs(),
                     seq: nextSeq(),
+                    protocolVersion: PROTOCOL_VERSION,
                     type: "error",
                     payload: {
                         code: "INTERNAL_ERROR",
