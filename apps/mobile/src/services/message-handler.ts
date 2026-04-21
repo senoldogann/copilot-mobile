@@ -557,11 +557,6 @@ export function handleServerMessage(message: ServerMessage): void {
             break;
         }
 
-        case "skills.list.response": {
-            useSessionStore.getState().setSkills(message.payload.skills);
-            break;
-        }
-
         default: {
             assertExhaustive(message, (message as { type: string }).type);
             break;

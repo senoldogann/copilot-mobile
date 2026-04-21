@@ -486,20 +486,21 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 iconName="folder"
                 title="Workspace"
                 subtitle={headerSubtitle}
+                stickyHeader={
+                    <View style={sheetStyles.tabBar}>
+                        <TabButton
+                            label="Changes"
+                            active={workspace.tab === "changes"}
+                            onPress={() => useWorkspaceStore.getState().setTab("changes")}
+                        />
+                        <TabButton
+                            label="Files"
+                            active={workspace.tab === "files"}
+                            onPress={() => useWorkspaceStore.getState().setTab("files")}
+                        />
+                    </View>
+                }
             >
-                <View style={sheetStyles.tabBar}>
-                    <TabButton
-                        label="Changes"
-                        active={workspace.tab === "changes"}
-                        onPress={() => useWorkspaceStore.getState().setTab("changes")}
-                    />
-                    <TabButton
-                        label="Files"
-                        active={workspace.tab === "files"}
-                        onPress={() => useWorkspaceStore.getState().setTab("files")}
-                    />
-                </View>
-
                 {workspace.tab === "changes" ? changesContent : filesContent}
             </BottomSheet>
             {viewer !== null && (

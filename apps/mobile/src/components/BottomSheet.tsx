@@ -26,6 +26,8 @@ type Props = {
     subtitle?: string;
     children: React.ReactNode;
     contentStyle?: ViewStyle;
+    /** Rendered between the header and the scrollable content — stays pinned while content scrolls */
+    stickyHeader?: React.ReactNode;
 };
 
 export function BottomSheet({
@@ -37,6 +39,7 @@ export function BottomSheet({
     subtitle,
     children,
     contentStyle,
+    stickyHeader,
 }: Props) {
     return (
         <Modal
@@ -84,6 +87,11 @@ export function BottomSheet({
                             <Feather name="x" size={14} color={colors.textSecondary} />
                         </Pressable>
                     </View>
+
+                    {/* Sticky header slot — rendered below the title bar, pinned above the scroll */}
+                    {stickyHeader !== undefined && stickyHeader !== null && (
+                        <View>{stickyHeader}</View>
+                    )}
 
                     {/* İçerik — flex: 1 so it fills remaining sheet space and scrolls properly */}
                     <ScrollView
