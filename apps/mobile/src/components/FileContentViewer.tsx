@@ -1,17 +1,16 @@
-// Workspace dosya ve diff görüntüleyicisi — paylaşılan modal bileşen.
+// Workspace dosya ve diff görüntüleyicisi — BottomSheet olarak açılır.
 // Hem sohbet içi dosya linkleri hem de workspace panelindeki dosya tıklamaları için kullanılır.
 
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
     ActivityIndicator,
-    Modal,
     Pressable,
-    ScrollView,
     StyleSheet,
     Text,
     View,
 } from "react-native";
 import { useSessionStore } from "../stores/session-store";
+import { useWorkspaceStore } from "../stores/workspace-store";
 import {
     onWorkspaceDiffResponse,
     onWorkspaceFileResponse,
@@ -19,7 +18,9 @@ import {
     requestWorkspaceFile,
 } from "../services/bridge";
 import type { WorkspaceDiffPayload, WorkspaceFilePayload } from "../services/workspace-events";
+import type { WorkspaceTreeNode } from "@copilot-mobile/shared";
 import { borderRadius, colors, fontSize, spacing } from "../theme/colors";
+import { BottomSheet } from "./BottomSheet";
 
 type ViewerMode = "file" | "diff";
 
@@ -50,10 +51,46 @@ function parseLineInfo(raw: string): { readonly clean: string; readonly info: st
     };
 }
 
+// Search workspace tree for a node whose name matches the bare filename.
+// Returns the full relative path if found, or the original path otherwise.
+function resolvePathFromTree(
+    rawPath: string,
+    tree: WorkspaceTreeNode | null
+): string {
+    if (tree === null) return rawPath;
+    // Only search if the path looks like a bare filename (no slashes)
+    const hasDirComponent = rawPath.includes("/") || rawPath.includes("\\");
+    if (hasDirComponent) return rawPath;
+    const needle = rawPath.toLowerCase().replace(/:\d+(-\d+)?$/, "");
+
+    function search(node: WorkspaceTreeNode): string | null {
+        if (node.type === "file" && node.name.toLowerCase() === needle) {
+            return node.path;
+        }
+        if (node.children !== undefined) {
+            for (const child of node.children) {
+                const found = search(child);
+                if (found !== null) return found;
+            }
+        }
+        return null;
+    }
+
+    return search(tree) ?? rawPath;
+}
+
 export function FileContentViewer(props: Props): React.JSX.Element {
     const { path, mode = "file", onClose } = props;
     const { clean, info } = parseLineInfo(path);
+
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
+    const workspaceTree = useWorkspaceStore((s) => s.tree);
+
+    // Resolve bare filenames (e.g. "bridge.ts") to their full tree path
+    const resolvedPath = useMemo(
+        () => resolvePathFromTree(clean, workspaceTree),
+        [clean, workspaceTree]
+    );
 
     const [state, setState] = useState<LoadState>({ status: "loading" });
 
@@ -66,7 +103,7 @@ export function FileContentViewer(props: Props): React.JSX.Element {
 
         const unsubscribe =
             mode === "diff"
-                ? onWorkspaceDiffResponse(clean, (payload: WorkspaceDiffPayload) => {
+                ? onWorkspaceDiffResponse(resolvedPath, (payload: WorkspaceDiffPayload) => {
                     finish();
                     if (payload.error !== undefined) {
                         setState({ status: "error", message: payload.error });
@@ -78,7 +115,7 @@ export function FileContentViewer(props: Props): React.JSX.Element {
                         });
                     }
                 })
-                : onWorkspaceFileResponse(clean, (payload: WorkspaceFilePayload) => {
+                : onWorkspaceFileResponse(resolvedPath, (payload: WorkspaceFilePayload) => {
                     finish();
                     if (payload.error !== undefined) {
                         setState({ status: "error", message: payload.error });
@@ -102,85 +139,65 @@ export function FileContentViewer(props: Props): React.JSX.Element {
         };
 
         if (mode === "diff") {
-            void requestWorkspaceDiff(activeSessionId, clean);
+            void requestWorkspaceDiff(activeSessionId, resolvedPath);
         } else {
-            void requestWorkspaceFile(activeSessionId, clean);
+            void requestWorkspaceFile(activeSessionId, resolvedPath);
         }
 
         return () => {
             clearTimeout(timeout);
             unsubscribe();
         };
-    }, [activeSessionId, clean, mode]);
+    }, [activeSessionId, resolvedPath, mode]);
 
     useEffect(() => {
         return load();
     }, [load]);
 
-    const fileName = clean.split("/").pop() ?? clean;
-    const titleIcon = mode === "diff" ? "±" : "📄";
+    const fileName = resolvedPath.split("/").pop() ?? resolvedPath;
+    const titleIcon = mode === "diff" ? "git-branch" : "file-text";
+
+    const stickyHeader = (info !== null || (state.status === "ready" && state.truncated)) ? (
+        <View style={viewerStyles.metaBanner}>
+            {info !== null && (
+                <Text style={viewerStyles.lineInfoText}>{info}</Text>
+            )}
+            {state.status === "ready" && state.truncated && (
+                <Text style={viewerStyles.truncatedText}>Showing first 256 KB</Text>
+            )}
+        </View>
+    ) : null;
 
     return (
-        <Modal
+        <BottomSheet
             visible
-            animationType="slide"
-            onRequestClose={onClose}
+            onClose={onClose}
+            icon={titleIcon === "file-text" ? "📄" : "±"}
+            title={fileName}
+            {...(resolvedPath !== fileName ? { subtitle: resolvedPath } : {})}
+            stickyHeader={stickyHeader}
         >
-            <View style={viewerStyles.container}>
-                <View style={viewerStyles.header}>
-                    <View style={viewerStyles.headerLeft}>
-                        <Text style={viewerStyles.fileIcon}>{titleIcon}</Text>
-                        <View style={viewerStyles.headerText}>
-                            <Text style={viewerStyles.fileName} numberOfLines={1}>
-                                {fileName}
-                            </Text>
-                            <Text style={viewerStyles.filePath} numberOfLines={1}>
-                                {clean}
-                            </Text>
-                        </View>
-                    </View>
-                    <Pressable style={viewerStyles.closeButton} onPress={onClose}>
-                        <Text style={viewerStyles.closeText}>✕</Text>
+            {state.status === "loading" && (
+                <View style={viewerStyles.centered}>
+                    <ActivityIndicator color={colors.accent} size="small" />
+                    <Text style={viewerStyles.loadingText}>Loading…</Text>
+                </View>
+            )}
+            {state.status === "error" && (
+                <View style={viewerStyles.centered}>
+                    <Text style={viewerStyles.errorText}>{state.message}</Text>
+                    <Pressable style={viewerStyles.retryBtn} onPress={load}>
+                        <Text style={viewerStyles.retryText}>Retry</Text>
                     </Pressable>
                 </View>
-                {info !== null && (
-                    <View style={viewerStyles.lineInfo}>
-                        <Text style={viewerStyles.lineInfoText}>{info}</Text>
-                    </View>
-                )}
-                {state.status === "ready" && state.truncated && (
-                    <View style={viewerStyles.truncatedBanner}>
-                        <Text style={viewerStyles.truncatedText}>
-                            File truncated — showing first 256 KB
-                        </Text>
-                    </View>
-                )}
-                <ScrollView style={viewerStyles.body} contentContainerStyle={viewerStyles.bodyContent}>
-                    {state.status === "loading" && (
-                        <View style={viewerStyles.centered}>
-                            <ActivityIndicator color={colors.accent} size="small" />
-                            <Text style={viewerStyles.loadingText}>Loading…</Text>
-                        </View>
-                    )}
-                    {state.status === "error" && (
-                        <View style={viewerStyles.centered}>
-                            <Text style={viewerStyles.errorText}>{state.message}</Text>
-                            <Pressable style={viewerStyles.retryBtn} onPress={load}>
-                                <Text style={viewerStyles.retryText}>Retry</Text>
-                            </Pressable>
-                        </View>
-                    )}
-                    {state.status === "ready" &&
-                        (mode === "diff" ? (
-                            <DiffBody diff={state.body} />
-                        ) : (
-                            <Text style={viewerStyles.codeText} selectable>
-                                {state.body}
-                            </Text>
-                        ))}
-                </ScrollView>
-            </View>
-        </Modal>
+            )}
+            {state.status === "ready" &&
+                (mode === "diff" ? (
+                    <DiffBody diff={state.body} />
+                ) : (
+                    <FileBody content={state.body} />
+                ))}
+        </BottomSheet>
     );
 }
 
@@ -224,82 +241,41 @@ function DiffBody({ diff }: { readonly diff: string }): React.JSX.Element {
     );
 }
 
+function FileBody({ content }: { readonly content: string }): React.JSX.Element {
+    const lines = content.split("\n");
+    return (
+        <View style={viewerStyles.codeBlock}>
+            {lines.map((line, idx) => (
+                <View key={idx} style={viewerStyles.codeLine}>
+                    <Text style={viewerStyles.lineNum} selectable={false}>
+                        {String(idx + 1).padStart(4, " ")}
+                    </Text>
+                    <Text style={viewerStyles.codeText} selectable>
+                        {line.length === 0 ? " " : line}
+                    </Text>
+                </View>
+            ))}
+        </View>
+    );
+}
+
 const viewerStyles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.bg,
-    },
-    header: {
+    metaBanner: {
         flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 14,
-        backgroundColor: colors.bgSecondary,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    headerLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        flex: 1,
-    },
-    headerText: {
-        flex: 1,
-    },
-    fileIcon: {
-        fontSize: 18,
-    },
-    fileName: {
-        fontSize: fontSize.base,
-        fontWeight: "600",
-        color: colors.textPrimary,
-    },
-    filePath: {
-        fontSize: fontSize.xs,
-        color: colors.textSecondary,
-    },
-    closeButton: {
-        width: 32,
-        height: 32,
-        borderRadius: borderRadius.sm,
-        backgroundColor: colors.bgElevated,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    closeText: {
-        fontSize: fontSize.base,
-        color: colors.textPrimary,
-    },
-    lineInfo: {
-        paddingHorizontal: spacing.lg,
+        gap: 12,
+        paddingHorizontal: spacing.md,
         paddingVertical: 6,
-        backgroundColor: colors.accentMuted,
+        backgroundColor: colors.bgElevated,
         borderBottomWidth: 1,
         borderBottomColor: colors.border,
     },
     lineInfoText: {
-        fontSize: fontSize.sm,
+        fontSize: fontSize.xs,
         color: colors.accent,
     },
-    truncatedBanner: {
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 6,
-        backgroundColor: colors.bgElevated,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
     truncatedText: {
-        fontSize: fontSize.sm,
+        fontSize: fontSize.xs,
         color: colors.textTertiary,
-    },
-    body: {
-        flex: 1,
-    },
-    bodyContent: {
-        padding: spacing.lg,
-        paddingBottom: 40,
     },
     centered: {
         alignItems: "center",
@@ -315,6 +291,7 @@ const viewerStyles = StyleSheet.create({
         fontSize: fontSize.sm,
         color: colors.error,
         textAlign: "center",
+        paddingHorizontal: spacing.md,
     },
     retryBtn: {
         paddingHorizontal: spacing.lg,
@@ -328,7 +305,25 @@ const viewerStyles = StyleSheet.create({
         fontSize: fontSize.sm,
         color: colors.textPrimary,
     },
+    codeBlock: {
+        paddingHorizontal: 8,
+        paddingVertical: spacing.sm,
+    },
+    codeLine: {
+        flexDirection: "row",
+    },
+    lineNum: {
+        width: 36,
+        fontSize: 11,
+        lineHeight: 18,
+        color: colors.textTertiary,
+        fontFamily: "monospace",
+        textAlign: "right",
+        marginRight: 10,
+        flexShrink: 0,
+    },
     codeText: {
+        flex: 1,
         fontSize: 12,
         lineHeight: 18,
         color: colors.textPrimary,
