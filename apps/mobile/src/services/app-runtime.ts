@@ -5,6 +5,7 @@ import {
     requestCapabilities,
     resumeBridgeConnection,
     resumeSession,
+    tryResumeFromStoredCredentials,
 } from "./bridge";
 import {
     dismissCompletionNotifications,
@@ -124,6 +125,8 @@ export function initializeAppRuntime(): () => void {
     if (currentAppState === "active") {
         void prepareNotificationPermissions();
     }
+    // SecureStore'da kimlik bilgileri varsa otomatik reconnect et.
+    void tryResumeFromStoredCredentials();
     const subscription = AppState.addEventListener("change", handleAppStateChange);
 
     return () => {

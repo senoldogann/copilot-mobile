@@ -7,6 +7,7 @@ export type BaseBridgeMessage = {
     id: string;
     timestamp: number;
     seq: number;
+    protocolVersion: number;
 };
 
 // --- Session Settings ---

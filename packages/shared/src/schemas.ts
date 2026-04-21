@@ -11,6 +11,7 @@ const baseBridgeMessageSchema = z.object({
     id: z.string().uuid(),
     timestamp: z.number().int().positive(),
     seq: z.number().int().nonnegative(),
+    protocolVersion: z.number().int().positive(),
 });
 
 const sessionConfigSchema = z.object({

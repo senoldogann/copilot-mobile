@@ -21,4 +21,6 @@ export const CERT_FILENAME = "cert.pem";
 export const KEY_FILENAME = "key.pem";
 export const JWT_SECRET_FILENAME = "jwt-secret.key";
 export const QR_PAYLOAD_VERSION = 1;
+// Runtime WS protocol version. Client/server uyumsuzlu\u011fu bu alana g\u00f6re tespit edilir.
+export const PROTOCOL_VERSION = 1;
 export const MODEL_UNKNOWN = "unknown";
