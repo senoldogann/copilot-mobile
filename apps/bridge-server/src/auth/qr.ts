@@ -51,7 +51,7 @@ function resolveTransportMode(
     const parsedUrl = new URL(publicWebSocketUrl);
 
     if (parsedUrl.protocol === "wss:") {
-        return "relay";
+        return "direct";
     }
 
     if (parsedUrl.protocol === "ws:" && isDirectHostname(parsedUrl.hostname)) {

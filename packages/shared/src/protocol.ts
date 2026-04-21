@@ -91,6 +91,11 @@ export type GitCommitSummary = {
     files: ReadonlyArray<string>;
 };
 
+export type GitBranchSummary = {
+    name: string;
+    current: boolean;
+};
+
 export type WorkspaceOperation = "pull" | "push";
 
 export type SessionInfo = {
@@ -142,10 +147,36 @@ export type WorkspaceGitSummaryMessage = BaseBridgeMessage & {
         gitRoot: string | null;
         repository?: string;
         branch?: string;
+        branches: ReadonlyArray<GitBranchSummary>;
         uncommittedChanges: ReadonlyArray<GitFileChange>;
         recentCommits: ReadonlyArray<GitCommitSummary>;
         truncated: boolean;
     };
+};
+
+export type WorkspaceBranchSwitchRequestMessage = BaseBridgeMessage & {
+    type: "workspace.branch.switch";
+    payload: {
+        sessionId: string;
+        branchName: string;
+    };
+};
+
+export type WorkspaceBranchSwitchResultPayload = {
+    sessionId: string;
+    context: SessionContext;
+    branchName: string;
+    success: boolean;
+    stdout?: string | undefined;
+    stderr?: string | undefined;
+    exitCode?: number | undefined;
+    signal?: string | null | undefined;
+    message?: string | undefined;
+};
+
+export type WorkspaceBranchSwitchResultMessage = BaseBridgeMessage & {
+    type: "workspace.branch.switch.result";
+    payload: WorkspaceBranchSwitchResultPayload;
 };
 
 export type WorkspaceOperationRequestMessage = BaseBridgeMessage & {
@@ -594,6 +625,7 @@ export type ServerMessage =
     | PlanExitRequestMessage
     | WorkspaceTreeMessage
     | WorkspaceGitSummaryMessage
+    | WorkspaceBranchSwitchResultMessage
     | WorkspacePullResultMessage
     | WorkspacePushResultMessage
     | WorkspaceResolveResponseMessage
@@ -723,6 +755,7 @@ export type ClientMessage =
     | WorkspaceTreeRequestMessage
     | WorkspaceGitSummaryRequestMessage
     | WorkspaceOperationRequestMessage
+    | WorkspaceBranchSwitchRequestMessage
     | WorkspaceResolveRequestMessage
     | WorkspaceFileRequestMessage
     | WorkspaceDiffRequestMessage;

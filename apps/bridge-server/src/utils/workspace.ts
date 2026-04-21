@@ -3,6 +3,7 @@ import { lstat, open, readFile, readdir, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
+    GitBranchSummary,
     GitCommitSummary,
     GitFileChange,
     SessionContext,
@@ -461,6 +462,34 @@ function parseGitLog(stdout: string): Array<GitCommitSummary> {
     });
 }
 
+function parseGitBranches(stdout: string, currentBranch: string | undefined): Array<GitBranchSummary> {
+    const branches = stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => {
+            const [name = "", headFlag = ""] = line.split("\t");
+            const current = headFlag.trim() === "*" || (currentBranch !== undefined && name === currentBranch);
+            return name.length > 0 ? { name, current } : null;
+        })
+        .filter((branch): branch is GitBranchSummary => branch !== null)
+        .sort((left, right) => {
+            if (left.current && !right.current) return -1;
+            if (!left.current && right.current) return 1;
+            return left.name.localeCompare(right.name);
+        });
+
+    if (branches.length > 0) {
+        return branches;
+    }
+
+    if (currentBranch !== undefined && currentBranch.length > 0) {
+        return [{ name: currentBranch, current: true }];
+    }
+
+    return [];
+}
+
 export async function buildWorkspaceTree(
     rootPath: string,
     requestedWorkspaceRelativePath = ".",
@@ -514,6 +543,7 @@ export async function buildWorkspaceGitSummary(
     gitRoot: string | null;
     repository?: string;
     branch?: string;
+    branches: ReadonlyArray<GitBranchSummary>;
     uncommittedChanges: ReadonlyArray<GitFileChange>;
     recentCommits: ReadonlyArray<GitCommitSummary>;
     truncated: boolean;
@@ -528,6 +558,7 @@ export async function buildWorkspaceGitSummary(
             gitRoot: null,
             ...(context.repository !== undefined ? { repository: context.repository } : {}),
             ...(context.branch !== undefined ? { branch: context.branch } : {}),
+            branches: context.branch !== undefined ? [{ name: context.branch, current: true }] : [],
             uncommittedChanges: [],
             recentCommits: [],
             truncated: false,
@@ -558,19 +589,22 @@ export async function buildWorkspaceGitSummary(
         throw new Error(logResult.stderr.trim() || logResult.message || "Unable to read git history");
     }
 
-    const branchResult = context.branch !== undefined
-        ? { success: true, stdout: context.branch, stderr: "" }
-        : await runGit(gitRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
+    const branchResult = await runGit(gitRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
     const repository = context.repository;
-    const branch = context.branch ?? (branchResult.success && branchResult.stdout.trim().length > 0
+    const branch = branchResult.success && branchResult.stdout.trim().length > 0
         ? branchResult.stdout.trim()
-        : undefined);
+        : context.branch;
+    const branchListResult = await runGit(gitRoot, ["for-each-ref", "--format=%(refname:short)\t%(HEAD)", "refs/heads"]);
+    const branches = branchListResult.success
+        ? parseGitBranches(branchListResult.stdout, branch)
+        : parseGitBranches("", branch);
 
     return {
         workspaceRoot,
         gitRoot,
         ...(repository !== undefined ? { repository } : {}),
         ...(branch !== undefined ? { branch } : {}),
+        branches,
         uncommittedChanges: statusResult.stdout
             .split(/\r?\n/)
             .map((line) => line.trimEnd())
@@ -598,6 +632,13 @@ export async function performWorkspaceGitOperation(
         ? ["pull", "--ff-only", "--no-rebase"]
         : ["push"];
     return runGit(cwd, args);
+}
+
+export async function switchWorkspaceBranch(
+    context: SessionContext,
+    branchName: string
+): Promise<GitCommandResult> {
+    return runGit(resolveWorkspaceRoot(context), ["checkout", "--quiet", branchName]);
 }
 
 const MAX_FILE_READ_BYTES = 256_000; // 256 KB

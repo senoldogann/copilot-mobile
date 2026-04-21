@@ -432,6 +432,25 @@ function normalizeSessionHistory(
     const items: Array<SessionHistoryItem> = [];
     const toolIndexByRequestId = new Map<string, number>();
 
+    function insertBeforeTrailingAssistant(item: SessionHistoryItem): void {
+        let insertIndex = items.length;
+
+        while (insertIndex > 0) {
+            const existingItem = items[insertIndex - 1];
+            if (existingItem === undefined || existingItem.type !== "assistant") {
+                break;
+            }
+            insertIndex -= 1;
+        }
+
+        if (insertIndex === items.length) {
+            items.push(item);
+            return;
+        }
+
+        items.splice(insertIndex, 0, item);
+    }
+
     for (const event of events) {
         const timestamp = parseEventTimestamp(event.timestamp);
 
@@ -464,7 +483,7 @@ function normalizeSessionHistory(
                 break;
 
             case "assistant.reasoning":
-                items.push({
+                insertBeforeTrailingAssistant({
                     id: event.data.reasoningId,
                     timestamp,
                     type: "thinking",

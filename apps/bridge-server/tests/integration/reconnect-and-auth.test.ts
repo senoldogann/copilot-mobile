@@ -87,7 +87,7 @@ function makeClientMessage(
 function createWSClient(port: number): Promise<WSClient> {
     return new Promise((resolve, reject) => {
         const url = `ws://127.0.0.1:${port}`;
-        const ws = new WebSocket(url, { rejectUnauthorized: false });
+        const ws = new WebSocket(url);
         const messages: ServerMessage[] = [];
         const waiters: Array<{
             type: ServerMessage["type"];

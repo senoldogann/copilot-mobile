@@ -48,7 +48,7 @@ function connectToServer(port: number, jwtToken?: string): Promise<WSClient> {
             ? `ws://127.0.0.1:${port}?token=${encodeURIComponent(jwtToken)}`
             : `ws://127.0.0.1:${port}`;
 
-        const ws = new WebSocket(url, { rejectUnauthorized: false });
+        const ws = new WebSocket(url);
         const messages: ServerMessage[] = [];
         const waiters: Array<{
             type: string;

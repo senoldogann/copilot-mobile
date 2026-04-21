@@ -33,6 +33,7 @@ import {
     readWorkspaceFile,
     resolveWorkspaceReference as resolveWorkspaceReferenceInContext,
     resolveWorkspaceRoot,
+    switchWorkspaceBranch,
 } from "../utils/workspace.js";
 
 type SendFn = (message: ServerMessage) => void;
@@ -958,6 +959,7 @@ export function createSessionManager(
                         gitRoot: summary.gitRoot,
                         ...(summary.repository !== undefined ? { repository: summary.repository } : {}),
                         ...(summary.branch !== undefined ? { branch: summary.branch } : {}),
+                        branches: summary.branches,
                         uncommittedChanges: summary.uncommittedChanges,
                         recentCommits: summary.recentCommits,
                         truncated: summary.truncated,
@@ -1045,6 +1047,45 @@ export function createSessionManager(
                         operation: "push",
                         success: false,
                         message: error instanceof Error ? error.message : "Workspace push failed",
+                    },
+                });
+            }
+        },
+
+        async switchWorkspaceBranch(sessionId: string, branchName: string): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const result = await switchWorkspaceBranch(context, branchName);
+                send({
+                    ...makeBase(),
+                    type: "workspace.branch.switch.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        branchName,
+                        success: result.success,
+                        ...(result.stdout.length > 0 ? { stdout: result.stdout.trim() } : {}),
+                        ...(result.stderr.length > 0 ? { stderr: result.stderr.trim() } : {}),
+                        ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+                        ...(result.signal !== undefined ? { signal: result.signal } : {}),
+                        ...(result.message !== undefined ? { message: result.message } : {}),
+                    },
+                });
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "workspace.branch.switch.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        branchName,
+                        success: false,
+                        message: error instanceof Error ? error.message : "Workspace branch switch failed",
                     },
                 });
             }

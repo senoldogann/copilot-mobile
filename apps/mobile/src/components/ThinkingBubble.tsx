@@ -12,7 +12,7 @@ type Props = {
 };
 
 function ThinkingBubbleComponent({ item }: Props) {
-    const [expanded, setExpanded] = useState<boolean>(true);
+    const [expanded, setExpanded] = useState<boolean>(item.isStreaming);
     const hasContent = item.content.length > 0;
     const charLabel = item.content.length > 1000
         ? `${Math.round(item.content.length / 1000)}K chars`
@@ -21,8 +21,8 @@ function ThinkingBubbleComponent({ item }: Props) {
     const isExpanded = item.isStreaming || expanded;
 
     useEffect(() => {
-        setExpanded(true);
-    }, [item.id]);
+        setExpanded(item.isStreaming);
+    }, [item.id, item.isStreaming]);
 
     return (
         <View style={styles.wrapper}>
