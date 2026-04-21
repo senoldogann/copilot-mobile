@@ -641,10 +641,12 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                 unsubscribes.push(unsub);
             },
 
-            onToolComplete(handler: (toolName: string, requestId: string, success: boolean) => void): void {
+            onToolComplete(handler: (toolName: string, requestId: string, success: boolean, resultContent?: string) => void): void {
                 const unsub = sdkSession.on("tool.execution_complete", (event) => {
                     // tool.execution_complete event has no toolName — toolCallId is used
-                    handler("", event.data.toolCallId, event.data.success);
+                    // Prefer detailedContent (full content for UI) over content (truncated for LLM)
+                    const resultContent = event.data.result?.detailedContent ?? event.data.result?.content;
+                    handler("", event.data.toolCallId, event.data.success, resultContent);
                 });
                 unsubscribes.push(unsub);
             },

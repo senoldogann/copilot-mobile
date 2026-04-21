@@ -20,7 +20,7 @@ import type {
     SessionHistoryItem,
     SessionInfo,
 } from "@copilot-mobile/shared";
-import { MAX_SESSIONS, PERMISSION_TIMEOUT_MS, SDKError } from "@copilot-mobile/shared";
+import { MAX_SESSIONS, PERMISSION_TIMEOUT_MS, PROTOCOL_VERSION, SDKError } from "@copilot-mobile/shared";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
 import {
     buildWorkspaceGitSummary,
@@ -64,7 +64,7 @@ export function createSessionManager(
     let lastHostCapabilities: HostSessionCapabilities = { elicitation: false };
 
     function makeBase() {
-        return { id: generateMessageId(), timestamp: nowMs(), seq: nextSeq() };
+        return { id: generateMessageId(), timestamp: nowMs(), seq: nextSeq(), protocolVersion: PROTOCOL_VERSION };
     }
 
     function getSessionInfo(sessionId: string): SessionInfo | undefined {
@@ -288,12 +288,23 @@ export function createSessionManager(
             });
         });
 
-        session.onToolComplete((toolName: string, requestId: string, success: boolean) => {
+        session.onToolComplete((toolName: string, requestId: string, success: boolean, resultContent?: string) => {
             const normalizedToolName =
                 toolNamesByRequestId.get(requestId)
                 ?? (toolName.trim().length > 0 ? toolName : "tool");
 
             toolNamesByRequestId.delete(requestId);
+
+            // If the tool has result content (e.g. file read output) and no
+            // partial output was streamed, forward it as a partial result so
+            // the mobile app can display it in the tool detail panel.
+            if (resultContent !== undefined && resultContent.trim().length > 0) {
+                emit({
+                    ...makeBase(),
+                    type: "tool.execution_partial_result",
+                    payload: { sessionId, requestId, partialOutput: resultContent },
+                });
+            }
 
             emit({
                 ...makeBase(),

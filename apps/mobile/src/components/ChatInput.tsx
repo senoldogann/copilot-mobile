@@ -12,6 +12,7 @@ import {
     Image,
     ScrollView,
     Alert,
+    InteractionManager,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useSessionStore, deriveAvailableReasoningEfforts } from "../stores/session-store";
@@ -607,37 +608,68 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     }, [activeToken, input]);
 
     const handlePickImage = useCallback(async () => {
-        const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-        if (status !== "granted") {
-            return;
-        }
+        try {
+            const existingPermission = await ImagePicker.getMediaLibraryPermissionsAsync();
+            const permission = existingPermission.granted
+                ? existingPermission
+                : await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ["images"],
-            allowsMultipleSelection: true,
-            quality: 0.8,
-            base64: true,
-        });
-
-        if (result.canceled) return;
-
-        const newImages: Array<ImageAttachment> = result.assets.flatMap((asset) => {
-            if (asset.base64 === undefined || asset.base64 === null) {
-                console.warn("[ChatInput] Seçilen görsel base64 verisi içermediği için atlandı");
-                return [];
+            if (!permission.granted) {
+                Alert.alert(
+                    "Photo Access Required",
+                    "Enable photo library access to attach images to your Copilot message.",
+                );
+                return;
             }
 
-            return [{
-                uri: asset.uri,
-                width: asset.width,
-                height: asset.height,
-                fileName: asset.fileName ?? `image-${Date.now()}.jpg`,
-                mimeType: asset.mimeType ?? "image/jpeg",
-                base64Data: asset.base64,
-            }];
-        });
-        setImages((prev) => [...prev, ...newImages]);
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ["images"],
+                allowsMultipleSelection: true,
+                quality: 0.8,
+                base64: true,
+            });
+
+            if (result.canceled) {
+                return;
+            }
+
+            const newImages: Array<ImageAttachment> = result.assets.flatMap((asset) => {
+                if (asset.base64 === undefined || asset.base64 === null) {
+                    console.warn("[ChatInput] Seçilen görsel base64 verisi içermediği için atlandı");
+                    return [];
+                }
+
+                return [{
+                    uri: asset.uri,
+                    width: asset.width,
+                    height: asset.height,
+                    fileName: asset.fileName ?? `image-${Date.now()}.jpg`,
+                    mimeType: asset.mimeType ?? "image/jpeg",
+                    base64Data: asset.base64,
+                }];
+            });
+
+            if (newImages.length === 0) {
+                Alert.alert(
+                    "Attachment unavailable",
+                    "The selected image could not be attached. Please try another image.",
+                );
+                return;
+            }
+
+            setImages((prev) => [...prev, ...newImages]);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            Alert.alert("Could not open photo library", message);
+        }
     }, []);
+
+    const handleAttachImage = useCallback(() => {
+        setShowPlusMenu(false);
+        InteractionManager.runAfterInteractions(() => {
+            void handlePickImage();
+        });
+    }, [handlePickImage]);
 
     const removeImage = useCallback((index: number) => {
         setImages((prev) => prev.filter((_, i) => i !== index));
@@ -691,6 +723,9 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
         : "";
 
     const supportsVision = currentModel?.supportsVision === true;
+    const contextWindowLabel = currentModel?.contextWindowTokens !== undefined
+        ? formatCtxWindow(currentModel.contextWindowTokens)
+        : null;
 
     return (
         <View style={styles.container}>
@@ -733,21 +768,28 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                             )}
                         </View>
                     )}
-                    {suggestions.map((s) => (
-                        <Pressable
-                            key={s.value}
-                            style={({ pressed }) => [
-                                autocompleteStyles.item,
-                                pressed && autocompleteStyles.itemPressed,
-                            ]}
-                            onPress={() => applySuggestion(s.value)}
-                        >
-                            <Text style={autocompleteStyles.label} numberOfLines={1}>{s.label}</Text>
-                            {s.hint !== undefined && (
-                                <Text style={autocompleteStyles.hint} numberOfLines={1}>{s.hint}</Text>
-                            )}
-                        </Pressable>
-                    ))}
+                    <ScrollView
+                        style={autocompleteStyles.list}
+                        keyboardShouldPersistTaps="always"
+                        showsVerticalScrollIndicator={true}
+                        nestedScrollEnabled={true}
+                    >
+                        {suggestions.map((s) => (
+                            <Pressable
+                                key={s.value}
+                                style={({ pressed }) => [
+                                    autocompleteStyles.item,
+                                    pressed && autocompleteStyles.itemPressed,
+                                ]}
+                                onPress={() => applySuggestion(s.value)}
+                            >
+                                <Text style={autocompleteStyles.label} numberOfLines={1}>{s.label}</Text>
+                                {s.hint !== undefined && (
+                                    <Text style={autocompleteStyles.hint} numberOfLines={1}>{s.hint}</Text>
+                                )}
+                            </Pressable>
+                        ))}
+                    </ScrollView>
                 </View>
             )}
             <View style={[
@@ -803,6 +845,14 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         </Text>
                         <ChevronDownIcon size={10} color={colors.textTertiary} />
                     </Pressable>
+
+                    {contextWindowLabel !== null && (
+                        <View style={toolbarStyles.ctxBadge}>
+                            <Text style={toolbarStyles.ctxBadgeText}>
+                                {contextWindowLabel} ctx
+                            </Text>
+                        </View>
+                    )}
 
                     {/* Thinking effort */}
                     {effortInfo.supported && (
@@ -948,12 +998,7 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     <Text style={dropdownStyles.sectionLabel}>Attach</Text>
                     <Pressable
                         style={dropdownStyles.effortItem}
-                        onPress={() => {
-                            setShowPlusMenu(false);
-                            // Wait for the modal fade-out animation to complete before launching the
-                            // system image picker, otherwise the two native modal layers conflict.
-                            setTimeout(() => void handlePickImage(), 320);
-                        }}
+                        onPress={handleAttachImage}
                     >
                         <View style={dropdownStyles.effortItemLeft}>
                             <View style={dropdownStyles.checkmarkSlot} />
@@ -1323,6 +1368,19 @@ const toolbarStyles = StyleSheet.create({
         fontWeight: "500",
         flexShrink: 1,
     },
+    ctxBadge: {
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 4,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.bgElevated,
+    },
+    ctxBadgeText: {
+        color: colors.textTertiary,
+        fontSize: fs.xs,
+        fontWeight: "600",
+    },
     spacer: {
         flex: 1,
     },
@@ -1411,6 +1469,12 @@ const autocompleteStyles = StyleSheet.create({
         borderRadius: borderRadius.md,
         marginBottom: 6,
         overflow: "hidden",
+        // Fixed height so keyboard stays visible and menu is scrollable
+        maxHeight: 220,
+    },
+    list: {
+        // Makes the list area scrollable when items overflow maxHeight
+        flexShrink: 1,
     },
     ctxHeader: {
         flexDirection: "row",
@@ -1420,7 +1484,10 @@ const autocompleteStyles = StyleSheet.create({
         paddingVertical: 7,
         borderBottomWidth: StyleSheet.hairlineWidth,
         borderBottomColor: colors.border,
-        backgroundColor: colors.bgSecondary,
+    },
+    list: {
+        maxHeight: 240,
+    },
     },
     ctxModelName: {
         fontSize: fs.xs,

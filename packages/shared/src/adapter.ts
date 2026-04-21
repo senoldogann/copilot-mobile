@@ -74,7 +74,7 @@ export type AdaptedCopilotSession = {
     ): void;
     onToolPartialResult(handler: (requestId: string, partialOutput: string) => void): void;
     onToolProgress(handler: (requestId: string, progressMessage: string) => void): void;
-    onToolComplete(handler: (toolName: string, requestId: string, success: boolean) => void): void;
+    onToolComplete(handler: (toolName: string, requestId: string, success: boolean, resultContent?: string) => void): void;
     onIdle(handler: () => void): void;
     onSessionError(handler: (errorType: string, message: string) => void): void;
     onTitleChanged(handler: (title: string) => void): void;
