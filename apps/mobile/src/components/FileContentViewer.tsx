@@ -124,7 +124,6 @@ export function FileContentViewer(props: Props): React.JSX.Element {
         <Modal
             visible
             animationType="slide"
-            presentationStyle="pageSheet"
             onRequestClose={onClose}
         >
             <View style={viewerStyles.container}>

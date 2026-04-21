@@ -6,7 +6,7 @@ import type { ToolItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
 import { ToolIcon } from "./Icons";
 import type { FeatherName } from "./Icons";
-import { ShimmerHighlight } from "./ShimmerHighlight";
+import { ShimmerText } from "./ShimmerHighlight";
 import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = { item: ToolItem };
@@ -418,13 +418,14 @@ function ToolCardComponent({ item }: Props) {
                             <ToolIcon toolName={item.toolName} size={11} color={isFailed ? colors.error : colors.textTertiary} />
                         )}
                     </View>
-                    <Text style={[styles.label, isFailed && styles.labelFailed]} numberOfLines={1}>
-                        {label}
-                    </Text>
+                    <ShimmerText active={isRunning}>
+                        <Text style={[styles.label, isFailed && styles.labelFailed]} numberOfLines={1}>
+                            {label}
+                        </Text>
+                    </ShimmerText>
                     <Text style={styles.argText} numberOfLines={1}>{rowSummary}</Text>
                     <Text style={styles.chevron}>›</Text>
                 </Pressable>
-                <ShimmerHighlight active={isRunning} />
             </View>
 
             <BottomSheet

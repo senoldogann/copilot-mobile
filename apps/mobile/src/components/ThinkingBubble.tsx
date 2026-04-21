@@ -5,7 +5,7 @@ import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
 import type { ThinkingItem } from "../stores/session-store";
 import { BottomSheet } from "./BottomSheet";
 import { SparklesIcon } from "./ProviderIcon";
-import { ShimmerHighlight } from "./ShimmerHighlight";
+import { ShimmerText } from "./ShimmerHighlight";
 import { colors, spacing, fontSize } from "../theme/colors";
 
 type Props = {
@@ -60,9 +60,11 @@ function ThinkingBubbleComponent({ item }: Props) {
                         ) : (
                             <SparklesIcon size={13} color={colors.textTertiary} />                    )}
                     </View>
-                    <Text style={styles.label}>
-                        {item.isStreaming ? "Thinking…" : "Thought"}
-                    </Text>
+                    <ShimmerText active={item.isStreaming}>
+                        <Text style={styles.label}>
+                            {item.isStreaming ? "Thinking…" : "Thought"}
+                        </Text>
+                    </ShimmerText>
                     {!item.isStreaming && hasContent && (
                         <Text style={styles.charCount}>{charLabel}</Text>
                     )}
@@ -70,7 +72,6 @@ function ThinkingBubbleComponent({ item }: Props) {
                         <Text style={styles.chevron}>›</Text>
                     )}
                 </Pressable>
-                <ShimmerHighlight active={item.isStreaming} />
             </View>
 
             <BottomSheet

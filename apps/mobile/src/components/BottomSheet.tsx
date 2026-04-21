@@ -48,11 +48,12 @@ export function BottomSheet({
             animationType="slide"
             onRequestClose={onClose}
         >
-            <Pressable style={styles.overlay} onPress={onClose}>
-                <Pressable
-                    style={styles.sheet}
-                    onPress={(e) => e.stopPropagation()}
-                >
+            {/* Full-screen overlay — tap here to dismiss */}
+            <View style={styles.overlay} pointerEvents="box-none">
+                <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
+
+                {/* Sheet — plain View so it doesn't compete with inner ScrollView gestures */}
+                <View style={styles.sheet}>
                     {/* Tutma çubuğu */}
                     <View style={styles.grabHandleContainer}>
                         <View style={styles.grabHandle} />
@@ -100,11 +101,12 @@ export function BottomSheet({
                         showsVerticalScrollIndicator={true}
                         scrollIndicatorInsets={{ right: 1 }}
                         keyboardShouldPersistTaps="handled"
+                        nestedScrollEnabled={true}
                     >
                         {children}
                     </ScrollView>
-                </Pressable>
-            </Pressable>
+                </View>
+            </View>
         </Modal>
     );
 }
@@ -125,7 +127,8 @@ const styles = StyleSheet.create({
         borderWidth: 1,
         borderBottomWidth: 0,
         borderColor: colors.border,
-        overflow: "hidden",
+        // Note: overflow "hidden" removed — it prevents ScrollView gestures on Android
+        // Border-radius clipping is handled by the borderTopRadius on iOS/Android natively
     },
     grabHandleContainer: {
         alignItems: "center",
