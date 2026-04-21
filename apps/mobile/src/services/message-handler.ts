@@ -2,7 +2,7 @@
 
 import type { ServerMessage, SessionHistoryItem } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
-import type { ChatItem } from "../stores/session-store";
+import type { AgentTodo, ChatItem } from "../stores/session-store";
 import { useSessionStore } from "../stores/session-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
@@ -238,6 +238,40 @@ function assertExhaustive(_value: never, type: string): void {
     console.warn("Unknown server message:", type);
 }
 
+// Tool name patterns that signal a todo write operation (Claude Code's TodoWrite tool)
+const TODO_WRITE_TOOL_NAMES = new Set(["TodoWrite", "todowrite", "todo_write", "todos_write"]);
+
+function isTodoWriteToolName(name: string): boolean {
+    return TODO_WRITE_TOOL_NAMES.has(name) || name.toLowerCase().includes("todowrite");
+}
+
+function parseTodoWriteArguments(args: Record<string, unknown>): ReadonlyArray<import("../stores/session-store").AgentTodo> | null {
+    // Claude Code format: { todos: [{ id, content, status, priority }] }
+    const raw = args["todos"] ?? args["items"] ?? args["todo_list"];
+    if (!Array.isArray(raw) || raw.length === 0) return null;
+
+    const todos: Array<import("../stores/session-store").AgentTodo> = [];
+    for (const item of raw) {
+        if (typeof item !== "object" || item === null) continue;
+        const entry = item as Record<string, unknown>;
+        const id = String(entry["id"] ?? entry["taskId"] ?? todos.length + 1);
+        const content = String(entry["content"] ?? entry["description"] ?? entry["task"] ?? entry["title"] ?? "");
+        if (content.length === 0) continue;
+        const rawStatus = String(entry["status"] ?? "pending").toLowerCase();
+        const status: import("../stores/session-store").TodoItemStatus =
+            rawStatus === "completed" || rawStatus === "done" ? "completed"
+            : rawStatus === "in_progress" || rawStatus === "in progress" ? "in_progress"
+            : "pending";
+        const rawPriority = String(entry["priority"] ?? "").toLowerCase();
+        const priority = rawPriority === "high" ? "high" as const
+            : rawPriority === "low" ? "low" as const
+            : rawPriority === "medium" ? "medium" as const
+            : undefined;
+        todos.push({ id, content, status, ...(priority !== undefined ? { priority } : {}) });
+    }
+    return todos.length > 0 ? todos : null;
+}
+
 export function handleServerMessage(message: ServerMessage): void {
     const connectionStore = useConnectionStore.getState();
     const sessionStore = useSessionStore.getState();
@@ -348,6 +382,13 @@ export function handleServerMessage(message: ServerMessage): void {
                 message.payload.toolName,
                 formatToolArguments(message.payload.arguments),
             );
+            // Detect TodoWrite — extract the todo list and surface it above the input
+            if (isTodoWriteToolName(message.payload.toolName) && message.payload.arguments !== undefined) {
+                const parsed = parseTodoWriteArguments(message.payload.arguments);
+                if (parsed !== null) {
+                    sessionStore.setAgentTodos(parsed);
+                }
+            }
             break;
         }
 
@@ -534,15 +575,6 @@ export function handleServerMessage(message: ServerMessage): void {
                 content,
                 mimeType,
                 truncated,
-                ...(error !== undefined ? { error } : {}),
-            });
-            break;
-        }
-
-        case "workspace.diff.response": {
-            const { path, diff, error } = message.payload;
-            dispatchWorkspaceDiffResponse(path, {
-                diff,
                 ...(error !== undefined ? { error } : {}),
             });
             break;

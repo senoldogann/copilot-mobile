@@ -9,23 +9,27 @@ type Props = {
     intent?: string | null;
 };
 
-// Her nokta bağımsız opaklık + dikey sıçrama animasyonu
+// Each dot: when active — bounce + bright pulse; when inactive — static dim dot
 function Dot({ delay, active }: { delay: number; active: boolean }) {
     const anim = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
-        const duration = active ? 380 : 900;
+        if (!active) {
+            anim.stopAnimation();
+            anim.setValue(0);
+            return;
+        }
         const loop = Animated.loop(
             Animated.sequence([
                 Animated.timing(anim, {
                     toValue: 1,
-                    duration,
+                    duration: 380,
                     delay,
                     useNativeDriver: true,
                 }),
                 Animated.timing(anim, {
                     toValue: 0,
-                    duration,
+                    duration: 380,
                     useNativeDriver: true,
                 }),
             ])
@@ -34,14 +38,12 @@ function Dot({ delay, active }: { delay: number; active: boolean }) {
         return () => loop.stop();
     }, [anim, delay, active]);
 
-    const opacity = anim.interpolate({
-        inputRange: [0, 1],
-        outputRange: active ? [0.35, 1.0] : [0.06, 0.18],
-    });
-    const translateY = anim.interpolate({
-        inputRange: [0, 0.5, 1],
-        outputRange: active ? [0, -4, 0] : [0, 0, 0],
-    });
+    const opacity = active
+        ? anim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1.0] })
+        : 0.15;
+    const translateY = active
+        ? anim.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0, -4, 0] })
+        : 0;
 
     return (
         <Animated.View

@@ -6,7 +6,7 @@ import {
     JWT_SECRET_ROTATION_MS,
     JWT_SECRET_GRACE_MS,
 } from "@copilot-mobile/shared";
-import { getOrCreateJWTSecret } from "./certs.js";
+import { getOrCreateJWTSecret, persistJWTSecret } from "./certs.js";
 import { randomBytes } from "node:crypto";
 
 type JWTPayload = {
@@ -28,7 +28,9 @@ export function rotateSecretIfNeeded(): boolean {
     previousSecretExpiresAt = now + JWT_SECRET_GRACE_MS;
     currentSecret = randomBytes(32);
     lastRotationAt = now;
-    console.log("[jwt] Secret rotation performed");
+    // Yeni secret'\u0131 diske at\u0131k yaz: restart sonras\u0131 grace window canl\u0131 kals\u0131n.
+    persistJWTSecret(currentSecret);
+    console.log("[jwt] Secret rotation performed and persisted");
     return true;
 }
 

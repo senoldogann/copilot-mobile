@@ -49,6 +49,15 @@ export type ToolItem = ChatItemBase & {
     partialOutput?: string;
 };
 
+export type TodoItemStatus = "pending" | "in_progress" | "completed";
+
+export type AgentTodo = {
+    id: string;
+    content: string;
+    status: TodoItemStatus;
+    priority?: "high" | "medium" | "low";
+};
+
 export type ChatItem = UserMessageItem | AssistantMessageItem | ThinkingItem | ToolItem;
 
 export type PermissionPrompt = {
@@ -102,6 +111,9 @@ export type SessionStore = {
     isAssistantTyping: boolean;
     currentIntent: string | null;
 
+    // Agent-managed todo list (from TodoWrite tool calls)
+    agentTodos: ReadonlyArray<AgentTodo>;
+
     // Permission and input prompts (modal overlay)
     permissionPrompt: PermissionPrompt | null;
     userInputPrompt: UserInputPrompt | null;
@@ -145,6 +157,7 @@ export type SessionStore = {
     updateToolStatus: (requestId: string, status: "completed" | "failed") => void;
 
     setCurrentIntent: (intent: string | null) => void;
+    setAgentTodos: (todos: ReadonlyArray<AgentTodo>) => void;
     setPermissionPrompt: (prompt: PermissionPrompt | null) => void;
     setUserInputPrompt: (prompt: UserInputPrompt | null) => void;
     setPlanExitPrompt: (prompt: PlanExitPrompt | null) => void;
@@ -250,6 +263,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
     chatItems: [],
     isAssistantTyping: false,
     currentIntent: null,
+    agentTodos: [],
 
     permissionPrompt: null,
     userInputPrompt: null,
@@ -400,6 +414,8 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     setCurrentIntent: (intent) => set({ currentIntent: intent }),
 
+    setAgentTodos: (todos) => set({ agentTodos: todos }),
+
     appendThinkingDelta: (delta, _index) => {
         set((s) => {
             const items = [...s.chatItems];
@@ -509,6 +525,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             chatItems: [],
             isAssistantTyping: false,
             currentIntent: null,
+            agentTodos: [],
             permissionPrompt: null,
             userInputPrompt: null,
             planExitPrompt: null,
@@ -534,6 +551,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             chatItems: [],
             isAssistantTyping: false,
             currentIntent: null,
+            agentTodos: [],
             permissionPrompt: null,
             userInputPrompt: null,
             planExitPrompt: null,

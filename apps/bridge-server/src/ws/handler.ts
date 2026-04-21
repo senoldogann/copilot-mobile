@@ -247,6 +247,9 @@ export function createMessageHandler(
                         type: "reconnect.ready",
                         payload: {},
                     });
+
+                    // UI durumunu tazele: capabilities + her session i\u00e7in state + bekleyen prompts.
+                    sessionManager.resyncStateAfterReconnect();
                     return;
                 }
 

@@ -1034,6 +1034,16 @@ export function createSessionManager(
             emitCapabilitiesState();
         },
 
+        // Reconnect sonras\u0131 mobilin UI'\u0131n\u0131 tazelemek i\u00e7in: capabilities.state + her aktif
+        // session i\u00e7in session.state + bekleyen permission/user_input promptlar\u0131n\u0131 yeniden yay\u0131mla.
+        resyncStateAfterReconnect(): void {
+            emitCapabilitiesState();
+            for (const sessionId of activeSessions.keys()) {
+                emitSessionState(sessionId);
+            }
+            replayPendingPrompts();
+        },
+
         replayPendingPrompts(sessionId?: string): void {
             replayPendingPrompts(sessionId);
         },

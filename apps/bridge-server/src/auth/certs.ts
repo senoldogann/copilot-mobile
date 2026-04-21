@@ -1,7 +1,7 @@
 // TLS certificate and JWT secret management
 // Stored in ~/.copilot-mobile/
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, renameSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
@@ -34,6 +34,16 @@ export function getOrCreateJWTSecret(): Buffer {
     const secret = randomBytes(32);
     writeFileSync(secretPath, secret, { mode: 0o600 });
     return secret;
+}
+
+// Rotation sonras\u0131 atomik yaz\u0131m: \u00f6nce tmp dosyaya yaz, sonra rename.
+// Restart sonras\u0131 yeni secret kaybolmas\u0131n.
+export function persistJWTSecret(secret: Buffer): void {
+    const configDir = getConfigDir();
+    const secretPath = join(configDir, JWT_SECRET_FILENAME);
+    const tmpPath = `${secretPath}.tmp-${process.pid}-${Date.now()}`;
+    writeFileSync(tmpPath, secret, { mode: 0o600 });
+    renameSync(tmpPath, secretPath);
 }
 
 // --- TLS Certificate ---

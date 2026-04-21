@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readdir, lstat, readFile } from "node:fs/promises";
+import { readdir, lstat, readFile, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
@@ -474,6 +474,14 @@ export async function readWorkspaceFile(
         if (!stat.isFile()) {
             return { content: "", mimeType: "text/plain", truncated: false, error: "Path is not a file" };
         }
+        // Symlink traversal koruması: realpath sonrası root içinde mi doğrula.
+        if (stat.isSymbolicLink()) {
+            return { content: "", mimeType: "text/plain", truncated: false, error: "Symbolic links are not allowed" };
+        }
+        const realAbsPath = await realpath(absPath);
+        if (!isWithinRoot(root, realAbsPath)) {
+            return { content: "", mimeType: "text/plain", truncated: false, error: "Path escapes workspace root via symlink" };
+        }
 
         const limitedBytes = Math.min(maxBytes, MAX_FILE_READ_BYTES);
         const truncated = stat.size > limitedBytes;
@@ -512,6 +520,20 @@ export async function readWorkspaceDiff(
 
     if (!isWithinRoot(root, absPath)) {
         return { diff: "", error: "Path is outside workspace root" };
+    }
+
+    // Symlink traversal koruması: dosya varsa realpath'i root içinde olmalı.
+    try {
+        const stat = await lstat(absPath);
+        if (stat.isSymbolicLink()) {
+            return { diff: "", error: "Symbolic links are not allowed" };
+        }
+        const realAbsPath = await realpath(absPath);
+        if (!isWithinRoot(root, realAbsPath)) {
+            return { diff: "", error: "Path escapes workspace root via symlink" };
+        }
+    } catch {
+        // Untracked/yeni dosya henüz var olmayabilir; bu durumda resolve'u olduğu gibi kullan.
     }
 
     const relPath = toPosixRelativePath(root, absPath);

@@ -28,6 +28,7 @@ import { ChatInput } from "../../src/components/ChatInput";
 import type { ImageAttachment, SendMode } from "../../src/components/ChatInput";
 import { EmptyChat } from "../../src/components/EmptyChat";
 import { ActivityDots } from "../../src/components/ActivityDots";
+import { TodoPanel } from "../../src/components/TodoPanel";
 import { PermissionDialog, PlanExitDialog, UserInputDialog } from "../../src/components/Dialogs";
 import { colors, spacing, fontSize, borderRadius } from "../../src/theme/colors";
 import type { SessionConfig, SessionMessageAttachment } from "@copilot-mobile/shared";
@@ -225,6 +226,7 @@ export default function ChatScreen() {
     const permissionPrompt = useSessionStore((s) => s.permissionPrompt);
     const userInputPrompt = useSessionStore((s) => s.userInputPrompt);
     const planExitPrompt = useSessionStore((s) => s.planExitPrompt);
+    const agentTodos = useSessionStore((s) => s.agentTodos);
 
     const connectionState = useConnectionStore((s) => s.state);
     const connectionError = useConnectionStore((s) => s.error);
@@ -536,6 +538,10 @@ export default function ChatScreen() {
                     <View style={styles.errorBanner}>
                         <Text style={styles.errorBannerText}>{connectionError}</Text>
                     </View>
+                )}
+
+                {agentTodos.length > 0 && (
+                    <TodoPanel todos={agentTodos} />
                 )}
 
                 <ChatInput

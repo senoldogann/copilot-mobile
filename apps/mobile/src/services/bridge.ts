@@ -16,6 +16,12 @@ import { useConnectionStore } from "../stores/connection-store";
 import { useSessionStore } from "../stores/session-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
 import { dispatchWorkspaceFileResponse, onWorkspaceFileResponse, dispatchWorkspaceDiffResponse, onWorkspaceDiffResponse } from "./workspace-events";
+import {
+    clearCredentials,
+    loadCredentials,
+    saveCredentials,
+    updateStoredJWT,
+} from "./credentials";
 
 export { onWorkspaceFileResponse, onWorkspaceDiffResponse };
 
@@ -25,6 +31,21 @@ function getClient(): ReturnType<typeof createWSClient> {
     if (client === null) {
         const nextClient = createWSClient({
             onMessage: (message) => {
+                // Kimlik bilgilerini kal\u0131c\u0131 olarak sakla: app restart sonras\u0131 otomatik reconnect.
+                if (message.type === "pairing.success") {
+                    const connState = useConnectionStore.getState();
+                    if (connState.serverUrl !== null) {
+                        void saveCredentials({
+                            jwt: message.payload.jwt,
+                            serverUrl: connState.serverUrl,
+                            certFingerprint: message.payload.certFingerprint,
+                            deviceId: message.payload.deviceId,
+                        });
+                    }
+                } else if (message.type === "token.refresh") {
+                    void updateStoredJWT(message.payload.jwt);
+                }
+
                 const sessionStore = useSessionStore.getState();
                 const activeSessionId = sessionStore.activeSessionId;
 
@@ -375,6 +396,25 @@ export function resumeBridgeConnection(): boolean {
     return client.resume();
 }
 
+// App restart sonras\u0131 SecureStore'dan kimlik bilgilerini y\u00fckle ve JWT ile yeniden ba\u011flan.
+// Kullan\u0131c\u0131 QR taramadan session'a geri d\u00f6ner.
+export async function tryResumeFromStoredCredentials(): Promise<boolean> {
+    const creds = await loadCredentials();
+    if (creds === null) {
+        return false;
+    }
+    const c = getClient();
+    c.seedStoredCredentials({
+        jwt: creds.jwt,
+        serverUrl: creds.serverUrl,
+        certFingerprint: creds.certFingerprint,
+    });
+    const connStore = useConnectionStore.getState();
+    connStore.setServerInfo(creds.serverUrl, creds.certFingerprint);
+    connStore.setDeviceId(creds.deviceId);
+    return c.resume();
+}
+
 export async function requestWorkspaceFile(
     sessionId: string,
     path: string,
@@ -423,4 +463,6 @@ export function disconnect(): void {
     }
     useConnectionStore.getState().reset();
     useSessionStore.getState().reset();
+    // Kal\u0131c\u0131 kimlik bilgilerini de temizle: QR'\u0131 tekrar taramak gerekecek.
+    void clearCredentials();
 }

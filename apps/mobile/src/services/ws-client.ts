@@ -333,6 +333,19 @@ export function createWSClient(config: WSClientConfig) {
 
         connectWithJWT,
 
+        // Kal\u0131c\u0131 kimlik bilgilerinden client'\u0131 hidratla. connectWithJWT/resume \u00f6ncesi \u00e7a\u011fr\u0131l\u0131r.
+        seedStoredCredentials(params: {
+            jwt: string;
+            serverUrl: string;
+            certFingerprint: string | null;
+        }): void {
+            jwt = params.jwt;
+            serverUrl = params.serverUrl;
+            expectedFingerprint = params.certFingerprint;
+            lastServerSeq = 0;
+            reconnectAttempt = 0;
+        },
+
         send,
 
         flushPending(): void {

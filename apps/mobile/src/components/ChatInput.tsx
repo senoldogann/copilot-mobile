@@ -950,7 +950,9 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         style={dropdownStyles.effortItem}
                         onPress={() => {
                             setShowPlusMenu(false);
-                            void handlePickImage();
+                            // Wait for the modal fade-out animation to complete before launching the
+                            // system image picker, otherwise the two native modal layers conflict.
+                            setTimeout(() => void handlePickImage(), 320);
                         }}
                     >
                         <View style={dropdownStyles.effortItemLeft}>
