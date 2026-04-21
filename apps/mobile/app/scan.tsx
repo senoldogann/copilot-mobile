@@ -5,6 +5,7 @@ import { View, Text, Pressable, StyleSheet, Alert } from "react-native";
 import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRouter } from "expo-router";
 import { qrPayloadSchema } from "@copilot-mobile/shared";
+import type { QRPayload } from "@copilot-mobile/shared";
 import { connectWithQR } from "../src/services/bridge";
 import { useConnectionStore } from "../src/stores/connection-store";
 import { colors, borderRadius } from "../src/theme/colors";
@@ -43,7 +44,7 @@ export default function ScanScreen() {
         ]);
     }, [connectionError]);
 
-    function handleBarCodeScanned(result: { data: string }): void {
+function handleBarCodeScanned(result: { data: string }): void {
         if (scanned) return;
         setScanned(true);
 
@@ -58,9 +59,23 @@ export default function ScanScreen() {
                 return;
             }
 
+            const qrPayload: QRPayload = {
+                url: qrPayloadResult.data.url,
+                token: qrPayloadResult.data.token,
+                certFingerprint: qrPayloadResult.data.certFingerprint,
+                transportMode: qrPayloadResult.data.transportMode,
+                version: qrPayloadResult.data.version,
+                ...(qrPayloadResult.data.companionId !== undefined
+                    ? { companionId: qrPayloadResult.data.companionId }
+                    : {}),
+                ...(qrPayloadResult.data.relayAccessToken !== undefined
+                    ? { relayAccessToken: qrPayloadResult.data.relayAccessToken }
+                    : {}),
+            };
+
             hasShownErrorRef.current = false;
             setIsPairing(true);
-            connectWithQR(qrPayloadResult.data);
+            connectWithQR(qrPayload);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Could not read QR code.";
             Alert.alert("QR Code Error", errorMessage, [

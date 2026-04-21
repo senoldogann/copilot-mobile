@@ -1,11 +1,25 @@
 {
     "name": "copilot-mobile",
     "private": true,
+    "bin": {
+        "copilot-mobile": "./bin/copilot-mobile.mjs"
+    },
     "scripts": {
+        "copilot-mobile": "node ./bin/copilot-mobile.mjs",
         "dev:bridge": "pnpm --filter bridge-server dev",
+        "dev:bridge:direct": "node ./bin/dev-bridge-direct.mjs",
+        "dev:companion:local": "node ./bin/dev-companion-local.mjs",
+        "dev:companion:macos": "swift run --package-path apps/macos-companion",
+        "dev:relay": "pnpm --filter @copilot-mobile/relay-server dev",
         "dev:mobile": "pnpm --filter mobile start",
         "build:bridge": "pnpm --filter bridge-server build",
+        "build:companion:macos": "swift build --package-path apps/macos-companion",
         "build:shared": "pnpm --filter @copilot-mobile/shared build",
+        "bridge:up": "node ./bin/copilot-mobile.mjs up",
+        "bridge:status": "node ./bin/copilot-mobile.mjs status",
+        "bridge:qr": "node ./bin/copilot-mobile.mjs qr",
+        "bridge:dashboard": "node ./bin/copilot-mobile.mjs dashboard",
+        "bridge:down": "node ./bin/copilot-mobile.mjs down",
         "test": "pnpm --filter bridge-server test",
         "test:bridge": "pnpm --filter bridge-server test",
         "typecheck": "pnpm -r typecheck",
@@ -14,5 +28,8 @@
     "engines": {
         "node": ">=20.0.0",
         "pnpm": ">=9.0.0"
+    },
+    "dependencies": {
+        "expo": "^55.0.15"
     }
 }

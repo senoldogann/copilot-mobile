@@ -27,7 +27,7 @@ Tarih: 2026-04-21
 - **U3 — Workspace dosya içerik görüntüleyicisi workspace panelinden tetiklenmiyor.** `FileContentViewer` var ama sadece markdown file-link'lerinden açılıyor; Files sekmesi ve Changes sekmesi dosyaları clickable değil.
 - **U4 — Changes panel kısmen fonksiyonsuz.** 3 görünüm ikonu (paragraph/diff/tree) yalnızca lokal `viewMode` state'ini değiştiriyor, dosya listesinin render'ını etkilemiyor. "Uncommitted" metni bir Pressable ama tıklanınca bir şey yapmıyor (committed seçeneği yok). Dosya satırları tıklanınca diff açmıyor.
 - **U5 — Ayarlar ekranı fazla.** Models, Reasoning Effort ve Default Approvals hepsi input'taki ayar menüsünde zaten mevcut → settings ekranında tekrarlanmamalı.
-- **U6 — Model chip arka planı opak + mikrofon butonu ölü.** `ChatInput.tsx` `modelPill` `backgroundColor: colors.bgElevated`; mikrofon butonu `toolBtnDimmed` ile devre dışı görüntülü ve `Pressable` değil.
+- **U6 — Model chip arka planı opak.** `ChatInput.tsx` `modelPill` `backgroundColor: colors.bgElevated`.
 - **U7 — @ ve / autocomplete yok.** TextInput'un placeholder'ı "@files, /commands" diyor ama ne mention ne slash command picker var.
 
 ---
@@ -61,9 +61,8 @@ Kullanıcı explicit öncelik: **UI/UX sorunları + runtimeMode düzeltmesi**. (
 ### P1 — U5: Ayarlar ekranını sadeleştir
 `settings.tsx`'ten `ModelPicker`, `ReasoningEffortPicker`, `ApprovalSettings`'i çıkar. Yalnızca `ConnectionInfo` + footer kalsın. Versiyon + bridge teşhis bilgileri görünür kalsın.
 
-### P1 — U6: Model chip + mikrofon
+### P1 — U6: Model chip
 - `ChatInput.tsx` `toolbarStyles.modelPill.backgroundColor` → `"transparent"`. Border'ı `borderMuted`'e indir.
-- Mikrofon butonu: `expo-speech-recognition` ekle (Expo SDK 54 ile uyumlu). Basılınca dinlemeye başla, transkripti `setInput` ile TextInput'a yaz. Dev-build gerekliliği nedeniyle runtime guard: import fail olursa Alert göster ("Voice requires dev build").
 - Model listesi zaten `listModels()` ile bridge'den geliyor (SDK `rpc.models.list()` — VS Code Copilot ile aynı kaynak). Ek iş yok; validate ettik.
 
 ### P1 — U7: @ ve / autocomplete

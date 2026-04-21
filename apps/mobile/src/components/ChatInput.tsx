@@ -1,32 +1,31 @@
 // Mesaj giriş çubuğu — GitHub Copilot mobil stili model/effort seçiciler, resim ekleme, gönderim modları
 
-import React, { useState, useCallback, useMemo } from "react";
+import React, { useState, useCallback, useEffect, useMemo } from "react";
 import {
     View,
     TextInput,
     Pressable,
     Text,
     StyleSheet,
+    InteractionManager,
     Platform,
     Modal,
     Image,
     ScrollView,
     Alert,
-    InteractionManager,
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { useSessionStore, deriveAvailableReasoningEfforts } from "../stores/session-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
+import { useConnectionStore } from "../stores/connection-store";
 import type { WorkspaceTreeNode } from "@copilot-mobile/shared";
 import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
 import type { AgentMode, ModelInfo, PermissionLevel, ReasoningEffortLevel } from "@copilot-mobile/shared";
-import { updatePermissionLevel, updateSessionMode } from "../services/bridge";
-import { startVoiceDictation, isVoiceAvailable, type DictationHandle } from "../services/voice-dictation";
+import { requestWorkspaceTree, updatePermissionLevel, updateSessionMode } from "../services/bridge";
 import {
     ProviderIcon,
     detectProvider,
     PaperclipIcon,
-    MicIcon,
     ArrowUpIcon,
     ChevronDownIcon,
     CheckIcon,
@@ -53,12 +52,24 @@ export type ImageAttachment = {
 };
 
 export type SendMode = "send" | "queue" | "steer";
+export type QueuedDraft = {
+    id: string;
+    sessionId: string | null;
+    content: string;
+    images: ReadonlyArray<ImageAttachment>;
+};
 
 type Props = {
     onSend: (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => void;
     onAbort: () => void;
     isTyping: boolean;
     disabled: boolean;
+    queuedDrafts: ReadonlyArray<QueuedDraft>;
+    editingDraft: QueuedDraft | null;
+    onEditingDraftConsumed: () => void;
+    onEditQueuedDraft: (draftId: string) => void;
+    onRemoveQueuedDraft: (draftId: string) => void;
+    onSteerQueuedDraft: (draftId: string) => void;
 };
 
 // --- Effort labels ---
@@ -209,11 +220,15 @@ function ModelSelectorContent({
 // --- Effort selector dropdown ---
 
 function EffortSelectorContent({
+    agentMode,
+    onSelectAgentMode,
     options,
     current,
     defaultEffort,
     onSelect,
 }: {
+    agentMode: AgentMode;
+    onSelectAgentMode: (mode: AgentMode) => void;
     options: ReadonlyArray<ReasoningEffortLevel>;
     current: ReasoningEffortLevel | null;
     defaultEffort: ReasoningEffortLevel | undefined;
@@ -221,6 +236,43 @@ function EffortSelectorContent({
 }) {
     return (
         <View style={dropdownStyles.effortList}>
+            <Text style={dropdownStyles.sectionLabel}>Agent Mode</Text>
+            {(["agent", "plan", "ask"] as const).map((mode) => {
+                const cfg = agentModeConfig[mode];
+                const isSelected = agentMode === mode;
+
+                return (
+                    <Pressable
+                        key={mode}
+                        style={[
+                            dropdownStyles.effortItem,
+                            isSelected && dropdownStyles.effortItemSelected,
+                        ]}
+                        onPress={() => onSelectAgentMode(mode)}
+                    >
+                        <View style={dropdownStyles.effortItemLeft}>
+                            <View style={dropdownStyles.checkmarkSlot}>
+                                {isSelected && <CheckIcon size={13} color={colors.textPrimary} />}
+                            </View>
+                            <View>
+                                <Text style={[
+                                    dropdownStyles.effortLabel,
+                                    isSelected && dropdownStyles.effortLabelSelected,
+                                ]}>
+                                    {cfg.label}
+                                </Text>
+                                <Text style={dropdownStyles.effortDesc}>
+                                    {cfg.desc}
+                                </Text>
+                            </View>
+                        </View>
+                        <cfg.Icon size={18} color={isSelected ? cfg.color : colors.textTertiary} />
+                    </Pressable>
+                );
+            })}
+
+            {options.length > 0 && <View style={dropdownStyles.sectionDivider} />}
+            {options.length > 0 && <Text style={dropdownStyles.sectionLabel}>Thinking Effort</Text>}
             {options.map((level) => {
                 const isSelected = current === level;
                 const isDefault = defaultEffort === level;
@@ -481,20 +533,44 @@ function collectFilePaths(node: WorkspaceTreeNode | null, out: Array<string>): v
     }
 }
 
-export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
+function pathMatchesQuery(path: string, query: string): boolean {
+    if (query.length === 0) {
+        return true;
+    }
+
+    const normalizedPath = path.toLowerCase();
+    if (normalizedPath.includes(query)) {
+        return true;
+    }
+
+    const fileName = normalizedPath.split("/").pop() ?? normalizedPath;
+    return fileName.includes(query);
+}
+
+export function ChatInput({
+    onSend,
+    onAbort,
+    isTyping,
+    disabled,
+    queuedDrafts,
+    editingDraft,
+    onEditingDraftConsumed,
+    onEditQueuedDraft,
+    onRemoveQueuedDraft,
+    onSteerQueuedDraft,
+}: Props) {
     const [input, setInput] = useState("");
     const [isFocused, setIsFocused] = useState(false);
     const [images, setImages] = useState<Array<ImageAttachment>>([]);
     const [showModelPicker, setShowModelPicker] = useState(false);
     const [showPermissionPicker, setShowPermissionPicker] = useState(false);
     const [showEffortPicker, setShowEffortPicker] = useState(false);
-    const [showPlusMenu, setShowPlusMenu] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
-    const [voiceHandle, setVoiceHandle] = useState<DictationHandle | null>(null);
-    const voiceSupported = isVoiceAvailable();
+    const [showContextWindowSheet, setShowContextWindowSheet] = useState(false);
     const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
     const workspaceTree = useWorkspaceStore((s) => s.tree);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
+    const connectionState = useConnectionStore((s) => s.state);
     const agentMode = useSessionStore((s) => s.agentMode);
     const setAgentMode = useSessionStore((s) => s.setAgentMode);
     const permissionLevel = useSessionStore((s) => s.permissionLevel);
@@ -524,6 +600,18 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
         [input, disabled, images, onSend]
     );
 
+    useEffect(() => {
+        if (editingDraft === null) {
+            return;
+        }
+
+        setInput(editingDraft.content);
+        setImages([...editingDraft.images]);
+        const nextCursor = editingDraft.content.length;
+        setSelection({ start: nextCursor, end: nextCursor });
+        onEditingDraftConsumed();
+    }, [editingDraft, onEditingDraftConsumed]);
+
     const handleDefaultSend = useCallback(() => {
         if (isTyping) {
             handleSend("queue");
@@ -531,33 +619,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
             handleSend("send");
         }
     }, [isTyping, handleSend]);
-
-    const handleToggleVoice = useCallback(async () => {
-        if (voiceHandle !== null) {
-            voiceHandle.stop();
-            setVoiceHandle(null);
-            return;
-        }
-        try {
-            const handle = await startVoiceDictation(
-                (transcript) => {
-                    setInput((prev) => (prev.length === 0 ? transcript : `${prev} ${transcript}`));
-                    setVoiceHandle(null);
-                },
-                (message) => {
-                    Alert.alert("Voice error", message);
-                    setVoiceHandle(null);
-                }
-            );
-            setVoiceHandle(handle);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : String(err);
-            Alert.alert(
-                "Voice unavailable",
-                `Voice dictation requires a development build with expo-speech-recognition.\n\n${message}`
-            );
-        }
-    }, [voiceHandle]);
 
     // Autocomplete tokeni: @file veya /command.
     const activeToken = useMemo<AutocompleteToken>(
@@ -572,13 +633,26 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
         return out;
     }, [workspaceTree]);
 
+    useEffect(() => {
+        if (activeToken?.kind !== "file") {
+            return;
+        }
+        if (activeSessionId === null || connectionState !== "authenticated") {
+            return;
+        }
+        if (workspaceTree !== null || filePaths.length > 0) {
+            return;
+        }
+        void requestWorkspaceTree(activeSessionId, undefined, 5);
+    }, [activeToken?.kind, activeSessionId, connectionState, workspaceTree, filePaths.length]);
+
     // Token tipine göre filtrelenmiş öneriler (slash + skill komutları dahil).
     const suggestions = useMemo<ReadonlyArray<{ label: string; value: string; hint?: string }>>(() => {
         if (activeToken === null) return [];
         const query = activeToken.query.toLowerCase();
         if (activeToken.kind === "file") {
             return filePaths
-                .filter((p) => p.toLowerCase().includes(query))
+                .filter((p) => pathMatchesQuery(p, query))
                 .slice(0, 8)
                 .map((p) => ({ label: p, value: `@${p} ` }));
         }
@@ -667,7 +741,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     }, []);
 
     const handleAttachImage = useCallback(() => {
-        setShowPlusMenu(false);
         InteractionManager.runAfterInteractions(() => {
             void handlePickImage();
         });
@@ -739,9 +812,76 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
     const contextWindowLabel = currentModel?.contextWindowTokens !== undefined
         ? formatCtxWindow(currentModel.contextWindowTokens)
         : null;
+    const contextLimit = sessionUsage?.tokenLimit ?? currentModel?.contextWindowTokens ?? null;
+    const contextCurrent = sessionUsage?.currentTokens ?? null;
+    const contextPercent = contextLimit !== null && contextCurrent !== null && contextLimit > 0
+        ? Math.min(100, Math.round((contextCurrent / contextLimit) * 100))
+        : null;
+    const reservedPercent = contextLimit !== null && contextCurrent !== null && contextLimit > 0
+        ? Math.max(0, Math.round(((contextLimit - contextCurrent) / contextLimit) * 100))
+        : null;
+    const toolResultsTokens =
+        sessionUsage !== undefined
+            ? Math.max(
+                0,
+                sessionUsage.currentTokens
+                - (sessionUsage.systemTokens ?? 0)
+                - (sessionUsage.conversationTokens ?? 0)
+                - (sessionUsage.toolDefinitionsTokens ?? 0)
+            )
+            : undefined;
+    const detailPercent = (value: number | undefined): string => {
+        if (value === undefined || contextLimit === null || contextLimit <= 0) {
+            return "—";
+        }
+        return `${((value / contextLimit) * 100).toFixed(1)}%`;
+    };
 
     return (
         <View style={styles.container}>
+            {queuedDrafts.length > 0 && (
+                <View style={queuedDraftStyles.container}>
+                    {queuedDrafts.map((draft) => (
+                        <View key={draft.id} style={queuedDraftStyles.item}>
+                            <Pressable
+                                style={queuedDraftStyles.body}
+                                onPress={() => onEditQueuedDraft(draft.id)}
+                                accessibilityLabel="Kuyruktaki mesajı düzenle"
+                            >
+                                <View style={queuedDraftStyles.badge}>
+                                    <Text style={queuedDraftStyles.badgeText}>Queued</Text>
+                                </View>
+                                <Text
+                                    style={queuedDraftStyles.content}
+                                    numberOfLines={2}
+                                >
+                                    {draft.content}
+                                </Text>
+                                {draft.images.length > 0 && (
+                                    <Text style={queuedDraftStyles.meta}>
+                                        {draft.images.length} image{draft.images.length > 1 ? "s" : ""}
+                                    </Text>
+                                )}
+                            </Pressable>
+                            <Pressable
+                                style={queuedDraftStyles.actionButton}
+                                onPress={() => onSteerQueuedDraft(draft.id)}
+                                accessibilityLabel="Kuyruktaki mesajı steer olarak gönder"
+                            >
+                                <ArrowUpIcon size={14} color={colors.textPrimary} />
+                            </Pressable>
+                            <Pressable
+                                style={queuedDraftStyles.actionButton}
+                                onPress={() => onRemoveQueuedDraft(draft.id)}
+                                accessibilityLabel="Kuyruktaki mesajı kaldır"
+                            >
+                                <CloseIcon size={14} color={colors.textTertiary} />
+                            </Pressable>
+                        </View>
+                    ))}
+                </View>
+            )}
+
             {/* Image attachments */}
             {images.length > 0 && (
                 <ScrollView
@@ -831,17 +971,16 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 {/* Thin separator */}
                 <View style={styles.inputSeparator} />
 
-                {/* Single toolbar row: + | model | sliders | spacer | permission-icon | mic | send */}
+                {/* Single toolbar row: attach | model | sliders | spacer | permission-icon | mic | send */}
                 <View style={toolbarStyles.row}>
-                    {/* + button — opens agent mode + attach menu */}
                     <Pressable
-                        style={toolbarStyles.plusBtn}
-                        onPress={() => setShowPlusMenu(true)}
+                        style={toolbarStyles.toolBtn}
+                        onPress={handleAttachImage}
                         disabled={disabled}
-                        hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        accessibilityLabel="Eylem menüsü"
+                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                        accessibilityLabel="Görsel ekle"
                     >
-                        <Text style={toolbarStyles.plusText}>+</Text>
+                        <PaperclipIcon size={15} color={colors.textSecondary} />
                     </Pressable>
 
                     {/* Model selector pill */}
@@ -859,39 +998,15 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                         <ChevronDownIcon size={10} color={colors.textTertiary} />
                     </Pressable>
 
-                    {contextUsageLabel !== null ? (
-                        <View
-                            style={[
-                                toolbarStyles.ctxBadge,
-                                contextUsageLabel.percent >= 90 && toolbarStyles.ctxBadgeDanger,
-                                contextUsageLabel.percent >= 75 && contextUsageLabel.percent < 90 && toolbarStyles.ctxBadgeWarn,
-                            ]}
-                            accessibilityLabel={`Bağlam penceresi kullanımı ${contextUsageLabel.percent} yüzde`}
-                        >
-                            <Text style={toolbarStyles.ctxBadgeText}>
-                                {contextUsageLabel.primary} · {contextUsageLabel.percent}%
-                            </Text>
-                        </View>
-                    ) : contextWindowLabel !== null ? (
-                        <View style={toolbarStyles.ctxBadge}>
-                            <Text style={toolbarStyles.ctxBadgeText}>
-                                {contextWindowLabel} ctx
-                            </Text>
-                        </View>
-                    ) : null}
-
-                    {/* Thinking effort */}
-                    {effortInfo.supported && (
-                        <Pressable
-                            style={toolbarStyles.toolBtn}
-                            onPress={() => setShowEffortPicker(true)}
-                            disabled={disabled}
-                            hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                            accessibilityLabel="Düşünme çabası"
-                        >
-                            <SlidersIcon size={15} color={colors.textSecondary} />
-                        </Pressable>
-                    )}
+                    <Pressable
+                        style={toolbarStyles.toolBtn}
+                        onPress={() => setShowEffortPicker(true)}
+                        disabled={disabled}
+                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                        accessibilityLabel="Session controls"
+                    >
+                        <SlidersIcon size={15} color={colors.textSecondary} />
+                    </Pressable>
 
                     <View style={toolbarStyles.spacer} />
 
@@ -908,19 +1023,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                             return <cfg.Icon size={16} color={colors.textSecondary} />;
                         })()}
                     </Pressable>
-
-                    {/* Mic — only shown when native module is registered (dev build) */}
-                    {voiceSupported && (
-                        <Pressable
-                            style={[toolbarStyles.toolBtn, voiceHandle !== null && toolbarStyles.toolBtnActive]}
-                            onPress={handleToggleVoice}
-                            disabled={disabled}
-                            hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-                            accessibilityLabel={voiceHandle !== null ? "Sesli dikte durdur" : "Sesli dikte başlat"}
-                        >
-                            <MicIcon size={16} color={voiceHandle !== null ? colors.accent : colors.textSecondary} />
-                        </Pressable>
-                    )}
 
                     {/* Send / Abort / Queue */}
                     {isTyping && canSend ? (
@@ -967,6 +1069,22 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 </View>
             </View>
 
+            {(contextUsageLabel !== null || contextWindowLabel !== null) && (
+                <View style={styles.contextFooterRow}>
+                    <Pressable
+                        style={styles.contextPill}
+                        onPress={() => setShowContextWindowSheet(true)}
+                        accessibilityLabel="Context window ayrıntılarını göster"
+                    >
+                        <Text style={styles.contextPillText}>
+                            {contextUsageLabel !== null
+                                ? `${contextUsageLabel.primary} · ${contextUsageLabel.percent}%`
+                                : `${contextWindowLabel} ctx`}
+                        </Text>
+                    </Pressable>
+                </View>
+            )}
+
             {/* Model picker modal */}
             <DropdownModal
                 visible={showModelPicker}
@@ -978,64 +1096,6 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                     selectedModel={selectedModel}
                     onSelect={handleModelSelect}
                 />
-            </DropdownModal>
-
-            {/* + menu: agent mode + attach image */}
-            <DropdownModal
-                visible={showPlusMenu}
-                onClose={() => setShowPlusMenu(false)}
-                title="Mode & Actions"
-            >
-                <Text style={dropdownStyles.sectionLabel}>Agent Mode</Text>
-                <View style={dropdownStyles.effortList}>
-                    {(["agent", "plan", "ask"] as const).map((mode) => {
-                        const cfg = agentModeConfig[mode];
-                        const isSelected = agentMode === mode;
-                        return (
-                            <Pressable
-                                key={mode}
-                                style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
-                                onPress={() => {
-                                    void handleAgentModeSelect(mode);
-                                    setShowPlusMenu(false);
-                                }}
-                            >
-                                <View style={dropdownStyles.effortItemLeft}>
-                                    <View style={dropdownStyles.checkmarkSlot}>
-                                        {isSelected && <CheckIcon size={13} color={colors.textPrimary} />}
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={[
-                                            dropdownStyles.effortLabel,
-                                            isSelected && { color: colors.textPrimary, fontWeight: "600" },
-                                        ]}>
-                                            {cfg.label}
-                                        </Text>
-                                        <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
-                                    </View>
-                                </View>
-                                <cfg.Icon size={18} color={isSelected ? colors.textSecondary : colors.textTertiary} />
-                            </Pressable>
-                        );
-                    })}
-                </View>
-                <>
-                    <View style={dropdownStyles.sectionDivider} />
-                    <Text style={dropdownStyles.sectionLabel}>Attach</Text>
-                    <Pressable
-                        style={dropdownStyles.effortItem}
-                        onPress={handleAttachImage}
-                    >
-                        <View style={dropdownStyles.effortItemLeft}>
-                            <View style={dropdownStyles.checkmarkSlot} />
-                            <View style={{ flex: 1 }}>
-                                <Text style={dropdownStyles.effortLabel}>Attach Image</Text>
-                                <Text style={dropdownStyles.effortDesc}>Pick a photo from your library</Text>
-                            </View>
-                        </View>
-                        <PaperclipIcon size={18} color={colors.textTertiary} />
-                    </Pressable>
-                </>
             </DropdownModal>
 
             {/* Permission level picker */}
@@ -1075,24 +1135,27 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 </View>
             </DropdownModal>
 
-            {/* Thinking effort picker */}
-            {effortInfo.supported && (
-                <DropdownModal
-                    visible={showEffortPicker}
-                    onClose={() => setShowEffortPicker(false)}
-                    title="Thinking Effort"
-                >
-                    <EffortSelectorContent
-                        options={effortInfo.options as ReasoningEffortLevel[]}
-                        current={reasoningEffort}
-                        defaultEffort={currentModel?.defaultReasoningEffort}
-                        onSelect={(level) => {
-                            setReasoningEffort(level);
-                            setShowEffortPicker(false);
-                        }}
-                    />
-                </DropdownModal>
-            )}
+            {/* Session controls picker */}
+            <DropdownModal
+                visible={showEffortPicker}
+                onClose={() => setShowEffortPicker(false)}
+                title="Session Controls"
+            >
+                <EffortSelectorContent
+                    agentMode={agentMode}
+                    onSelectAgentMode={(mode) => {
+                        void handleAgentModeSelect(mode);
+                        setShowEffortPicker(false);
+                    }}
+                    options={effortInfo.options as ReasoningEffortLevel[]}
+                    current={reasoningEffort}
+                    defaultEffort={currentModel?.defaultReasoningEffort}
+                    onSelect={(level) => {
+                        setReasoningEffort(level);
+                        setShowEffortPicker(false);
+                    }}
+                />
+            </DropdownModal>
 
             {/* Send mode menu */}
             <SendModeMenu
@@ -1100,6 +1163,81 @@ export function ChatInput({ onSend, onAbort, isTyping, disabled }: Props) {
                 onClose={() => setShowSendMenu(false)}
                 onSelect={handleSendModeSelect}
             />
+
+            <DropdownModal
+                visible={showContextWindowSheet}
+                onClose={() => setShowContextWindowSheet(false)}
+                title="Context Window"
+            >
+                <View style={contextStyles.container}>
+                    <View style={contextStyles.heroCard}>
+                        <View style={contextStyles.summaryRow}>
+                            <Text style={contextStyles.eyebrow}>Window Usage</Text>
+                            {contextPercent !== null ? (
+                                <Text style={contextStyles.summaryPercent}>{contextPercent}%</Text>
+                            ) : null}
+                        </View>
+                        <Text style={contextStyles.summaryText}>
+                            {contextUsageLabel !== null
+                                ? contextUsageLabel.primary
+                                : contextWindowLabel !== null
+                                    ? `${contextWindowLabel} tokens`
+                                    : "Context unavailable"}
+                        </Text>
+                        {reservedPercent !== null ? (
+                            <View style={contextStyles.reservePill}>
+                                <Text style={contextStyles.reservePillText}>
+                                    Reserved for response · {reservedPercent}%
+                                </Text>
+                            </View>
+                        ) : null}
+                        {contextPercent !== null ? (
+                            <View style={contextStyles.progressTrack}>
+                                <View style={[contextStyles.progressFill, { width: `${contextPercent}%` }]} />
+                            </View>
+                        ) : null}
+                    </View>
+
+                    <View style={contextStyles.sectionCard}>
+                        <Text style={contextStyles.sectionTitle}>System</Text>
+                        <View style={contextStyles.metricRow}>
+                            <Text style={contextStyles.metricLabel}>System Instructions</Text>
+                            <Text style={contextStyles.metricValue}>{detailPercent(sessionUsage?.systemTokens)}</Text>
+                        </View>
+                        <View style={contextStyles.metricRow}>
+                            <Text style={contextStyles.metricLabel}>Tool Definitions</Text>
+                            <Text style={contextStyles.metricValue}>{detailPercent(sessionUsage?.toolDefinitionsTokens)}</Text>
+                        </View>
+                    </View>
+
+                    <View style={contextStyles.sectionCard}>
+                        <Text style={contextStyles.sectionTitle}>User Context</Text>
+                        <View style={contextStyles.metricRow}>
+                            <Text style={contextStyles.metricLabel}>Messages</Text>
+                            <Text style={contextStyles.metricValue}>{detailPercent(sessionUsage?.conversationTokens)}</Text>
+                        </View>
+                        <View style={contextStyles.metricRow}>
+                            <Text style={contextStyles.metricLabel}>Tool Results</Text>
+                            <Text style={contextStyles.metricValue}>{detailPercent(toolResultsTokens)}</Text>
+                        </View>
+                    </View>
+
+                    <Pressable
+                        style={contextStyles.compactButton}
+                        onPress={() => {
+                            setShowContextWindowSheet(false);
+                            // /compact'i doğrudan gönder: kullanıcı input'a bir şey yazmak zorunda kalmasın.
+                            // SDK slash command'i işleyince "Compacting conversation…" çıktısı akışa düşer.
+                            if (!disabled) {
+                                onSend("/compact", [], "send");
+                            }
+                        }}
+                        disabled={disabled}
+                    >
+                        <Text style={contextStyles.compactButtonText}>Compact Conversation</Text>
+                    </Pressable>
+                </View>
+            </DropdownModal>
         </View>
     );
 }
@@ -1114,10 +1252,14 @@ const dropdownStyles = StyleSheet.create({
     },
     container: {
         backgroundColor: colors.bg,
-        borderTopLeftRadius: borderRadius.xl,
-        borderTopRightRadius: borderRadius.xl,
-        maxHeight: "85%",
-        paddingBottom: Platform.OS === "ios" ? 34 : 16,
+        borderRadius: borderRadius.xl,
+        borderWidth: 1,
+        borderColor: colors.border,
+        maxHeight: "82%",
+        marginHorizontal: spacing.md,
+        marginBottom: Platform.OS === "ios" ? 28 : 16,
+        paddingBottom: 12,
+        overflow: "hidden",
     },
     scroll: {
         maxHeight: 600,
@@ -1349,19 +1491,6 @@ const toolbarStyles = StyleSheet.create({
         gap: 4,
         overflow: "hidden",
     },
-    plusBtn: {
-        alignItems: "center",
-        justifyContent: "center",
-        width: 32,
-        height: 32,
-    },
-    plusText: {
-        color: colors.textSecondary,
-        fontSize: 22,
-        fontWeight: "300",
-        lineHeight: 24,
-        includeFontPadding: false,
-    },
     toolBtn: {
         width: 32,
         height: 32,
@@ -1393,26 +1522,6 @@ const toolbarStyles = StyleSheet.create({
         fontSize: fs.sm,
         fontWeight: "500",
         flexShrink: 1,
-    },
-    ctxBadge: {
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 4,
-        borderRadius: borderRadius.full,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.bgElevated,
-    },
-    ctxBadgeWarn: {
-        borderColor: colors.warning,
-    },
-    ctxBadgeDanger: {
-        borderColor: colors.error,
-        backgroundColor: colors.errorMuted,
-    },
-    ctxBadgeText: {
-        color: colors.textTertiary,
-        fontSize: fs.xs,
-        fontWeight: "600",
     },
     spacer: {
         flex: 1,
@@ -1451,6 +1560,24 @@ const styles = StyleSheet.create({
     },
     inputCardFocused: {
         borderColor: colors.accent,
+    },
+    contextFooterRow: {
+        flexDirection: "row",
+        justifyContent: "flex-end",
+        marginTop: 8,
+    },
+    contextPill: {
+        paddingHorizontal: spacing.md,
+        paddingVertical: 6,
+        borderRadius: borderRadius.full,
+        borderWidth: 1,
+        borderColor: colors.border,
+        backgroundColor: colors.bgElevated,
+    },
+    contextPillText: {
+        color: colors.textSecondary,
+        fontSize: fs.xs,
+        fontWeight: "600",
     },
     inputSeparator: {
         height: StyleSheet.hairlineWidth,
@@ -1491,6 +1618,102 @@ const styles = StyleSheet.create({
         height: 10,
         borderRadius: 2,
         backgroundColor: colors.textOnAccent,
+    },
+});
+
+const contextStyles = StyleSheet.create({
+    container: {
+        gap: 10,
+        paddingHorizontal: spacing.md,
+        paddingTop: spacing.sm,
+    },
+    heroCard: {
+        gap: 6,
+        paddingVertical: spacing.sm,
+        paddingHorizontal: spacing.sm,
+        borderRadius: borderRadius.md,
+        backgroundColor: colors.bgSecondary,
+    },
+    eyebrow: {
+        color: colors.textTertiary,
+        fontSize: fs.xs,
+        fontWeight: "600",
+        textTransform: "uppercase",
+        letterSpacing: 0.4,
+    },
+    summaryRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    summaryText: {
+        color: colors.textPrimary,
+        fontSize: fs.base,
+        fontWeight: "600",
+    },
+    summaryPercent: {
+        color: colors.textSecondary,
+        fontSize: fs.sm,
+        fontWeight: "600",
+    },
+    progressTrack: {
+        height: 5,
+        borderRadius: borderRadius.full,
+        backgroundColor: colors.bgTertiary,
+        overflow: "hidden",
+    },
+    progressFill: {
+        height: "100%",
+        borderRadius: borderRadius.full,
+        backgroundColor: colors.textSecondary,
+    },
+    reservePill: {
+        alignSelf: "flex-start",
+        borderRadius: borderRadius.full,
+        backgroundColor: colors.bgTertiary,
+        paddingHorizontal: spacing.sm,
+        paddingVertical: 3,
+    },
+    reservePillText: {
+        color: colors.textSecondary,
+        fontSize: fs.xs,
+    },
+    sectionCard: {
+        gap: 6,
+        paddingVertical: spacing.sm,
+        paddingHorizontal: spacing.sm,
+        borderRadius: borderRadius.md,
+        backgroundColor: colors.bgSecondary,
+    },
+    sectionTitle: {
+        color: colors.textPrimary,
+        fontSize: fs.sm,
+        fontWeight: "600",
+    },
+    metricRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+    },
+    metricLabel: {
+        color: colors.textSecondary,
+        fontSize: fs.sm,
+    },
+    metricValue: {
+        color: colors.textTertiary,
+        fontSize: fs.sm,
+        fontWeight: "600",
+    },
+    compactButton: {
+        borderRadius: borderRadius.md,
+        backgroundColor: colors.bgSecondary,
+        paddingVertical: 9,
+        alignItems: "center",
+    },
+    compactButtonText: {
+        color: colors.textPrimary,
+        fontSize: fs.sm,
+        fontWeight: "600",
     },
 });
 
@@ -1544,5 +1767,58 @@ const autocompleteStyles = StyleSheet.create({
         fontSize: fs.xs,
         color: colors.textTertiary,
         marginTop: 2,
+    },
+});
+
+const queuedDraftStyles = StyleSheet.create({
+    container: {
+        gap: 6,
+        marginBottom: 8,
+    },
+    item: {
+        flexDirection: "row",
+        alignItems: "center",
+        borderWidth: 1,
+        borderColor: colors.border,
+        borderRadius: borderRadius.md,
+        backgroundColor: colors.bgSecondary,
+        paddingLeft: spacing.sm,
+        paddingRight: 6,
+        paddingVertical: 6,
+        gap: 6,
+    },
+    body: {
+        flex: 1,
+        minWidth: 0,
+    },
+    badge: {
+        alignSelf: "flex-start",
+        paddingHorizontal: 6,
+        paddingVertical: 2,
+        borderRadius: borderRadius.full,
+        backgroundColor: colors.accentMuted,
+        marginBottom: 4,
+    },
+    badgeText: {
+        color: colors.accent,
+        fontSize: fs.xs,
+        fontWeight: "700",
+    },
+    content: {
+        color: colors.textPrimary,
+        fontSize: fs.sm,
+        lineHeight: 18,
+    },
+    meta: {
+        color: colors.textTertiary,
+        fontSize: fs.xs,
+        marginTop: 4,
+    },
+    actionButton: {
+        width: 28,
+        height: 28,
+        borderRadius: borderRadius.sm,
+        alignItems: "center",
+        justifyContent: "center",
     },
 });

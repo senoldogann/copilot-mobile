@@ -14,7 +14,7 @@ import type {
     HostSessionCapabilities,
     SessionMessageInput,
     ToolArguments,
-} from "./protocol";
+} from "./protocol.js";
 
 // Adapter representation of a permission request from the SDK
 export type AdaptedPermissionRequest = {
@@ -28,6 +28,13 @@ export type AdaptedPermissionRequest = {
 
 export type AdaptedToolStartDetails = {
     arguments?: ToolArguments;
+};
+
+export type AdaptedToolCompletionDetails = {
+    resultContent?: string;
+    errorMessage?: string;
+    exitCode?: number;
+    toolTelemetry?: Record<string, unknown>;
 };
 
 export type AdaptedUserInputRequest = {
@@ -74,11 +81,28 @@ export type AdaptedCopilotSession = {
     ): void;
     onToolPartialResult(handler: (requestId: string, partialOutput: string) => void): void;
     onToolProgress(handler: (requestId: string, progressMessage: string) => void): void;
-    onToolComplete(handler: (toolName: string, requestId: string, success: boolean, resultContent?: string) => void): void;
+    onToolComplete(
+        handler: (
+            toolName: string,
+            requestId: string,
+            success: boolean,
+            details?: AdaptedToolCompletionDetails
+        ) => void
+    ): void;
     onIdle(handler: () => void): void;
     onSessionError(handler: (errorType: string, message: string) => void): void;
     onTitleChanged(handler: (title: string) => void): void;
     onIntent(handler: (intent: string) => void): void;
+    onUsage(
+        handler: (usage: {
+            tokenLimit: number;
+            currentTokens: number;
+            systemTokens?: number;
+            conversationTokens?: number;
+            toolDefinitionsTokens?: number;
+            messagesLength?: number;
+        }) => void
+    ): void;
     onRuntimeModeChanged(handler: (runtimeMode: RuntimeMode) => void): void;
     onPlanExitRequest(handler: (request: AdaptedPlanExitRequest) => void): void;
     getHistory(): Promise<ReadonlyArray<SessionHistoryItem>>;

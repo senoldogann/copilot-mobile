@@ -2,16 +2,22 @@
 
 import type { ServerMessage, SessionHistoryItem } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
-import type { AgentTodo, ChatItem } from "../stores/session-store";
+import type { ChatItem } from "../stores/session-store";
 import { useSessionStore } from "../stores/session-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
 import {
     armBackgroundCompletion,
+    appendBackgroundCompletionPreview,
     clearBackgroundCompletion,
     notifyIfBackgroundCompletion,
-} from "./app-runtime";
-import { dispatchWorkspaceFileResponse, dispatchWorkspaceDiffResponse } from "./workspace-events";
+    replaceBackgroundCompletionPreview,
+} from "./background-completion";
+import {
+    dispatchWorkspaceDiffResponse,
+    dispatchWorkspaceFileResponse,
+    dispatchWorkspaceResolveResponse,
+} from "./workspace-events";
 
 function collectPermissionDetails(metadata: Record<string, unknown>): Array<string> {
     const details: Array<string> = [];
@@ -37,7 +43,10 @@ function collectPermissionDetails(metadata: Record<string, unknown>): Array<stri
 function mapHistoryItemToChatItem(item: SessionHistoryItem): ChatItem {
     switch (item.type) {
         case "user":
-            return item;
+            return {
+                ...item,
+                deliveryState: "sent",
+            };
 
         case "assistant":
             return {
@@ -205,6 +214,9 @@ function mergeHistoryIntoExistingItems(
                 ...(historyItem.partialOutput !== undefined
                     ? { partialOutput: historyItem.partialOutput }
                     : {}),
+                ...(historyItem.errorMessage !== undefined
+                    ? { errorMessage: historyItem.errorMessage }
+                    : {}),
             });
         }
     }
@@ -283,8 +295,21 @@ export function handleServerMessage(message: ServerMessage): void {
         return activeSessionId !== null && activeSessionId === sessionId;
     };
 
+    const isWorkspaceLoadError = (code: string): boolean => {
+        if (code === "WORKSPACE_TREE_FAILED" || code === "WORKSPACE_GIT_FAILED") {
+            return true;
+        }
+
+        if (code !== "SESSION_NOT_FOUND") {
+            return false;
+        }
+
+        const workspaceState = useWorkspaceStore.getState();
+        return workspaceState.isLoadingGit || Object.keys(workspaceState.loadingTreePaths).length > 0;
+    };
+
     switch (message.type) {
-        case "pairing.success": {
+        case "auth.authenticated": {
             connectionStore.setDeviceId(message.payload.deviceId);
             connectionStore.setState("authenticated");
             break;
@@ -313,6 +338,9 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.upsertSession(message.payload.session);
             clearBackgroundCompletion(message.payload.session.id);
+            void import("./bridge").then(({ syncSessionPreferences }) =>
+                syncSessionPreferences(message.payload.session.id)
+            );
 
             const chatHistoryStore = useChatHistoryStore.getState();
             const linkedConversation = chatHistoryStore.conversations.find(
@@ -356,12 +384,14 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "assistant.message": {
+            replaceBackgroundCompletionPreview(message.payload.sessionId, message.payload.content);
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.finalizeAssistantMessage(message.payload.content);
             break;
         }
 
         case "assistant.message_delta": {
+            appendBackgroundCompletionPreview(message.payload.sessionId, message.payload.delta);
             if (!isActiveSession(message.payload.sessionId)) break;
             armBackgroundCompletion(message.payload.sessionId);
             sessionStore.setAssistantTyping(true);
@@ -371,8 +401,8 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.reasoning": {
             if (!isActiveSession(message.payload.sessionId)) break;
-            // Full reasoning message — finalize thinking stream
-            sessionStore.finalizeThinking();
+            armBackgroundCompletion(message.payload.sessionId);
+            sessionStore.finalizeThinking(message.payload.content);
             break;
         }
 
@@ -385,6 +415,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "tool.execution_start": {
             if (!isActiveSession(message.payload.sessionId)) break;
+            sessionStore.setAssistantTyping(true);
             sessionStore.addToolStart(
                 message.payload.requestId,
                 message.payload.toolName,
@@ -422,14 +453,16 @@ export function handleServerMessage(message: ServerMessage): void {
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.updateToolStatus(
                 message.payload.requestId,
-                message.payload.success ? "completed" : "failed"
+                message.payload.completionStatus
+                ?? (message.payload.success ? "completed" : "failed"),
+                message.payload.errorMessage,
             );
             break;
         }
 
         case "permission.request": {
             if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.setPermissionPrompt({
+            sessionStore.enqueuePermissionPrompt({
                 sessionId: message.payload.sessionId,
                 requestId: message.payload.requestId,
                 kind: message.payload.kind,
@@ -461,11 +494,18 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "error": {
+            if (isWorkspaceLoadError(message.payload.code)) {
+                const workspaceStore = useWorkspaceStore.getState();
+                workspaceStore.clearRequestLoadingState();
+                workspaceStore.setError(`[${message.payload.code}] ${message.payload.message}`);
+                break;
+            }
+
             clearBackgroundCompletion();
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
             // Hata durumunda açık dialog'ları temizle — ekranda takılı kalmasın
-            sessionStore.setPermissionPrompt(null);
+            sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
             sessionStore.setPlanExitPrompt(null);
             connectionStore.setError(
@@ -479,12 +519,8 @@ export function handleServerMessage(message: ServerMessage): void {
             break;
         }
 
-        case "token.refresh": {
+        case "auth.session_token": {
             // Token handled at ws-client level, no store update needed
-            break;
-        }
-
-        case "reconnect.ready": {
             break;
         }
 
@@ -501,11 +537,18 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "session.state": {
             if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.setAgentMode(message.payload.agentMode);
-            sessionStore.setPermissionLevel(message.payload.permissionLevel);
-            sessionStore.setRuntimeMode(message.payload.runtimeMode);
+            sessionStore.syncRemoteSessionState({
+                agentMode: message.payload.agentMode,
+                permissionLevel: message.payload.permissionLevel,
+                runtimeMode: message.payload.runtimeMode,
+            });
             if (message.payload.runtimeMode !== "plan") {
                 sessionStore.setPlanExitPrompt(null);
+            }
+            // Bridge is the source of truth for "agent is working" so the stop button
+            // is restored after reconnect/restart if a turn is still in progress.
+            if (message.payload.busy !== undefined) {
+                sessionStore.setAssistantTyping(message.payload.busy);
             }
             break;
         }
@@ -517,7 +560,7 @@ export function handleServerMessage(message: ServerMessage): void {
             }
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
-            sessionStore.setPermissionPrompt(null);
+            sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
             sessionStore.setPlanExitPrompt(null);
             connectionStore.setError(
@@ -539,7 +582,13 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "assistant.intent": {
+            if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.setCurrentIntent(message.payload.intent);
+            break;
+        }
+
+        case "session.usage": {
+            sessionStore.setSessionUsage(message.payload);
             break;
         }
 
@@ -560,7 +609,7 @@ export function handleServerMessage(message: ServerMessage): void {
             if (!isActiveSession(message.payload.sessionId)) break;
             const workspaceStore = useWorkspaceStore.getState();
             workspaceStore.setWorkspaceTree(message.payload);
-            workspaceStore.setTreeLoading(message.payload.rootPath, false);
+            workspaceStore.setTreeLoading(message.payload.requestedWorkspaceRelativePath, false);
             workspaceStore.setTreeLoading("__root__", false);
             break;
         }
@@ -581,8 +630,8 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "workspace.file.response": {
-            const { path, content, mimeType, truncated, error } = message.payload;
-            dispatchWorkspaceFileResponse(path, {
+            const { sessionId, workspaceRelativePath, content, mimeType, truncated, error } = message.payload;
+            dispatchWorkspaceFileResponse(sessionId, workspaceRelativePath, {
                 content,
                 mimeType,
                 truncated,
@@ -592,9 +641,22 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "workspace.diff.response": {
-            const { path, diff, error } = message.payload;
-            dispatchWorkspaceDiffResponse(path, {
+            const { sessionId, workspaceRelativePath, diff, error } = message.payload;
+            dispatchWorkspaceDiffResponse(sessionId, workspaceRelativePath, {
                 diff,
+                ...(error !== undefined ? { error } : {}),
+            });
+            break;
+        }
+
+        case "workspace.resolve.response": {
+            const { sessionId, rawPath, resolvedWorkspaceRelativePath, matches, error } = message.payload;
+            dispatchWorkspaceResolveResponse(sessionId, rawPath, {
+                rawPath,
+                ...(resolvedWorkspaceRelativePath !== undefined
+                    ? { resolvedWorkspaceRelativePath }
+                    : {}),
+                ...(matches !== undefined ? { matches } : {}),
                 ...(error !== undefined ? { error } : {}),
             });
             break;

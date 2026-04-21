@@ -6,27 +6,39 @@ import {
     resumeSession,
     tryResumeFromStoredCredentials,
 } from "./bridge";
-import { loadActiveSessionId } from "./credentials";
+import { loadActiveSessionId, loadSessionPreferences } from "./credentials";
 import {
     dismissCompletionNotifications,
     initializeNotifications,
-    notifySessionCompleted,
+    initializeNotificationRouting,
     prepareNotificationPermissions,
 } from "./notifications";
 import { useConnectionStore } from "../stores/connection-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useSessionStore } from "../stores/session-store";
+import { armBackgroundCompletion, clearBackgroundCompletion } from "./background-completion";
 
 let currentAppState: AppStateStatus = AppState.currentState;
 let runtimeInitialized = false;
-const pendingCompletionSessions = new Set<string>();
 
-function sanitizeNotificationText(input: string): string {
-    const singleLine = input.replace(/\s+/g, " ").trim();
-    if (singleLine.length <= 160) {
-        return singleLine;
+function openSessionFromNotification(sessionId: string): void {
+    const sessionStore = useSessionStore.getState();
+    const connectionStore = useConnectionStore.getState();
+
+    void dismissCompletionNotifications();
+
+    sessionStore.setActiveSession(sessionId);
+    sessionStore.setSessionLoading(true);
+
+    if (connectionStore.state === "authenticated") {
+        void resumeSession(sessionId);
+        return;
     }
-    return `${singleLine.slice(0, 157)}...`;
+
+    void tryResumeFromStoredCredentials({
+        reconnectOnFailure: true,
+        reportErrors: true,
+    });
 }
 
 function syncOnForeground(): void {
@@ -51,7 +63,10 @@ function syncOnForeground(): void {
     }
 
     if (connectionStore.state === "disconnected") {
-        void tryResumeFromStoredCredentials();
+        void tryResumeFromStoredCredentials({
+            reconnectOnFailure: false,
+            reportErrors: false,
+        });
     }
 }
 
@@ -59,6 +74,11 @@ async function hydrateMobileState(): Promise<void> {
     await useChatHistoryStore.getState().hydrate();
 
     const sessionStore = useSessionStore.getState();
+    const storedPreferences = await loadSessionPreferences();
+    if (storedPreferences !== null) {
+        sessionStore.hydratePreferences(storedPreferences);
+    }
+
     if (sessionStore.activeSessionId !== null) {
         return;
     }
@@ -76,58 +96,15 @@ function handleAppStateChange(nextAppState: AppStateStatus): void {
     if (nextAppState !== "active") {
         const sessionStore = useSessionStore.getState();
         if (sessionStore.activeSessionId !== null && sessionStore.isAssistantTyping) {
-            pendingCompletionSessions.add(sessionStore.activeSessionId);
+            armBackgroundCompletion(sessionStore.activeSessionId);
         }
         return;
     }
 
     if (previousAppState !== "active") {
-        pendingCompletionSessions.clear();
+        clearBackgroundCompletion();
         syncOnForeground();
     }
-}
-
-export function isAppInForeground(): boolean {
-    return currentAppState === "active";
-}
-
-export function armBackgroundCompletion(sessionId: string): void {
-    if (!isAppInForeground()) {
-        pendingCompletionSessions.add(sessionId);
-    }
-}
-
-export function clearBackgroundCompletion(sessionId?: string): void {
-    if (sessionId === undefined) {
-        pendingCompletionSessions.clear();
-        return;
-    }
-    pendingCompletionSessions.delete(sessionId);
-}
-
-export function notifyIfBackgroundCompletion(sessionId: string): void {
-    if (isAppInForeground() || !pendingCompletionSessions.has(sessionId)) {
-        return;
-    }
-
-    pendingCompletionSessions.delete(sessionId);
-
-    const sessionStore = useSessionStore.getState();
-    const session = sessionStore.sessions.find((item) => item.id === sessionId);
-    const latestAssistant = [...sessionStore.chatItems]
-        .reverse()
-        .find((item): item is Extract<(typeof sessionStore.chatItems)[number], { type: "assistant" }> =>
-            item.type === "assistant" && item.content.trim().length > 0
-        );
-
-    const title = session?.title?.trim().length
-        ? session.title.trim()
-        : "Copilot finished working";
-    const body = latestAssistant !== undefined
-        ? sanitizeNotificationText(latestAssistant.content)
-        : "Open Copilot Mobile to review the latest session output.";
-
-    void notifySessionCompleted({ sessionId, title, body });
 }
 
 export function initializeAppRuntime(): () => void {
@@ -137,12 +114,16 @@ export function initializeAppRuntime(): () => void {
 
     runtimeInitialized = true;
     void initializeNotifications();
+    void initializeNotificationRouting(openSessionFromNotification);
     if (currentAppState === "active") {
         void prepareNotificationPermissions();
     }
     void (async () => {
         await hydrateMobileState();
-        await tryResumeFromStoredCredentials();
+        await tryResumeFromStoredCredentials({
+            reconnectOnFailure: false,
+            reportErrors: false,
+        });
     })();
     const subscription = AppState.addEventListener("change", handleAppStateChange);
 

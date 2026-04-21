@@ -26,6 +26,7 @@ import type {
     AdaptedPermissionRequest,
     AdaptedPlanExitRequest,
     AdaptedSessionState,
+    AdaptedToolCompletionDetails,
     AdaptedToolStartDetails,
     AdaptedUserInputRequest,
     AgentMode,
@@ -39,9 +40,27 @@ import type {
     ReasoningEffortLevel,
     HostSessionCapabilities,
     SessionMessageInput,
+    ToolExecutionStatus,
 } from "@copilot-mobile/shared";
 import { MODEL_UNKNOWN } from "@copilot-mobile/shared";
 import type { SessionMetadata } from "@github/copilot-sdk";
+import { execSync } from "node:child_process";
+
+/** Detect git repository root starting from `dir`. Falls back to `dir` itself. */
+function detectGitRoot(dir: string): string {
+    try {
+        return execSync("git rev-parse --show-toplevel", {
+            cwd: dir,
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+    } catch {
+        return dir;
+    }
+}
+
+const PROCESS_CWD = process.cwd();
+const WORKSPACE_ROOT = detectGitRoot(PROCESS_CWD);
 
 type SessionRecord = {
     session: AdaptedCopilotSession;
@@ -76,12 +95,37 @@ function adaptSessionContext(metadata: SessionMetadata): SessionInfo["context"] 
         return undefined;
     }
 
+    const sessionCwd = context.cwd;
+    const detectedGitRoot = detectGitRoot(sessionCwd);
+    const workspaceRoot = context.gitRoot ?? detectedGitRoot;
+    const gitRoot = context.gitRoot ?? (detectedGitRoot !== sessionCwd ? detectedGitRoot : undefined);
+    const repository = typeof context.repository === "string"
+        ? normalizeRepositoryLabel(context.repository)
+        : undefined;
+
     return {
-        cwd: context.cwd,
-        ...(context.gitRoot !== undefined ? { gitRoot: context.gitRoot } : {}),
-        ...(context.repository !== undefined ? { repository: context.repository } : {}),
+        sessionCwd,
+        workspaceRoot,
+        ...(gitRoot !== undefined ? { gitRoot } : {}),
+        ...(repository !== undefined ? { repository } : {}),
         ...(context.branch !== undefined ? { branch: context.branch } : {}),
     };
+}
+
+function normalizeRepositoryLabel(repository: string): string {
+    const trimmed = repository.trim();
+    const withoutGitSuffix = trimmed.replace(/\.git$/i, "");
+    const githubMatch = withoutGitSuffix.match(/github\.com[/:]([^/]+\/[^/]+)$/i);
+    if (githubMatch?.[1] !== undefined) {
+        return githubMatch[1];
+    }
+
+    const genericMatch = withoutGitSuffix.match(/[:/]([^/]+\/[^/]+)$/);
+    if (genericMatch?.[1] !== undefined) {
+        return genericMatch[1];
+    }
+
+    return trimmed;
 }
 
 function adaptSessionInfoFromMetadata(metadata: SessionMetadata): SessionInfo {
@@ -140,7 +184,7 @@ function normalizeReasoningEfforts(sdkModel: SDKModelInfo): {
         }
     }
 
-    // 2. Support exists but no list — conservative: level list unknown
+    // 2. Support exists but no list — keep level list unknown.
     if (capabilitySupport) {
         const result: {
             supportsReasoningEffort: boolean;
@@ -281,6 +325,65 @@ function normalizeRuntimeMode(
     return fallback;
 }
 
+type SDKToolExecutionCompleteData = Extract<SessionEvent, { type: "tool.execution_complete" }>["data"];
+
+function extractToolExitCode(data: SDKToolExecutionCompleteData): number | undefined {
+    for (const content of data.result?.contents ?? []) {
+        if (content.type === "terminal" && typeof content.exitCode === "number") {
+            return content.exitCode;
+        }
+    }
+
+    return undefined;
+}
+
+function readToolTelemetryCount(
+    toolTelemetry: Record<string, unknown> | undefined,
+    key: string
+): number | undefined {
+    const value = toolTelemetry?.[key];
+    return typeof value === "number" ? value : undefined;
+}
+
+function isSearchLikeToolName(toolName: string): boolean {
+    const normalized = toolName.toLowerCase();
+    return normalized === "rg"
+        || normalized.includes("grep")
+        || normalized.includes("search")
+        || normalized.includes("find")
+        || normalized.includes("glob");
+}
+
+function normalizeToolCompletionStatus(params: {
+    toolName: string;
+    success: boolean;
+    errorMessage?: string;
+    exitCode?: number;
+    toolTelemetry?: Record<string, unknown>;
+}): Exclude<ToolExecutionStatus, "running"> {
+    if (params.success) {
+        return "completed";
+    }
+
+    const matchCount = readToolTelemetryCount(params.toolTelemetry, "matchCount")
+        ?? readToolTelemetryCount(params.toolTelemetry, "matches")
+        ?? readToolTelemetryCount(params.toolTelemetry, "resultCount");
+    const errorText = params.errorMessage?.toLowerCase() ?? "";
+
+    if (
+        isSearchLikeToolName(params.toolName)
+        && (params.exitCode === 1
+            || matchCount === 0
+            || errorText.includes("no matches")
+            || errorText.includes("0 results")
+            || errorText.includes("not found"))
+    ) {
+        return "no_results";
+    }
+
+    return "failed";
+}
+
 async function applySDKSessionState(
     sdkSession: CopilotSession,
     stateRef: SessionStateRef
@@ -380,6 +483,7 @@ function normalizeSessionHistory(
 
             case "tool.execution_start": {
                 const nextIndex = items.length;
+                const argumentsText = formatToolArgumentsForHistory(event.data.arguments);
                 toolIndexByRequestId.set(event.data.toolCallId, nextIndex);
                 items.push({
                     id: event.id,
@@ -388,9 +492,7 @@ function normalizeSessionHistory(
                     toolName: event.data.toolName,
                     requestId: event.data.toolCallId,
                     status: "running",
-                    ...(formatToolArgumentsForHistory(event.data.arguments) !== undefined
-                        ? { argumentsText: formatToolArgumentsForHistory(event.data.arguments) }
-                        : {}),
+                    ...(argumentsText !== undefined ? { argumentsText } : {}),
                 });
                 break;
             }
@@ -429,6 +531,24 @@ function normalizeSessionHistory(
 
             case "tool.execution_complete": {
                 const existingIndex = toolIndexByRequestId.get(event.data.toolCallId);
+                const resultContent = event.data.result?.detailedContent ?? event.data.result?.content;
+                const errorMessage = event.data.error?.message;
+                const exitCode = extractToolExitCode(event.data);
+                const toolName =
+                    existingIndex !== undefined
+                        && items[existingIndex] !== undefined
+                        && items[existingIndex]?.type === "tool"
+                        ? items[existingIndex].toolName
+                        : "Tool";
+                const status = normalizeToolCompletionStatus({
+                    toolName,
+                    success: event.data.success,
+                    ...(errorMessage !== undefined ? { errorMessage } : {}),
+                    ...(exitCode !== undefined ? { exitCode } : {}),
+                    ...(event.data.toolTelemetry !== undefined
+                        ? { toolTelemetry: event.data.toolTelemetry }
+                        : {}),
+                });
 
                 if (existingIndex !== undefined) {
                     const existingItem = items[existingIndex];
@@ -437,7 +557,16 @@ function normalizeSessionHistory(
                         items[existingIndex] = {
                             ...existingItem,
                             timestamp,
-                            status: event.data.success ? "completed" : "failed",
+                            status,
+                            ...(resultContent !== undefined && resultContent.trim().length > 0
+                                ? {
+                                    partialOutput: existingItem.partialOutput !== undefined
+                                        && existingItem.partialOutput.length > 0
+                                        ? existingItem.partialOutput
+                                        : resultContent,
+                                }
+                                : {}),
+                            ...(errorMessage !== undefined ? { errorMessage } : {}),
                         };
                         break;
                     }
@@ -447,9 +576,13 @@ function normalizeSessionHistory(
                     id: event.id,
                     timestamp,
                     type: "tool",
-                    toolName: "Tool",
+                    toolName,
                     requestId: event.data.toolCallId,
-                    status: event.data.success ? "completed" : "failed",
+                    status,
+                    ...(resultContent !== undefined && resultContent.trim().length > 0
+                        ? { partialOutput: resultContent }
+                        : {}),
+                    ...(errorMessage !== undefined ? { errorMessage } : {}),
                 });
                 break;
             }
@@ -512,7 +645,7 @@ function adaptPermissionRequest(req: SDKPermissionRequest): AdaptedPermissionReq
 }
 
 export function createCopilotAdapter(): AdaptedCopilotClient {
-    const client = new CopilotClient();
+    const client = new CopilotClient({ cwd: WORKSPACE_ROOT });
     const sessions = new Map<string, SessionRecord>();
     let startPromise: Promise<void> | null = null;
 
@@ -541,7 +674,11 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             createdAt: now,
             lastActiveAt: now,
             status: "active",
-            context: { cwd: process.cwd() },
+            context: {
+                sessionCwd: PROCESS_CWD,
+                workspaceRoot: WORKSPACE_ROOT,
+                ...(WORKSPACE_ROOT !== PROCESS_CWD ? { gitRoot: WORKSPACE_ROOT } : {}),
+            },
         };
 
         const unsubscribes: Array<() => void> = [];
@@ -618,11 +755,11 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                 ) => void
             ): void {
                 const unsub = sdkSession.on("tool.execution_start", (event) => {
-                    handler(event.data.toolName, event.data.toolCallId, {
-                        ...(normalizeToolArguments(event.data.arguments) !== undefined
-                            ? { arguments: normalizeToolArguments(event.data.arguments) }
-                            : {}),
-                    });
+                    const argumentsPayload = normalizeToolArguments(event.data.arguments);
+                    const details = argumentsPayload !== undefined
+                        ? { arguments: argumentsPayload }
+                        : undefined;
+                    handler(event.data.toolName, event.data.toolCallId, details);
                 });
                 unsubscribes.push(unsub);
             },
@@ -641,12 +778,31 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                 unsubscribes.push(unsub);
             },
 
-            onToolComplete(handler: (toolName: string, requestId: string, success: boolean, resultContent?: string) => void): void {
+            onToolComplete(
+                handler: (
+                    toolName: string,
+                    requestId: string,
+                    success: boolean,
+                    details?: AdaptedToolCompletionDetails
+                ) => void
+            ): void {
                 const unsub = sdkSession.on("tool.execution_complete", (event) => {
-                    // tool.execution_complete event has no toolName — toolCallId is used
-                    // Prefer detailedContent (full content for UI) over content (truncated for LLM)
+                    const details: AdaptedToolCompletionDetails = {};
                     const resultContent = event.data.result?.detailedContent ?? event.data.result?.content;
-                    handler("", event.data.toolCallId, event.data.success, resultContent);
+                    if (resultContent !== undefined) {
+                        details.resultContent = resultContent;
+                    }
+                    if (event.data.error?.message !== undefined) {
+                        details.errorMessage = event.data.error.message;
+                    }
+                    const exitCode = extractToolExitCode(event.data);
+                    if (exitCode !== undefined) {
+                        details.exitCode = exitCode;
+                    }
+                    if (event.data.toolTelemetry !== undefined) {
+                        details.toolTelemetry = event.data.toolTelemetry;
+                    }
+                    handler("", event.data.toolCallId, event.data.success, details);
                 });
                 unsubscribes.push(unsub);
             },
@@ -676,6 +832,43 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             onIntent(handler: (intent: string) => void): void {
                 const unsub = sdkSession.on("assistant.intent", (event) => {
                     handler(event.data.intent);
+                });
+                unsubscribes.push(unsub);
+            },
+
+            onUsage(handler: (usage: {
+                tokenLimit: number;
+                currentTokens: number;
+                systemTokens?: number;
+                conversationTokens?: number;
+                toolDefinitionsTokens?: number;
+                messagesLength?: number;
+            }) => void): void {
+                const unsub = sdkSession.on("session.usage_info", (event) => {
+                    const payload: {
+                        tokenLimit: number;
+                        currentTokens: number;
+                        systemTokens?: number;
+                        conversationTokens?: number;
+                        toolDefinitionsTokens?: number;
+                        messagesLength?: number;
+                    } = {
+                        tokenLimit: event.data.tokenLimit,
+                        currentTokens: event.data.currentTokens,
+                    };
+                    if (event.data.systemTokens !== undefined) {
+                        payload.systemTokens = event.data.systemTokens;
+                    }
+                    if (event.data.conversationTokens !== undefined) {
+                        payload.conversationTokens = event.data.conversationTokens;
+                    }
+                    if (event.data.toolDefinitionsTokens !== undefined) {
+                        payload.toolDefinitionsTokens = event.data.toolDefinitionsTokens;
+                    }
+                    if (event.data.messagesLength !== undefined) {
+                        payload.messagesLength = event.data.messagesLength;
+                    }
+                    handler(payload);
                 });
                 unsubscribes.push(unsub);
             },
@@ -811,6 +1004,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             const sdkConfig: SDKSessionConfig = {
                 model: config.model,
                 streaming: config.streaming,
+                workingDirectory: PROCESS_CWD,
                 onPermissionRequest: createSDKPermissionHandler(permissionProxy),
                 onUserInputRequest: createSDKUserInputHandler(inputProxy),
                 customAgents: [ASK_AGENT_CONFIG],
@@ -860,6 +1054,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             const resumeConfig: ResumeSessionConfig = {
                 onPermissionRequest: createSDKPermissionHandler(permissionProxy),
                 onUserInputRequest: createSDKUserInputHandler(inputProxy),
+                workingDirectory: metadata?.context?.cwd ?? PROCESS_CWD,
                 customAgents: [ASK_AGENT_CONFIG],
                 hooks: buildSessionHooks(stateRef),
             };

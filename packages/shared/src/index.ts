@@ -4,12 +4,14 @@ export type {
     AgentMode,
     PermissionLevel,
     RuntimeMode,
+    TransportMode,
     SessionStatePayload,
     UserInputRequestPayload,
     PlanExitRequestPayload,
     SessionMessageAttachment,
     SessionMessageInput,
     ToolArguments,
+    ToolExecutionStatus,
     SessionContext,
     WorkspaceTreeNode,
     GitFileChange,
@@ -21,6 +23,8 @@ export type {
     WorkspaceGitSummaryRequestMessage,
     WorkspaceGitSummaryMessage,
     WorkspaceOperationRequestMessage,
+    WorkspaceResolveRequestMessage,
+    WorkspaceResolveResponseMessage,
     WorkspaceOperationResultPayload,
     WorkspacePullResultMessage,
     WorkspacePushResultMessage,
@@ -39,7 +43,7 @@ export type {
     QRPayload,
     ServerMessage,
     ClientMessage,
-    PairingSuccessMessage,
+    AuthAuthenticatedMessage,
     SessionCreatedMessage,
     SessionResumedMessage,
     SessionIdleMessage,
@@ -58,15 +62,17 @@ export type {
     ModelsListMessage,
     ErrorMessage,
     ConnectionStatusMessage,
-    TokenRefreshMessage,
-    ReconnectReadyMessage,
+    AuthSessionTokenMessage,
     CapabilitiesStateMessage,
     SessionStateMessage,
     SessionErrorMessage,
     SessionTitleChangedMessage,
     AssistantIntentMessage,
+    SessionUsagePayload,
+    SessionUsageMessage,
     PlanExitRequestMessage,
     AuthPairMessage,
+    AuthResumeMessage,
     SessionCreateMessage,
     SessionResumeMessage,
     SessionListRequestMessage,
@@ -79,28 +85,28 @@ export type {
     SessionModeUpdateMessage,
     PermissionLevelUpdateMessage,
     ModelsRequestMessage,
-    ReconnectMessage,
     CapabilitiesRequestMessage,
     SkillInfo,
     SkillsListRequestMessage,
     SkillsListResponseMessage,
-} from "./protocol";
+} from "./protocol.js";
 
 export type {
     AdaptedPermissionRequest,
     AdaptedToolStartDetails,
+    AdaptedToolCompletionDetails,
     AdaptedUserInputRequest,
     AdaptedSessionState,
     AdaptedPlanExitRequest,
     AdaptedCopilotSession,
     AdaptedCopilotClient,
-} from "./adapter";
+} from "./adapter.js";
 
 export {
     serverMessageSchema,
     clientMessageSchema,
     qrPayloadSchema,
-} from "./schemas";
+} from "./schemas.js";
 
 export {
     BridgeError,
@@ -111,14 +117,16 @@ export {
     SDKError,
     RateLimitError,
     ReplayAttackError,
-} from "./errors";
+} from "./errors.js";
 
 export {
     DEFAULT_WS_PORT,
     PAIRING_TOKEN_BYTES,
     PAIRING_TOKEN_TTL_MS,
-    JWT_TTL_SECONDS,
-    JWT_REFRESH_THRESHOLD_MS,
+    AUTH_FRAME_TIMEOUT_MS,
+    DEVICE_CREDENTIAL_TTL_SECONDS,
+    SESSION_TOKEN_TTL_SECONDS,
+    SESSION_TOKEN_REFRESH_THRESHOLD_MS,
     JWT_SECRET_ROTATION_MS,
     JWT_SECRET_GRACE_MS,
     HEARTBEAT_INTERVAL_MS,
@@ -134,7 +142,8 @@ export {
     CERT_FILENAME,
     KEY_FILENAME,
     JWT_SECRET_FILENAME,
+    COMPANION_ID_FILENAME,
     QR_PAYLOAD_VERSION,
     PROTOCOL_VERSION,
     MODEL_UNKNOWN,
-} from "./constants";
+} from "./constants.js";

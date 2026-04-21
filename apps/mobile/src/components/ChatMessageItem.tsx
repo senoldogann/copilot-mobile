@@ -1,6 +1,6 @@
 // Sohbet mesaj öğesi — GitHub Copilot mobil tasarım diliyle markdown render
 
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo } from "react";
 import {
     View,
     Text,
@@ -16,9 +16,6 @@ import { ThinkingBubble } from "./ThinkingBubble";
 import { ToolCard } from "./ToolCard";
 import { FileContentViewer } from "./FileContentViewer";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
-import { useSessionStore } from "../stores/session-store";
-import { requestWorkspaceFile, onWorkspaceFileResponse } from "../services/bridge";
-
 type Props = {
     item: ChatItem;
 };
@@ -73,13 +70,13 @@ function parseInlineMarkdown(text: string): ReadonlyArray<MarkdownSegment> {
 
 // Detect file paths in plain text
 function isFilePath(text: string): boolean {
-    return /^[a-zA-Z0-9_\-./\\]+\.[a-zA-Z]{1,10}(:\d+)?$/.test(text) &&
+    return /^[a-zA-Z0-9_\-./\\…]+\.[a-zA-Z]{1,10}(:\d+)?$/.test(text) &&
         text.includes(".");
 }
 
 function parseFilePaths(text: string): ReadonlyArray<MarkdownSegment> {
-    // Match file paths like src/foo/bar.ts, ./file.tsx, packages/shared/index.ts
-    const fileRegex = /(?:^|\s)((?:\.\/|\.\.\/|[a-zA-Z0-9_\-]+\/)*[a-zA-Z0-9_\-]+\.[a-zA-Z]{1,10}(?::\d+(?:-\d+)?)?)(?=\s|$|[,.)}\]])/g;
+    // Match file paths like src/foo/bar.ts, ./file.tsx, .../foo.ts, packages/shared/index.ts
+    const fileRegex = /(?:^|\s)((?:(?:\.{3}|…)\/|\.\/|\.\.\/|[a-zA-Z0-9_\-]+\/)*[a-zA-Z0-9_\-]+\.[a-zA-Z]{1,10}(?::\d+(?:-\d+)?)?)(?=\s|$|[,.)}\]])/g;
     const segments: Array<MarkdownSegment> = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
@@ -325,7 +322,6 @@ function MarkdownContent({
                                     { paddingLeft: 16 + block.indent * 16 },
                                 ]}
                             >
-                                <Text style={mdStyles.bullet}>•</Text>
                                 <View style={mdStyles.listContent}>
                                     <InlineMarkdown segments={block.segments} />
                                 </View>
@@ -401,9 +397,11 @@ function MarkdownContent({
 function UserBubble({
     content,
     attachments,
+    deliveryState,
 }: {
     content: string;
     attachments?: ReadonlyArray<SessionMessageAttachment>;
+    deliveryState: Extract<ChatItem, { type: "user" }>["deliveryState"];
 }) {
     return (
         <View style={styles.userRow}>
@@ -426,6 +424,12 @@ function UserBubble({
                     {content}
                 </Text>
             </View>
+            {deliveryState === "pending" && (
+                <Text style={styles.userMetaText}>Sending…</Text>
+            )}
+            {deliveryState === "failed" && (
+                <Text style={styles.userErrorText}>Failed to send</Text>
+            )}
         </View>
     );
 }
@@ -458,6 +462,7 @@ function ChatMessageItemComponent({ item }: Props) {
                         return (
                             <UserBubble
                                 content={item.content}
+                                deliveryState={item.deliveryState}
                                 {...(item.attachments !== undefined ? { attachments: item.attachments } : {})}
                             />
                         );
@@ -565,12 +570,6 @@ const mdStyles = StyleSheet.create({
         alignItems: "flex-start",
         gap: spacing.sm,
         marginVertical: 2,
-    },
-    bullet: {
-        fontSize: fontSize.base,
-        color: colors.textTertiary,
-        lineHeight: 22,
-        width: 12,
     },
     numberedBullet: {
         fontSize: fontSize.base,
@@ -700,6 +699,19 @@ const styles = StyleSheet.create({
         fontSize: fontSize.base,
         lineHeight: 22,
         color: colors.textPrimary,
+    },
+    userMetaText: {
+        marginTop: spacing.xs,
+        marginHorizontal: spacing.sm,
+        fontSize: fontSize.xs,
+        color: colors.textTertiary,
+    },
+    userErrorText: {
+        marginTop: spacing.xs,
+        marginHorizontal: spacing.sm,
+        fontSize: fontSize.xs,
+        color: colors.error,
+        fontWeight: "600",
     },
 
     // Asistan mesajı

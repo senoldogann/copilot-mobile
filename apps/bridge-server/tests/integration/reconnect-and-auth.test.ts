@@ -64,6 +64,12 @@ function wait(delayMs: number): Promise<void> {
     });
 }
 
+async function fetchManagement(port: number, path: string): Promise<Response> {
+    return fetch(`http://127.0.0.1:${port}${path}`, {
+        signal: AbortSignal.timeout(TEST_TIMEOUT_MS),
+    });
+}
+
 function makeClientMessage(
     type: string,
     payload: Record<string, unknown>
@@ -78,11 +84,9 @@ function makeClientMessage(
     };
 }
 
-function createWSClient(port: number, jwtToken?: string): Promise<WSClient> {
+function createWSClient(port: number): Promise<WSClient> {
     return new Promise((resolve, reject) => {
-        const url = jwtToken !== undefined
-            ? `ws://127.0.0.1:${port}?token=${encodeURIComponent(jwtToken)}`
-            : `ws://127.0.0.1:${port}`;
+        const url = `ws://127.0.0.1:${port}`;
         const ws = new WebSocket(url, { rejectUnauthorized: false });
         const messages: ServerMessage[] = [];
         const waiters: Array<{
@@ -455,13 +459,67 @@ describe("bridge reconnect and auth integration", () => {
         resetSeq();
     });
 
+    it("sanitizes client validation errors", async () => {
+        const client = await createWSClient(TEST_PORT);
+
+        try {
+            client.send(makeClientMessage("session.create", {
+                config: {
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+
+            const errorMessage = await client.waitForMessage("error");
+            if (errorMessage.type !== "error") {
+                throw new Error("Expected error message");
+            }
+
+            assert.equal(errorMessage.payload.code, "VALIDATION_ERROR");
+            assert.equal(errorMessage.payload.message, "Invalid message payload");
+            assert.equal(errorMessage.payload.message.includes("Required"), false);
+        } finally {
+            await client.close();
+        }
+    });
+
+    it("serves the localhost dashboard and status endpoints", async () => {
+        const statusResponse = await fetchManagement(TEST_PORT, "/__copilot_mobile/status");
+        assert.equal(statusResponse.status, 200);
+
+        const statusPayload = await statusResponse.json() as {
+            status: {
+                port: number;
+                publicUrl: string;
+            };
+        };
+        assert.equal(statusPayload.status.port, TEST_PORT);
+        assert.equal(statusPayload.status.publicUrl, `ws://127.0.0.1:${TEST_PORT}`);
+
+        const dashboardResponse = await fetchManagement(TEST_PORT, "/__copilot_mobile/dashboard");
+        assert.equal(dashboardResponse.status, 200);
+        assert.equal(
+            dashboardResponse.headers.get("content-type")?.includes("text/html"),
+            true
+        );
+
+        const html = await dashboardResponse.text();
+        assert.equal(html.includes("Companion Dashboard"), true);
+        assert.equal(html.includes("/__copilot_mobile/status"), true);
+        assert.equal(html.includes("/__copilot_mobile/qr"), true);
+    });
+
     it("keeps the authenticated client active until a replacement authenticates", async () => {
         const token = generatePairingToken();
         const clientA = await createWSClient(TEST_PORT);
 
         try {
-            clientA.send(makeClientMessage("auth.pair", { pairingToken: token }));
-            await clientA.waitForMessage("pairing.success");
+            clientA.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await clientA.waitForMessage("auth.authenticated");
 
             clientA.send(makeClientMessage("session.create", {
                 config: {
@@ -496,9 +554,12 @@ describe("bridge reconnect and auth integration", () => {
         const clientA = await createWSClient(TEST_PORT);
 
         try {
-            clientA.send(makeClientMessage("auth.pair", { pairingToken: token }));
-            const pairingMessage = await clientA.waitForMessage("pairing.success");
-            assert.equal(pairingMessage.type, "pairing.success");
+            clientA.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            const pairingMessage = await clientA.waitForMessage("auth.authenticated");
+            assert.equal(pairingMessage.type, "auth.authenticated");
 
             clientA.send(makeClientMessage("session.create", {
                 config: {
@@ -518,8 +579,15 @@ describe("bridge reconnect and auth integration", () => {
             await clientA.waitForMessage("permission.request");
             await clientA.close();
 
-            const clientB = await createWSClient(TEST_PORT, pairingMessage.payload.jwt);
+            const clientB = await createWSClient(TEST_PORT);
             try {
+                clientB.send(makeClientMessage("auth.resume", {
+                    deviceCredential: pairingMessage.payload.deviceCredential,
+                    sessionToken: pairingMessage.payload.sessionToken,
+                    lastSeenSeq: pairingMessage.seq,
+                    transportMode: "direct",
+                }));
+                await clientB.waitForMessage("auth.authenticated");
                 clientB.send(makeClientMessage("session.resume", { sessionId: session.id }));
                 const replayedPrompt = await clientB.waitForMessage("permission.request");
                 assert.equal(replayedPrompt.type, "permission.request");
@@ -543,8 +611,11 @@ describe("bridge reconnect and auth integration", () => {
         const client = await createWSClient(TEST_PORT);
 
         try {
-            client.send(makeClientMessage("auth.pair", { pairingToken: token }));
-            await client.waitForMessage("pairing.success");
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
 
             client.send(makeClientMessage("session.create", {
                 config: {
@@ -604,7 +675,8 @@ describe("workspace explorer integration", () => {
         workspaceRoot = fixture.root;
         session = new FakeSession();
         session.setContext({
-            cwd: workspaceRoot,
+            sessionCwd: workspaceRoot,
+            workspaceRoot,
             gitRoot: workspaceRoot,
             repository: "example/copilot-mobile",
             branch: "main",
@@ -627,8 +699,11 @@ describe("workspace explorer integration", () => {
         const client = await createWSClient(WORKSPACE_TEST_PORT);
 
         try {
-            client.send(makeClientMessage("auth.pair", { pairingToken: token }));
-            await client.waitForMessage("pairing.success");
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
 
             client.send(makeClientMessage("session.create", {
                 config: {
@@ -645,7 +720,7 @@ describe("workspace explorer integration", () => {
 
             client.send(makeClientMessage("workspace.tree.request", {
                 sessionId: session.id,
-                path: ".",
+                workspaceRelativePath: ".",
                 maxDepth: 2,
             }));
             const treeMsg = await client.waitForMessage("workspace.tree");
@@ -656,9 +731,10 @@ describe("workspace explorer integration", () => {
             }
 
             assert.equal(parsedTree.payload.sessionId, session.id);
-            assert.equal(parsedTree.payload.context.cwd, workspaceRoot);
-            assert.equal(parsedTree.payload.rootPath, workspaceRoot);
-            assert.equal(parsedTree.payload.requestedPath, ".");
+            assert.equal(parsedTree.payload.context.sessionCwd, workspaceRoot);
+            assert.equal(parsedTree.payload.context.workspaceRoot, workspaceRoot);
+            assert.equal(parsedTree.payload.workspaceRoot, workspaceRoot);
+            assert.equal(parsedTree.payload.requestedWorkspaceRelativePath, ".");
             assert.equal(parsedTree.payload.tree.type, "directory");
             assert.equal(parsedTree.payload.truncated, false);
 
@@ -676,8 +752,11 @@ describe("workspace explorer integration", () => {
         const client = await createWSClient(WORKSPACE_TEST_PORT);
 
         try {
-            client.send(makeClientMessage("auth.pair", { pairingToken: token }));
-            await client.waitForMessage("pairing.success");
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
 
             client.send(makeClientMessage("session.create", {
                 config: {
@@ -699,7 +778,7 @@ describe("workspace explorer integration", () => {
             }
 
             assert.equal(gitMsg.payload.sessionId, session.id);
-            assert.equal(gitMsg.payload.rootPath, workspaceRoot);
+            assert.equal(gitMsg.payload.workspaceRoot, workspaceRoot);
             assert.equal(gitMsg.payload.gitRoot, workspaceRoot);
             assert.equal(gitMsg.payload.branch, "main");
             assert.equal(gitMsg.payload.repository, "example/copilot-mobile");
@@ -736,11 +815,102 @@ describe("workspace explorer integration", () => {
         }
     });
 
+    it("uses the repository root for tree, file, and diff requests when cwd is a subdirectory", async () => {
+        const nestedFilePath = join("apps", "bridge-server", "src", "copilot", "session-manager.ts");
+        await mkdir(join(workspaceRoot, "apps", "bridge-server", "src", "copilot"), { recursive: true });
+        await writeFile(join(workspaceRoot, nestedFilePath), "export const nested = true;\n");
+        await runGit(workspaceRoot, ["add", nestedFilePath]);
+        await runGit(workspaceRoot, ["commit", "-m", "add nested workspace file"]);
+        await appendFile(join(workspaceRoot, nestedFilePath), "export const changed = true;\n");
+
+        session.setContext({
+            sessionCwd: join(workspaceRoot, "apps", "bridge-server"),
+            workspaceRoot,
+            gitRoot: workspaceRoot,
+            repository: "example/copilot-mobile",
+            branch: "main",
+        });
+
+        const token = generatePairingToken();
+        const client = await createWSClient(WORKSPACE_TEST_PORT);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await client.waitForMessage("session.created");
+
+            client.send(makeClientMessage("workspace.tree.request", {
+                sessionId: session.id,
+                workspaceRelativePath: ".",
+                maxDepth: 2,
+            }));
+            const treeMsg = await client.waitForMessage("workspace.tree");
+            if (treeMsg.type !== "workspace.tree") {
+                throw new Error("Expected workspace.tree");
+            }
+
+            assert.equal(treeMsg.payload.workspaceRoot, workspaceRoot);
+            assert.equal(treeMsg.payload.tree.path, ".");
+            assert.ok((treeMsg.payload.tree.children?.map((child) => child.name) ?? []).includes("apps"));
+
+            client.send(makeClientMessage("workspace.git.request", {
+                sessionId: session.id,
+                commitLimit: 5,
+            }));
+            const gitMsg = await client.waitForMessage("workspace.git.summary");
+            if (gitMsg.type !== "workspace.git.summary") {
+                throw new Error("Expected workspace.git.summary");
+            }
+
+            assert.equal(gitMsg.payload.workspaceRoot, workspaceRoot);
+            assert.ok(gitMsg.payload.uncommittedChanges.some((change) => change.path === nestedFilePath));
+
+            client.send(makeClientMessage("workspace.file.request", {
+                sessionId: session.id,
+                workspaceRelativePath: nestedFilePath,
+            }));
+            const fileMsg = await client.waitForMessage("workspace.file.response");
+            if (fileMsg.type !== "workspace.file.response") {
+                throw new Error("Expected workspace.file.response");
+            }
+
+            assert.equal(fileMsg.payload.error, undefined);
+            assert.match(fileMsg.payload.content, /changed/);
+
+            client.send(makeClientMessage("workspace.diff.request", {
+                sessionId: session.id,
+                workspaceRelativePath: nestedFilePath,
+            }));
+            const diffMsg = await client.waitForMessage("workspace.diff.response");
+            if (diffMsg.type !== "workspace.diff.response") {
+                throw new Error("Expected workspace.diff.response");
+            }
+
+            assert.equal(diffMsg.payload.error, undefined);
+            assert.match(diffMsg.payload.diff, /changed/);
+        } finally {
+            await client.close();
+        }
+    });
+
     it("caps oversized workspace tree and git summary requests", async () => {
         const fixture = await createWorkspaceFixture({ commitCount: 55, deepDepth: 7 });
         const cappedSession = new FakeSession();
         cappedSession.setContext({
-            cwd: fixture.root,
+            sessionCwd: fixture.root,
+            workspaceRoot: fixture.root,
             gitRoot: fixture.root,
             repository: "example/copilot-mobile",
             branch: "main",
@@ -754,8 +924,11 @@ describe("workspace explorer integration", () => {
         const client = await createWSClient(WORKSPACE_LIMIT_PORT);
 
         try {
-            client.send(makeClientMessage("auth.pair", { pairingToken: token }));
-            await client.waitForMessage("pairing.success");
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
 
             client.send(makeClientMessage("session.create", {
                 config: {
@@ -798,7 +971,8 @@ describe("workspace explorer integration", () => {
         const fixture = await createPlainWorkspaceFixture();
         const plainSession = new FakeSession();
         plainSession.setContext({
-            cwd: fixture.root,
+            sessionCwd: fixture.root,
+            workspaceRoot: fixture.root,
         });
 
         process.env["BRIDGE_PORT"] = String(WORKSPACE_LIMIT_PORT);
@@ -809,8 +983,11 @@ describe("workspace explorer integration", () => {
         const client = await createWSClient(WORKSPACE_LIMIT_PORT);
 
         try {
-            client.send(makeClientMessage("auth.pair", { pairingToken: token }));
-            await client.waitForMessage("pairing.success");
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
 
             client.send(makeClientMessage("session.create", {
                 config: {
@@ -831,7 +1008,7 @@ describe("workspace explorer integration", () => {
                 throw new Error("Expected workspace.git.summary");
             }
 
-            assert.equal(gitMsg.payload.rootPath, fixture.root);
+            assert.equal(gitMsg.payload.workspaceRoot, fixture.root);
             assert.equal(gitMsg.payload.gitRoot, null);
             assert.deepEqual(gitMsg.payload.uncommittedChanges, []);
             assert.deepEqual(gitMsg.payload.recentCommits, []);

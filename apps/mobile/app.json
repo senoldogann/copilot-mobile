@@ -16,6 +16,10 @@
             "infoPlist": {
                 "NSCameraUsageDescription": "Camera is required to connect to the bridge server via QR code",
                 "NSLocalNetworkUsageDescription": "Local network access is required to connect to your Copilot Bridge running on your computer",
+                "NSBonjourServices": [
+                    "_expo._tcp",
+                    "_react-native._tcp"
+                ],
                 "NSAppTransportSecurity": {
                     "NSAllowsLocalNetworking": true
                 }

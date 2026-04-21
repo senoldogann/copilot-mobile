@@ -20,6 +20,7 @@ type Props = {
     onClose: () => void;
     /** Feather icon name — if provided, renders an SVG icon */
     iconName?: FeatherName;
+    iconNode?: React.ReactNode;
     /** Fallback text icon (used if iconName not provided) */
     icon?: string;
     title: string;
@@ -34,6 +35,7 @@ export function BottomSheet({
     visible,
     onClose,
     iconName,
+    iconNode,
     icon,
     title,
     subtitle,
@@ -62,7 +64,11 @@ export function BottomSheet({
                     {/* Başlık */}
                     <View style={styles.header}>
                         <View style={styles.headerLeft}>
-                            {iconName !== undefined ? (
+                            {iconNode !== undefined ? (
+                                <View style={styles.iconBadge}>
+                                    {iconNode}
+                                </View>
+                            ) : iconName !== undefined ? (
                                 <View style={styles.iconBadge}>
                                     <Feather name={iconName} size={14} color={colors.textSecondary} />
                                 </View>

@@ -42,9 +42,13 @@ export type SessionMessageInput = {
 };
 
 export type ToolArguments = Record<string, unknown>;
+export type ToolExecutionStatus = "running" | "completed" | "failed" | "no_results";
+
+export type TransportMode = "direct" | "relay";
 
 export type SessionContext = {
-    cwd: string;
+    sessionCwd: string;
+    workspaceRoot: string;
     gitRoot?: string | undefined;
     repository?: string | undefined;
     branch?: string | undefined;
@@ -104,7 +108,7 @@ export type WorkspaceTreeRequestMessage = BaseBridgeMessage & {
     type: "workspace.tree.request";
     payload: {
         sessionId: string;
-        path?: string;
+        workspaceRelativePath?: string;
         maxDepth?: number;
     };
 };
@@ -114,8 +118,8 @@ export type WorkspaceTreeMessage = BaseBridgeMessage & {
     payload: {
         sessionId: string;
         context: SessionContext;
-        rootPath: string;
-        requestedPath: string;
+        workspaceRoot: string;
+        requestedWorkspaceRelativePath: string;
         tree: WorkspaceTreeNode;
         truncated: boolean;
     };
@@ -134,7 +138,7 @@ export type WorkspaceGitSummaryMessage = BaseBridgeMessage & {
     payload: {
         sessionId: string;
         context: SessionContext;
-        rootPath: string;
+        workspaceRoot: string;
         gitRoot: string | null;
         repository?: string;
         branch?: string;
@@ -155,8 +159,27 @@ export type WorkspaceFileRequestMessage = BaseBridgeMessage & {
     type: "workspace.file.request";
     payload: {
         sessionId: string;
-        path: string;
+        workspaceRelativePath: string;
         maxBytes?: number;
+    };
+};
+
+export type WorkspaceResolveRequestMessage = BaseBridgeMessage & {
+    type: "workspace.resolve.request";
+    payload: {
+        sessionId: string;
+        rawPath: string;
+    };
+};
+
+export type WorkspaceResolveResponseMessage = BaseBridgeMessage & {
+    type: "workspace.resolve.response";
+    payload: {
+        sessionId: string;
+        rawPath: string;
+        resolvedWorkspaceRelativePath?: string;
+        matches?: ReadonlyArray<string>;
+        error?: string;
     };
 };
 
@@ -164,7 +187,7 @@ export type WorkspaceFileResponseMessage = BaseBridgeMessage & {
     type: "workspace.file.response";
     payload: {
         sessionId: string;
-        path: string;
+        workspaceRelativePath: string;
         content: string;
         mimeType: string;
         truncated: boolean;
@@ -176,7 +199,7 @@ export type WorkspaceDiffRequestMessage = BaseBridgeMessage & {
     type: "workspace.diff.request";
     payload: {
         sessionId: string;
-        path: string;
+        workspaceRelativePath: string;
     };
 };
 
@@ -184,7 +207,7 @@ export type WorkspaceDiffResponseMessage = BaseBridgeMessage & {
     type: "workspace.diff.response";
     payload: {
         sessionId: string;
-        path: string;
+        workspaceRelativePath: string;
         diff: string;
         error?: string;
     };
@@ -238,10 +261,11 @@ export type SessionHistoryItem =
         type: "tool";
         toolName: string;
         requestId: string;
-        status: "running" | "completed" | "failed";
+        status: ToolExecutionStatus;
         argumentsText?: string;
         progressMessage?: string;
         partialOutput?: string;
+        errorMessage?: string;
     };
 
 // --- Permission Types ---
@@ -325,6 +349,9 @@ export type SessionStatePayload = {
     agentMode: AgentMode;
     permissionLevel: PermissionLevel;
     runtimeMode: RuntimeMode;
+    // True while an SDK turn is in flight. Emitted by the bridge so that reconnecting
+    // clients can restore the "agent is working" indicator after a restart.
+    busy?: boolean;
 };
 
 export type UserInputRequestPayload = {
@@ -363,9 +390,18 @@ export type ErrorPayload = {
 
 // --- Server → Client Messages (Discriminated Union) ---
 
-export type PairingSuccessMessage = BaseBridgeMessage & {
-    type: "pairing.success";
-    payload: { jwt: string; deviceId: string; certFingerprint: string | null };
+export type AuthAuthenticatedMessage = BaseBridgeMessage & {
+    type: "auth.authenticated";
+    payload: {
+        authMethod: "pair" | "resume";
+        deviceId: string;
+        deviceCredential: string;
+        sessionToken: string;
+        sessionTokenExpiresAt: number;
+        transportMode: TransportMode;
+        certFingerprint: string | null;
+        replayedCount: number;
+    };
 };
 
 export type SessionCreatedMessage = BaseBridgeMessage & {
@@ -435,7 +471,16 @@ export type ToolExecutionProgressMessage = BaseBridgeMessage & {
 
 export type ToolExecutionCompleteMessage = BaseBridgeMessage & {
     type: "tool.execution_complete";
-    payload: { sessionId: string; toolName: string; requestId: string; success: boolean };
+    payload: {
+        sessionId: string;
+        toolName: string;
+        requestId: string;
+        success: boolean;
+        completionStatus?: Exclude<ToolExecutionStatus, "running">;
+        errorMessage?: string;
+        exitCode?: number;
+        toolTelemetry?: Record<string, unknown>;
+    };
 };
 
 export type PermissionRequestMessage = BaseBridgeMessage & {
@@ -463,14 +508,9 @@ export type ConnectionStatusMessage = BaseBridgeMessage & {
     payload: ConnectionStatusPayload;
 };
 
-export type TokenRefreshMessage = BaseBridgeMessage & {
-    type: "token.refresh";
-    payload: { jwt: string };
-};
-
-export type ReconnectReadyMessage = BaseBridgeMessage & {
-    type: "reconnect.ready";
-    payload: Record<string, never>;
+export type AuthSessionTokenMessage = BaseBridgeMessage & {
+    type: "auth.session_token";
+    payload: { sessionToken: string; sessionTokenExpiresAt: number };
 };
 
 export type CapabilitiesStateMessage = BaseBridgeMessage & {
@@ -498,13 +538,34 @@ export type AssistantIntentMessage = BaseBridgeMessage & {
     payload: { sessionId: string; intent: string };
 };
 
+export type SessionUsagePayload = {
+    sessionId: string;
+    // Maximum token count for the model's context window.
+    tokenLimit: number;
+    // Current number of tokens in the context window.
+    currentTokens: number;
+    // Token count from system message(s).
+    systemTokens?: number;
+    // Token count from non-system messages (user, assistant, tool).
+    conversationTokens?: number;
+    // Token count from tool definitions.
+    toolDefinitionsTokens?: number;
+    // Current number of messages in the conversation.
+    messagesLength?: number;
+};
+
+export type SessionUsageMessage = BaseBridgeMessage & {
+    type: "session.usage";
+    payload: SessionUsagePayload;
+};
+
 export type PlanExitRequestMessage = BaseBridgeMessage & {
     type: "plan.exit.request";
     payload: PlanExitRequestPayload;
 };
 
 export type ServerMessage =
-    | PairingSuccessMessage
+    | AuthAuthenticatedMessage
     | SessionCreatedMessage
     | SessionResumedMessage
     | SessionIdleMessage
@@ -523,18 +584,19 @@ export type ServerMessage =
     | ModelsListMessage
     | ErrorMessage
     | ConnectionStatusMessage
-    | TokenRefreshMessage
-    | ReconnectReadyMessage
+    | AuthSessionTokenMessage
     | CapabilitiesStateMessage
     | SessionStateMessage
     | SessionErrorMessage
     | SessionTitleChangedMessage
     | AssistantIntentMessage
+    | SessionUsageMessage
     | PlanExitRequestMessage
     | WorkspaceTreeMessage
     | WorkspaceGitSummaryMessage
     | WorkspacePullResultMessage
     | WorkspacePushResultMessage
+    | WorkspaceResolveResponseMessage
     | WorkspaceFileResponseMessage
     | WorkspaceDiffResponseMessage
     | SkillsListResponseMessage;
@@ -543,7 +605,17 @@ export type ServerMessage =
 
 export type AuthPairMessage = BaseBridgeMessage & {
     type: "auth.pair";
-    payload: { pairingToken: string };
+    payload: { pairingToken: string; transportMode: TransportMode };
+};
+
+export type AuthResumeMessage = BaseBridgeMessage & {
+    type: "auth.resume";
+    payload: {
+        deviceCredential: string;
+        sessionToken?: string;
+        lastSeenSeq: number;
+        transportMode: TransportMode;
+    };
 };
 
 export type SessionCreateMessage = BaseBridgeMessage & {
@@ -616,11 +688,6 @@ export type ModelsRequestMessage = BaseBridgeMessage & {
     payload: Record<string, never>;
 };
 
-export type ReconnectMessage = BaseBridgeMessage & {
-    type: "reconnect";
-    payload: { lastSeenSeq: number };
-};
-
 export type CapabilitiesRequestMessage = BaseBridgeMessage & {
     type: "capabilities.request";
     payload: Record<string, never>;
@@ -638,6 +705,7 @@ export type SkillsListResponseMessage = BaseBridgeMessage & {
 
 export type ClientMessage =
     | AuthPairMessage
+    | AuthResumeMessage
     | SessionCreateMessage
     | SessionResumeMessage
     | SessionListRequestMessage
@@ -650,12 +718,12 @@ export type ClientMessage =
     | SessionModeUpdateMessage
     | PermissionLevelUpdateMessage
     | ModelsRequestMessage
-    | ReconnectMessage
     | CapabilitiesRequestMessage
     | SkillsListRequestMessage
     | WorkspaceTreeRequestMessage
     | WorkspaceGitSummaryRequestMessage
     | WorkspaceOperationRequestMessage
+    | WorkspaceResolveRequestMessage
     | WorkspaceFileRequestMessage
     | WorkspaceDiffRequestMessage;
 
@@ -665,5 +733,8 @@ export type QRPayload = {
     url: string;
     token: string;
     certFingerprint: string | null;
+    transportMode: TransportMode;
+    companionId?: string | undefined;
+    relayAccessToken?: string | undefined;
     version: number;
 };

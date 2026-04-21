@@ -10,40 +10,49 @@ import type {
     SessionMessageAttachment,
 } from "@copilot-mobile/shared";
 import { createWSClient } from "./ws-client";
-import type { ConnectionState } from "./ws-client";
+import type { ConnectionState, ResumeOptions } from "./ws-client";
 import { handleServerMessage } from "./message-handler";
 import { useConnectionStore } from "../stores/connection-store";
 import { useSessionStore } from "../stores/session-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
-import { dispatchWorkspaceFileResponse, onWorkspaceFileResponse, dispatchWorkspaceDiffResponse, onWorkspaceDiffResponse } from "./workspace-events";
+import {
+    dispatchWorkspaceDiffResponse,
+    dispatchWorkspaceFileResponse,
+    dispatchWorkspaceResolveResponse,
+    onWorkspaceDiffResponse,
+    onWorkspaceFileResponse,
+    onWorkspaceResolveResponse,
+} from "./workspace-events";
 import {
     clearCredentials,
     loadCredentials,
     saveCredentials,
-    updateStoredJWT,
 } from "./credentials";
 
-export { onWorkspaceFileResponse, onWorkspaceDiffResponse };
+export { onWorkspaceFileResponse, onWorkspaceDiffResponse, onWorkspaceResolveResponse };
 
 let client: ReturnType<typeof createWSClient> | null = null;
+const STALE_DIRECT_CREDENTIAL_GRACE_MS = 3_000;
 
 function getClient(): ReturnType<typeof createWSClient> {
     if (client === null) {
         const nextClient = createWSClient({
             onMessage: (message) => {
-                // Kimlik bilgilerini kal\u0131c\u0131 olarak sakla: app restart sonras\u0131 otomatik reconnect.
-                if (message.type === "pairing.success") {
-                    const connState = useConnectionStore.getState();
-                    if (connState.serverUrl !== null) {
+                if (message.type === "auth.authenticated") {
+                    const persistableConnection = nextClient.getPersistableConnection();
+                    if (
+                        persistableConnection.serverUrl !== null
+                        && persistableConnection.transportMode !== null
+                    ) {
                         void saveCredentials({
-                            jwt: message.payload.jwt,
-                            serverUrl: connState.serverUrl,
-                            certFingerprint: message.payload.certFingerprint,
+                            deviceCredential: message.payload.deviceCredential,
+                            serverUrl: persistableConnection.serverUrl,
+                            certFingerprint: persistableConnection.certFingerprint,
                             deviceId: message.payload.deviceId,
+                            transportMode: persistableConnection.transportMode,
+                            relayAccessToken: persistableConnection.relayAccessToken,
                         });
                     }
-                } else if (message.type === "token.refresh") {
-                    void updateStoredJWT(message.payload.jwt);
                 }
 
                 const sessionStore = useSessionStore.getState();
@@ -159,6 +168,7 @@ async function sendMessageWithoutLocalEcho(
         useConnectionStore.getState().setError(
             `Failed to send message: ${error instanceof Error ? error.message : String(error)}`
         );
+        throw error;
     }
 }
 
@@ -169,9 +179,14 @@ export async function sendMessage(
     attachments?: ReadonlyArray<SessionMessageAttachment>
 ): Promise<void> {
     const sessionStore = useSessionStore.getState();
-    sessionStore.addUserMessage(content, attachments);
+    const itemId = sessionStore.addUserMessage(content, attachments);
     sessionStore.setAssistantTyping(true);
-    await sendMessageWithoutLocalEcho(sessionId, content, attachments);
+    try {
+        await sendMessageWithoutLocalEcho(sessionId, content, attachments);
+        sessionStore.updateUserMessageDeliveryState(itemId, "sent");
+    } catch {
+        sessionStore.updateUserMessageDeliveryState(itemId, "failed");
+    }
 }
 
 export async function sendQueuedMessage(
@@ -182,6 +197,26 @@ export async function sendQueuedMessage(
     const sessionStore = useSessionStore.getState();
     sessionStore.setAssistantTyping(true);
     await sendMessageWithoutLocalEcho(sessionId, content, attachments);
+}
+
+export async function syncSessionPreferences(sessionId: string): Promise<void> {
+    const c = getClient();
+    const sessionStore = useSessionStore.getState();
+
+    try {
+        await c.sendMessage("session.mode.update", {
+            sessionId,
+            agentMode: sessionStore.agentMode,
+        });
+        await c.sendMessage("permission.level.update", {
+            sessionId,
+            permissionLevel: sessionStore.permissionLevel,
+        });
+    } catch (error) {
+        useConnectionStore.getState().setError(
+            `Failed to restore session behavior: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
 }
 
 // Abort message — best-effort, swallows send failures
@@ -197,10 +232,9 @@ export async function abortMessage(sessionId: string): Promise<void> {
 // Respond to permission request
 export async function respondPermission(requestId: string, approved: boolean): Promise<void> {
     const c = getClient();
-    const sessionStore = useSessionStore.getState();
-    sessionStore.setPermissionPrompt(null);
     try {
         await c.sendMessage("permission.respond", { requestId, approved });
+        useSessionStore.getState().resolvePermissionPrompt(requestId);
     } catch {
         useConnectionStore.getState().setError("Failed to send permission response");
     }
@@ -318,20 +352,20 @@ export async function requestSkillsList(): Promise<void> {
 // Workspace tree — requests a repository subtree for the active session
 export async function requestWorkspaceTree(
     sessionId: string,
-    path?: string,
+    workspaceRelativePath?: string,
     maxDepth?: number
 ): Promise<void> {
     const c = getClient();
     const workspaceStore = useWorkspaceStore.getState();
-    workspaceStore.setTreeLoading(path ?? "__root__", true);
+    workspaceStore.setTreeLoading(workspaceRelativePath ?? "__root__", true);
     try {
         await c.sendMessage("workspace.tree.request", {
             sessionId,
-            ...(path !== undefined ? { path } : {}),
+            ...(workspaceRelativePath !== undefined ? { workspaceRelativePath } : {}),
             ...(maxDepth !== undefined ? { maxDepth } : {}),
         });
     } catch (error) {
-        workspaceStore.setTreeLoading(path ?? "__root__", false);
+        workspaceStore.setTreeLoading(workspaceRelativePath ?? "__root__", false);
         workspaceStore.setError(
             `Failed to request workspace tree: ${error instanceof Error ? error.message : String(error)}`
         );
@@ -393,42 +427,66 @@ export function resumeBridgeConnection(): boolean {
     if (client === null) {
         return false;
     }
-    return client.resume();
+    return client.resume({
+        reconnectOnFailure: true,
+        reportErrors: true,
+    });
 }
 
-// App restart sonras\u0131 SecureStore'dan kimlik bilgilerini y\u00fckle ve JWT ile yeniden ba\u011flan.
-// Kullan\u0131c\u0131 QR taramadan session'a geri d\u00f6ner.
-export async function tryResumeFromStoredCredentials(): Promise<boolean> {
+// Load persisted credentials after app restart and resume with auth.resume.
+export async function tryResumeFromStoredCredentials(options: ResumeOptions): Promise<boolean> {
     const creds = await loadCredentials();
     if (creds === null) {
         return false;
     }
     const c = getClient();
     c.seedStoredCredentials({
-        jwt: creds.jwt,
+        deviceCredential: creds.deviceCredential,
         serverUrl: creds.serverUrl,
         certFingerprint: creds.certFingerprint,
+        transportMode: creds.transportMode,
+        relayAccessToken: creds.relayAccessToken,
     });
     const connStore = useConnectionStore.getState();
     connStore.setServerInfo(creds.serverUrl, creds.certFingerprint);
     connStore.setDeviceId(creds.deviceId);
-    return c.resume();
+    const didStartResume = c.resume(options);
+
+    if (
+        didStartResume
+        && creds.transportMode === "direct"
+        && !options.reconnectOnFailure
+        && !options.reportErrors
+    ) {
+        setTimeout(() => {
+            const currentConnection = useConnectionStore.getState();
+            if (
+                currentConnection.state === "disconnected"
+                && currentConnection.serverUrl === creds.serverUrl
+            ) {
+                void clearCredentials();
+                currentConnection.reset();
+            }
+        }, STALE_DIRECT_CREDENTIAL_GRACE_MS);
+    }
+
+    return didStartResume;
 }
 
 export async function requestWorkspaceFile(
     sessionId: string,
-    path: string,
+    workspaceRelativePath: string,
     maxBytes?: number
 ): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("workspace.file.request", {
             sessionId,
-            path,
+            workspaceRelativePath,
             ...(maxBytes !== undefined ? { maxBytes } : {}),
         });
     } catch (error) {
-        dispatchWorkspaceFileResponse(path, {
+        dispatchWorkspaceFileResponse(sessionId, workspaceRelativePath, {
             content: "",
             mimeType: "text/plain",
             truncated: false,
@@ -439,17 +497,35 @@ export async function requestWorkspaceFile(
 
 export async function requestWorkspaceDiff(
     sessionId: string,
-    path: string
+    workspaceRelativePath: string
 ): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("workspace.diff.request", {
             sessionId,
-            path,
+            workspaceRelativePath,
         });
     } catch (error) {
-        dispatchWorkspaceDiffResponse(path, {
+        dispatchWorkspaceDiffResponse(sessionId, workspaceRelativePath, {
             diff: "",
+            error: error instanceof Error ? error.message : String(error),
+        });
+    }
+}
+
+export async function requestWorkspaceResolve(
+    sessionId: string,
+    rawPath: string
+): Promise<void> {
+    const c = getClient();
+    try {
+        await c.sendMessage("workspace.resolve.request", {
+            sessionId,
+            rawPath,
+        });
+    } catch (error) {
+        dispatchWorkspaceResolveResponse(sessionId, rawPath, {
+            rawPath,
             error: error instanceof Error ? error.message : String(error),
         });
     }

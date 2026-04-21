@@ -1,6 +1,6 @@
 // Yan panel — sohbet geçmişi, yeni sohbet, ayarlar
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
     View,
     Text,
@@ -12,130 +12,25 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import { Feather, Ionicons } from "@expo/vector-icons";
+import { useDrawerStatus } from "@react-navigation/drawer";
 import type { DrawerContentComponentProps } from "@react-navigation/drawer";
-import type { SessionInfo } from "@copilot-mobile/shared";
-import { MODEL_UNKNOWN } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useSessionStore } from "../stores/session-store";
 import {
     deleteSession,
+    listSessions,
     resumeSession,
     respondPermission,
     respondUserInput,
 } from "../services/bridge";
 import { startDraftConversation } from "../services/new-chat";
 import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
-
-// Workspace grouping — sessions grouped by cwd folder
-type WorkspaceGroup = {
-    workspace: string;
-    displayName: string;
-    sessions: ReadonlyArray<SessionInfo>;
-};
-
-function extractWorkspaceName(cwd: string): string {
-    const parts = cwd.split(/[\\/]/).filter(Boolean);
-    return parts[parts.length - 1] ?? cwd;
-}
-
-function groupByWorkspace(
-    sessions: ReadonlyArray<SessionInfo>
-): ReadonlyArray<WorkspaceGroup> {
-    const workspaceMap = new Map<string, Array<SessionInfo>>();
-    const noWorkspace: Array<SessionInfo> = [];
-
-    for (const session of sessions) {
-        const cwd = session.context?.cwd;
-        if (cwd !== undefined && cwd.length > 0) {
-            const existing = workspaceMap.get(cwd);
-            if (existing !== undefined) {
-                existing.push(session);
-            } else {
-                workspaceMap.set(cwd, [session]);
-            }
-        } else {
-            noWorkspace.push(session);
-        }
-    }
-
-    const result: Array<WorkspaceGroup> = [];
-    for (const [cwd, groupSessions] of workspaceMap) {
-        result.push({
-            workspace: cwd,
-            displayName: extractWorkspaceName(cwd),
-            sessions: groupSessions,
-        });
-    }
-
-    // Sort workspaces by most recent activity
-    result.sort((a, b) => {
-        const aMax = Math.max(...a.sessions.map((s) => s.lastActiveAt));
-        const bMax = Math.max(...b.sessions.map((s) => s.lastActiveAt));
-        return bMax - aMax;
-    });
-
-    if (noWorkspace.length > 0) {
-        result.push({
-            workspace: "__none__",
-            displayName: "Other",
-            sessions: noWorkspace,
-        });
-    }
-
-    return result;
-}
-
-function getRelativeTime(ts: number): string {
-    const diff = Date.now() - ts;
-    const mins = Math.floor(diff / 60000);
-    if (mins < 1) return "just now";
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    if (days < 7) return `${days}d ago`;
-    return `${Math.floor(days / 7)}w ago`;
-}
-
-function formatSessionTitle(session: SessionInfo): string {
-    const summary = session.summary?.trim();
-    if (
-        summary !== undefined &&
-        summary.length > 0 &&
-        !summary.startsWith("You are ") &&
-        !summary.startsWith("You're ") &&
-        !summary.startsWith("You have ") &&
-        summary.length < 200
-    ) {
-        return summary.length > 55 ? summary.slice(0, 52) + "…" : summary;
-    }
-
-    if (session.context?.repository !== undefined) {
-        const parts = session.context.repository.replace(/\.git$/, "").split("/");
-        const repo = parts[parts.length - 1] ?? session.context.repository;
-        const branch = session.context.branch !== undefined ? ` · ${session.context.branch}` : "";
-        return repo + branch;
-    }
-
-    if (session.context?.branch !== undefined) {
-        return session.context.branch;
-    }
-
-    return `Session · ${getRelativeTime(session.createdAt)}`;
-}
-
-function formatSessionPreview(session: SessionInfo): string {
-    const previewParts = [
-        session.context?.branch,
-        session.model !== MODEL_UNKNOWN ? session.model : null,
-    ].filter((value): value is string => value !== undefined && value !== null && value.length > 0);
-
-    return previewParts.join(" · ");
-}
+import { buildWorkspaceGroups } from "./drawer-session-groups";
 
 export default function DrawerContent(props: DrawerContentComponentProps) {
     const router = useRouter();
+    const drawerStatus = useDrawerStatus();
     const sessions = useSessionStore((s) => s.sessions);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const conversations = useChatHistoryStore((s) => s.conversations);
@@ -143,13 +38,33 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     const connectionState = useConnectionStore((s) => s.state);
     const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set());
 
-    const groups = useMemo(() => groupByWorkspace(sessions), [sessions]);
+    useEffect(() => {
+        const refreshSessions = () => {
+            if (useConnectionStore.getState().state === "authenticated") {
+                void listSessions();
+            }
+        };
+
+        if (connectionState === "authenticated" && drawerStatus === "open") {
+            refreshSessions();
+        }
+
+    }, [connectionState, drawerStatus]);
+
+    const groups = useMemo(() => buildWorkspaceGroups(sessions), [sessions]);
     const draftConversations = useMemo(
         () => conversations
-            .filter((conversation) => conversation.sessionId === null)
+            .filter((conversation) => conversation.sessionId === null && !conversation.archived)
             .sort((left, right) => right.updatedAt - left.updatedAt),
         [conversations],
     );
+    const archivedConversations = useMemo(
+        () => conversations
+            .filter((conversation) => conversation.archived)
+            .sort((left, right) => right.updatedAt - left.updatedAt),
+        [conversations],
+    );
+    const [archivedExpanded, setArchivedExpanded] = useState(false);
 
     const toggleWorkspace = (workspace: string) => {
         setExpandedWorkspaces((prev) => {
@@ -163,53 +78,57 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         });
     };
 
-    const handleNewChat = () => {
-        startDraftConversation();
+    const handleNewChat = (workspaceRoot: string | null) => {
+        startDraftConversation(workspaceRoot);
         props.navigation.closeDrawer();
     };
 
     const handleSelectDraft = (conversationId: string) => {
         const sessionStore = useSessionStore.getState();
-        if (sessionStore.permissionPrompt !== null) {
-            void respondPermission(sessionStore.permissionPrompt.requestId, false);
-        }
-        if (sessionStore.userInputPrompt !== null) {
-            void respondUserInput(sessionStore.userInputPrompt.requestId, "");
-        }
+        const pendingPermissionRequestId = sessionStore.permissionPrompt?.requestId ?? null;
+        const pendingUserInputRequestId = sessionStore.userInputPrompt?.requestId ?? null;
 
         sessionStore.clearChatItems();
         sessionStore.setActiveSession(null);
         sessionStore.setSessionLoading(false);
-        sessionStore.setPermissionPrompt(null);
+        sessionStore.clearPermissionPrompts();
         sessionStore.setUserInputPrompt(null);
         sessionStore.setPlanExitPrompt(null);
         useConnectionStore.getState().setError(null);
+        if (pendingPermissionRequestId !== null) {
+            void respondPermission(pendingPermissionRequestId, false);
+        }
+        if (pendingUserInputRequestId !== null) {
+            void respondUserInput(pendingUserInputRequestId, "");
+        }
         useChatHistoryStore.getState().setActiveConversation(conversationId);
         props.navigation.closeDrawer();
     };
 
     const handleSelectSession = (sessionId: string) => {
         const sessionStore = useSessionStore.getState();
-        if (sessionStore.permissionPrompt !== null) {
-            void respondPermission(sessionStore.permissionPrompt.requestId, false);
-        }
-        if (sessionStore.userInputPrompt !== null) {
-            void respondUserInput(sessionStore.userInputPrompt.requestId, "");
-        }
+        const pendingPermissionRequestId = sessionStore.permissionPrompt?.requestId ?? null;
+        const pendingUserInputRequestId = sessionStore.userInputPrompt?.requestId ?? null;
         sessionStore.clearChatItems();
         sessionStore.setActiveSession(sessionId);
         sessionStore.setSessionLoading(true);
-        sessionStore.setPermissionPrompt(null);
+        sessionStore.clearPermissionPrompts();
         sessionStore.setUserInputPrompt(null);
         sessionStore.setPlanExitPrompt(null);
         useConnectionStore.getState().setError(null);
+        if (pendingPermissionRequestId !== null) {
+            void respondPermission(pendingPermissionRequestId, false);
+        }
+        if (pendingUserInputRequestId !== null) {
+            void respondUserInput(pendingUserInputRequestId, "");
+        }
 
         const historyStore = useChatHistoryStore.getState();
         const linkedConversation = historyStore.conversations.find((item) => item.sessionId === sessionId);
         if (linkedConversation !== undefined) {
             historyStore.setActiveConversation(linkedConversation.id);
         } else {
-            historyStore.createConversation(sessionId);
+            historyStore.createConversation(sessionId, null);
         }
 
         void resumeSession(sessionId);
@@ -240,6 +159,68 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         );
     };
 
+    // VS Code tarzı üç-noktalı menü: Archive / Delete
+    const openSessionMenu = (sessionId: string, conversationId: string | null, title: string) => {
+        Alert.alert(
+            title.length > 0 ? title : "Sohbet",
+            undefined,
+            [
+                {
+                    text: "Arşivle",
+                    onPress: () => {
+                        if (conversationId !== null) {
+                            useChatHistoryStore.getState().archiveConversation(conversationId);
+                        }
+                    },
+                },
+                {
+                    text: "Sil",
+                    style: "destructive",
+                    onPress: () => handleDeleteSession(sessionId),
+                },
+                { text: "İptal", style: "cancel" },
+            ]
+        );
+    };
+
+    const openDraftMenu = (conversationId: string, title: string) => {
+        Alert.alert(
+            title.length > 0 ? title : "Taslak",
+            undefined,
+            [
+                {
+                    text: "Arşivle",
+                    onPress: () => useChatHistoryStore.getState().archiveConversation(conversationId),
+                },
+                {
+                    text: "Sil",
+                    style: "destructive",
+                    onPress: () => useChatHistoryStore.getState().deleteConversation(conversationId),
+                },
+                { text: "İptal", style: "cancel" },
+            ]
+        );
+    };
+
+    const openArchivedMenu = (conversationId: string, title: string) => {
+        Alert.alert(
+            title.length > 0 ? title : "Arşivlenmiş",
+            undefined,
+            [
+                {
+                    text: "Geri Yükle",
+                    onPress: () => useChatHistoryStore.getState().unarchiveConversation(conversationId),
+                },
+                {
+                    text: "Kalıcı Olarak Sil",
+                    style: "destructive",
+                    onPress: () => useChatHistoryStore.getState().deleteConversation(conversationId),
+                },
+                { text: "İptal", style: "cancel" },
+            ]
+        );
+    };
+
     return (
         <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
             {/* Header */}
@@ -256,7 +237,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     styles.newChatButton,
                     pressed && styles.newChatButtonPressed,
                 ]}
-                onPress={handleNewChat}
+                onPress={() => handleNewChat(null)}
                 accessibilityLabel="Yeni oturum"
             >
                 <Feather name="plus" size={16} color={colors.textPrimary} />
@@ -282,99 +263,212 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                             <Text style={styles.sectionHeaderText}>Drafts</Text>
                         </View>
                         {draftConversations.map((conversation) => (
-                            <Pressable
-                                key={conversation.id}
-                                style={({ pressed }) => [
-                                    styles.conversationItem,
-                                    activeSessionId === null && activeConversationId === conversation.id && styles.conversationItemActive,
-                                    pressed && styles.conversationItemPressed,
-                                ]}
-                                onPress={() => handleSelectDraft(conversation.id)}
-                                onLongPress={() => useChatHistoryStore.getState().deleteConversation(conversation.id)}
-                                accessibilityLabel={conversation.title}
-                            >
-                                <Text
-                                    style={[
-                                        styles.conversationTitle,
-                                        activeSessionId === null && activeConversationId === conversation.id && styles.conversationTitleActive,
+                            <View key={conversation.id} style={styles.conversationRow}>
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.conversationItem,
+                                        styles.conversationItemFlex,
+                                        activeSessionId === null && activeConversationId === conversation.id && styles.conversationItemActive,
+                                        pressed && styles.conversationItemPressed,
                                     ]}
-                                    numberOfLines={1}
+                                    onPress={() => handleSelectDraft(conversation.id)}
+                                    onLongPress={() => openDraftMenu(conversation.id, conversation.title)}
+                                    accessibilityLabel={conversation.title}
                                 >
-                                    {conversation.title}
-                                </Text>
-                                <Text style={styles.conversationPreview} numberOfLines={1}>
-                                    {conversation.preview.length > 0 ? conversation.preview : "Empty draft"}
-                                </Text>
-                            </Pressable>
+                                    <Text
+                                        style={[
+                                            styles.conversationTitle,
+                                            activeSessionId === null && activeConversationId === conversation.id && styles.conversationTitleActive,
+                                        ]}
+                                        numberOfLines={1}
+                                    >
+                                        {conversation.title}
+                                    </Text>
+                                    <Text style={styles.conversationPreview} numberOfLines={1}>
+                                        {conversation.preview.length > 0 ? conversation.preview : "Empty draft"}
+                                    </Text>
+                                </Pressable>
+                                <Pressable
+                                    style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
+                                    onPress={() => openDraftMenu(conversation.id, conversation.title)}
+                                    hitSlop={8}
+                                    accessibilityLabel="Daha fazla"
+                                >
+                                    <Feather name="more-horizontal" size={14} color={colors.textTertiary} />
+                                </Pressable>
+                            </View>
                         ))}
                     </View>
                 )}
 
                 {groups.map((group) => {
                     const isExpanded = expandedWorkspaces.has(group.workspace);
+                    const workspaceRootForNewChat =
+                        group.workspace === "__none__" ? null : group.workspace;
                     return (
                         <View key={group.workspace} style={styles.workspaceGroup}>
-                            <Pressable
-                                style={styles.workspaceHeader}
-                                onPress={() => toggleWorkspace(group.workspace)}
-                            >
-                                <Feather
-                                    name={isExpanded ? "chevron-down" : "chevron-right"}
-                                    size={12}
-                                    color={colors.textTertiary}
-                                />
-                                <Feather name="folder" size={14} color={colors.textTertiary} />
-                                <Text
-                                    style={styles.workspaceName}
-                                    numberOfLines={1}
+                            <View style={styles.workspaceHeaderRow}>
+                                <Pressable
+                                    style={styles.workspaceHeader}
+                                    onPress={() => toggleWorkspace(group.workspace)}
                                 >
-                                    {group.displayName}
-                                </Text>
-                                <Text style={styles.workspaceCount}>
-                                    {group.sessions.length}
-                                </Text>
-                            </Pressable>
-                            {isExpanded &&
-                                group.sessions.map((session) => (
-                                    <Pressable
-                                        key={session.id}
-                                        style={({ pressed }) => [
-                                            styles.conversationItem,
-                                            activeSessionId === session.id &&
-                                            styles.conversationItemActive,
-                                            pressed && styles.conversationItemPressed,
-                                        ]}
-                                        onPress={() =>
-                                            handleSelectSession(session.id)
-                                        }
-                                        onLongPress={() =>
-                                            handleDeleteSession(session.id)
-                                        }
-                                        accessibilityLabel={formatSessionTitle(session) || "Oturum"}
+                                    <Feather
+                                        name={isExpanded ? "chevron-down" : "chevron-right"}
+                                        size={12}
+                                        color={colors.textTertiary}
+                                    />
+                                    <Feather name="folder" size={14} color={colors.textTertiary} />
+                                    <Text
+                                        style={styles.workspaceName}
+                                        numberOfLines={1}
                                     >
-                                        <Text
-                                            style={[
-                                                styles.conversationTitle,
-                                                activeSessionId === session.id &&
-                                                styles.conversationTitleActive,
-                                            ]}
-                                            numberOfLines={1}
-                                        >
-                                            {formatSessionTitle(session)}
-                                        </Text>
-                                        {formatSessionPreview(session).length > 0 && (
-                                            <Text
-                                                style={styles.conversationPreview}
-                                                numberOfLines={1}
+                                        {group.displayName}
+                                    </Text>
+                                    <Text style={styles.workspaceCount}>
+                                        {group.totalSessions === group.entries.length
+                                            ? String(group.totalSessions)
+                                            : `${group.entries.length}/${group.totalSessions}`}
+                                    </Text>
+                                </Pressable>
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.workspaceAddBtn,
+                                        pressed && styles.workspaceAddBtnPressed,
+                                    ]}
+                                    onPress={() => handleNewChat(workspaceRootForNewChat)}
+                                    hitSlop={8}
+                                    accessibilityLabel={`${group.displayName} için yeni sohbet`}
+                                >
+                                    <Feather name="plus" size={14} color={colors.textSecondary} />
+                                </Pressable>
+                            </View>
+                            {isExpanded &&
+                                group.entries.map((entry) => {
+                                    const linkedConv = conversations.find(
+                                        (c) => c.sessionId === entry.primarySession.id
+                                    );
+                                    const linkedId = linkedConv?.id ?? null;
+                                    return (
+                                        <View key={entry.key} style={styles.conversationRow}>
+                                            <Pressable
+                                                style={({ pressed }) => [
+                                                    styles.conversationItem,
+                                                    styles.conversationItemFlex,
+                                                    activeSessionId === entry.primarySession.id &&
+                                                    styles.conversationItemActive,
+                                                    pressed && styles.conversationItemPressed,
+                                                ]}
+                                                onPress={() =>
+                                                    handleSelectSession(entry.primarySession.id)
+                                                }
+                                                onLongPress={() =>
+                                                    openSessionMenu(entry.primarySession.id, linkedId, entry.title)
+                                                }
+                                                accessibilityLabel={entry.title.length > 0 ? entry.title : "Oturum"}
                                             >
-                                                {formatSessionPreview(session)}
-                                            </Text>
-                                        )}
-                                    </Pressable>
-                                ))}
+                                                <View style={styles.conversationTitleRow}>
+                                                    <Text
+                                                        style={[
+                                                            styles.conversationTitle,
+                                                            activeSessionId === entry.primarySession.id &&
+                                                            styles.conversationTitleActive,
+                                                        ]}
+                                                        numberOfLines={1}
+                                                    >
+                                                        {entry.title}
+                                                    </Text>
+                                                    {entry.duplicateCount > 0 && (
+                                                        <Text style={styles.conversationDuplicateCount}>
+                                                            ×{entry.duplicateCount + 1}
+                                                        </Text>
+                                                    )}
+                                                </View>
+                                                {(entry.preview.length > 0 || entry.duplicateCount > 0) && (
+                                                    <Text
+                                                        style={styles.conversationPreview}
+                                                        numberOfLines={1}
+                                                    >
+                                                        {entry.preview.length > 0
+                                                            ? entry.preview
+                                                            : `${entry.duplicateCount + 1} similar sessions`}
+                                                    </Text>
+                                                )}
+                                            </Pressable>
+                                            <Pressable
+                                                style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
+                                                onPress={() => openSessionMenu(entry.primarySession.id, linkedId, entry.title)}
+                                                hitSlop={8}
+                                                accessibilityLabel="Daha fazla"
+                                            >
+                                                <Feather name="more-horizontal" size={14} color={colors.textTertiary} />
+                                            </Pressable>
+                                        </View>
+                                    );
+                                })}
                         </View>
                     );
                 })}
+
+                {archivedConversations.length > 0 && (
+                    <View style={styles.workspaceGroup}>
+                        <Pressable
+                            style={styles.workspaceHeader}
+                            onPress={() => setArchivedExpanded((prev) => !prev)}
+                        >
+                            <Feather
+                                name={archivedExpanded ? "chevron-down" : "chevron-right"}
+                                size={12}
+                                color={colors.textTertiary}
+                            />
+                            <Feather name="archive" size={14} color={colors.textTertiary} />
+                            <Text style={styles.workspaceName} numberOfLines={1}>
+                                Archived
+                            </Text>
+                            <Text style={styles.workspaceCount}>
+                                {archivedConversations.length}
+                            </Text>
+                        </Pressable>
+                        {archivedExpanded &&
+                            archivedConversations.map((conversation) => (
+                                <View key={conversation.id} style={styles.conversationRow}>
+                                    <Pressable
+                                        style={({ pressed }) => [
+                                            styles.conversationItem,
+                                            styles.conversationItemFlex,
+                                            styles.conversationItemArchived,
+                                            pressed && styles.conversationItemPressed,
+                                        ]}
+                                        onPress={() => {
+                                            if (conversation.sessionId !== null) {
+                                                handleSelectSession(conversation.sessionId);
+                                            } else {
+                                                handleSelectDraft(conversation.id);
+                                            }
+                                        }}
+                                        onLongPress={() => openArchivedMenu(conversation.id, conversation.title)}
+                                        accessibilityLabel={conversation.title}
+                                    >
+                                        <Text style={styles.conversationTitle} numberOfLines={1}>
+                                            {conversation.title}
+                                        </Text>
+                                        {conversation.preview.length > 0 && (
+                                            <Text style={styles.conversationPreview} numberOfLines={1}>
+                                                {conversation.preview}
+                                            </Text>
+                                        )}
+                                    </Pressable>
+                                    <Pressable
+                                        style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
+                                        onPress={() => openArchivedMenu(conversation.id, conversation.title)}
+                                        hitSlop={8}
+                                        accessibilityLabel="Daha fazla"
+                                    >
+                                        <Feather name="more-horizontal" size={14} color={colors.textTertiary} />
+                                    </Pressable>
+                                </View>
+                            ))}
+                    </View>
+                )}
             </ScrollView>
 
             {/* Footer — settings and connection status */}
@@ -495,11 +589,27 @@ const styles = StyleSheet.create({
         letterSpacing: 0.5,
     },
     workspaceHeader: {
+        flex: 1,
         flexDirection: "row",
         alignItems: "center",
         paddingHorizontal: spacing.md,
         paddingVertical: 7,
         gap: 6,
+    },
+    workspaceHeaderRow: {
+        flexDirection: "row",
+        alignItems: "center",
+    },
+    workspaceAddBtn: {
+        width: 26,
+        height: 26,
+        borderRadius: borderRadius.sm,
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: spacing.sm,
+    },
+    workspaceAddBtnPressed: {
+        backgroundColor: colors.bgElevated,
     },
     workspaceChevron: {
         width: 12,
@@ -529,6 +639,27 @@ const styles = StyleSheet.create({
         borderRadius: borderRadius.sm,
         marginBottom: 1,
     },
+    conversationItemFlex: {
+        flex: 1,
+    },
+    conversationItemArchived: {
+        opacity: 0.6,
+    },
+    conversationRow: {
+        flexDirection: "row",
+        alignItems: "center",
+    },
+    moreBtn: {
+        width: 28,
+        height: 28,
+        borderRadius: borderRadius.sm,
+        alignItems: "center",
+        justifyContent: "center",
+        marginRight: spacing.sm,
+    },
+    moreBtnPressed: {
+        backgroundColor: colors.bgElevated,
+    },
     conversationItemActive: {
         backgroundColor: colors.bgElevated,
     },
@@ -540,9 +671,23 @@ const styles = StyleSheet.create({
         color: colors.textPrimary,
         fontWeight: "400",
     },
+    conversationTitleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: spacing.xs,
+    },
     conversationTitleActive: {
         color: colors.textPrimary,
         fontWeight: "500",
+    },
+    conversationDuplicateCount: {
+        fontSize: fontSize.xs,
+        color: colors.textTertiary,
+        backgroundColor: colors.bgElevated,
+        paddingHorizontal: 5,
+        paddingVertical: 1,
+        borderRadius: borderRadius.xs,
+        overflow: "hidden",
     },
     conversationPreview: {
         fontSize: fontSize.xs,

@@ -3,11 +3,12 @@
 
 import * as Crypto from "expo-crypto";
 import type {
-    ServerMessage,
     ClientMessage,
     QRPayload,
+    ServerMessage,
+    TransportMode,
 } from "@copilot-mobile/shared";
-import { serverMessageSchema, PROTOCOL_VERSION } from "@copilot-mobile/shared";
+import { PROTOCOL_VERSION, serverMessageSchema } from "@copilot-mobile/shared";
 
 export type ConnectionState = "disconnected" | "connecting" | "connected" | "authenticated";
 
@@ -15,6 +16,11 @@ export type WSClientConfig = {
     onMessage: (message: ServerMessage) => void;
     onStateChange: (state: ConnectionState) => void;
     onError: (error: string) => void;
+};
+
+export type ResumeOptions = {
+    reconnectOnFailure: boolean;
+    reportErrors: boolean;
 };
 
 type PendingMessage = {
@@ -27,8 +33,6 @@ type PendingMessage = {
 const PENDING_TIMEOUT_MS = 30_000;
 const MAX_PENDING_MESSAGES = 100;
 
-// Mesaj ID ve sıra numarası üreteci
-// Client-başına tutulur, reconnect'te sıfırlanır (createWSClient içinde)
 function createSeqGenerator(): () => number {
     let counter = 0;
     return () => {
@@ -47,7 +51,6 @@ function generateId(): string {
     bytes[8] = (bytes[8]! & 0x3f) | 0x80;
 
     const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0"));
-
     return [
         hex.slice(0, 4).join(""),
         hex.slice(4, 6).join(""),
@@ -60,20 +63,23 @@ function generateId(): string {
 export function createWSClient(config: WSClientConfig) {
     let ws: WebSocket | null = null;
     let state: ConnectionState = "disconnected";
-    let jwt: string | null = null;
+    let deviceCredential: string | null = null;
+    let sessionToken: string | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     const pendingMessages: Array<PendingMessage> = [];
     let reconnectAttempt = 0;
     let serverUrl: string | null = null;
     let expectedFingerprint: string | null = null;
+    let transportMode: TransportMode | null = null;
+    let relayAccessToken: string | null = null;
     let lastServerSeq = 0;
+    let reconnectOnClose = false;
+    let reportConnectionErrors = true;
     const MAX_RECONNECT_DELAY_MS = 30_000;
     const BASE_RECONNECT_DELAY_MS = 1_000;
     const nextSeq = createSeqGenerator();
-    // QR pairing sonrası gönderilecek mesaj (onopen içinde kullanılır)
     let pendingPairMessage: ClientMessage | null = null;
-    // Reconnect sonrası gönderilecek mesaj
-    let pendingReconnectMessage: ClientMessage | null = null;
+    let pendingResumeMessage: ClientMessage | null = null;
 
     function setState(next: ConnectionState): void {
         if (state === next) return;
@@ -131,32 +137,40 @@ export function createWSClient(config: WSClientConfig) {
             sendRaw(message);
             return Promise.resolve();
         }
+
         const promise = new Promise<void>((resolve, reject) => {
             const timeoutId = setTimeout(() => {
-                const idx = pendingMessages.findIndex((p) => p.message === message);
+                const idx = pendingMessages.findIndex((pending) => pending.message === message);
                 if (idx !== -1) {
                     pendingMessages.splice(idx, 1);
                     reject(new Error("Message send timed out"));
                 }
             }, PENDING_TIMEOUT_MS);
+
             if (pendingMessages.length >= MAX_PENDING_MESSAGES) {
-                console.warn("[WsClient] Pending kuyruk limitine ulaşıldı, en eski mesaj düşürülüyor");
+                console.warn("[WsClient] Pending queue limit reached, dropping oldest message");
                 const dropped = pendingMessages.shift();
                 if (dropped !== undefined) {
                     clearTimeout(dropped.timeoutId);
                     dropped.reject(new Error("Dropped from pending queue — limit reached"));
                 }
             }
+
             pendingMessages.push({
                 message,
-                resolve: () => { clearTimeout(timeoutId); resolve(); },
-                reject: (err: Error) => { clearTimeout(timeoutId); reject(err); },
+                resolve: () => {
+                    clearTimeout(timeoutId);
+                    resolve();
+                },
+                reject: (error: Error) => {
+                    clearTimeout(timeoutId);
+                    reject(error);
+                },
                 timeoutId,
             });
         });
-        // Mark promise as handled for React Native's rejection tracker.
-        // Callers still receive the rejection through their await/catch chains.
-        promise.catch(() => { });
+
+        promise.catch(() => {});
         return promise;
     }
 
@@ -171,13 +185,18 @@ export function createWSClient(config: WSClientConfig) {
     }
 
     function disconnectWithError(errorMessage: string): void {
-        jwt = null;
+        deviceCredential = null;
+        sessionToken = null;
         serverUrl = null;
         expectedFingerprint = null;
+        transportMode = null;
+        relayAccessToken = null;
         lastServerSeq = 0;
+        reconnectOnClose = false;
+        reportConnectionErrors = true;
         reconnectAttempt = 0;
         pendingPairMessage = null;
-        pendingReconnectMessage = null;
+        pendingResumeMessage = null;
         cleanup();
         setState("disconnected");
         rejectPendingMessages(errorMessage);
@@ -186,7 +205,8 @@ export function createWSClient(config: WSClientConfig) {
 
     function scheduleReconnect(): void {
         if (reconnectTimer !== null || state === "connecting") return;
-        if (jwt === null || serverUrl === null) return;
+        if (!reconnectOnClose) return;
+        if (deviceCredential === null || serverUrl === null || transportMode === null) return;
 
         const delay = Math.min(
             BASE_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempt),
@@ -196,10 +216,34 @@ export function createWSClient(config: WSClientConfig) {
 
         reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
-            if (jwt !== null) {
-                connectWithJWT(jwt);
-            }
+            void resumeConnection({
+                reconnectOnFailure: true,
+                reportErrors: true,
+            });
         }, delay);
+    }
+
+    function resumeConnection(options: ResumeOptions): boolean {
+        if (deviceCredential === null || serverUrl === null || transportMode === null) {
+            return false;
+        }
+
+        if (state === "authenticated" || state === "connected" || state === "connecting") {
+            return true;
+        }
+
+        reconnectAttempt = 0;
+        reconnectOnClose = options.reconnectOnFailure;
+        reportConnectionErrors = options.reportErrors;
+        pendingPairMessage = null;
+        pendingResumeMessage = buildMessage("auth.resume", {
+            deviceCredential,
+            ...(sessionToken !== null ? { sessionToken } : {}),
+            lastSeenSeq: lastServerSeq,
+            transportMode,
+        });
+        connectToURL(serverUrl, options);
+        return true;
     }
 
     function handleMessage(data: string): void {
@@ -224,57 +268,72 @@ export function createWSClient(config: WSClientConfig) {
         const message = result.data as ServerMessage;
         lastServerSeq = message.seq;
 
-        if (message.type === "pairing.success") {
+        if (message.type === "auth.authenticated") {
             if (
-                expectedFingerprint !== null &&
-                message.payload.certFingerprint !== expectedFingerprint
+                expectedFingerprint !== null
+                && message.payload.certFingerprint !== expectedFingerprint
             ) {
-                disconnectWithError(
-                    "Certificate verification failed — server is not trusted"
-                );
+                disconnectWithError("Certificate verification failed — server is not trusted");
                 return;
             }
 
-            jwt = message.payload.jwt;
+            deviceCredential = message.payload.deviceCredential;
+            sessionToken = message.payload.sessionToken;
+            transportMode = message.payload.transportMode;
+            reconnectOnClose = true;
+            reportConnectionErrors = true;
             setState("authenticated");
             reconnectAttempt = 0;
             flushPending();
         }
 
-        if (message.type === "reconnect.ready") {
-            setState("authenticated");
-            reconnectAttempt = 0;
-        }
-
-        if (message.type === "token.refresh") {
-            jwt = message.payload.jwt;
+        if (message.type === "auth.session_token") {
+            sessionToken = message.payload.sessionToken;
         }
 
         config.onMessage(message);
     }
 
-    function connectToURL(url: string): void {
+    function connectToURL(url: string, options: ResumeOptions): void {
         cleanup();
+        reconnectOnClose = options.reconnectOnFailure;
+        reportConnectionErrors = options.reportErrors;
         setState("connecting");
+
+        if (transportMode === "relay" && relayAccessToken === null) {
+            if (reportConnectionErrors) {
+                config.onError("Relay connection requires a relay access token");
+            }
+            setState("disconnected");
+            return;
+        }
 
         try {
             ws = new WebSocket(url);
-        } catch (err) {
-            config.onError(`Connection error: ${String(err)}`);
+        } catch (error) {
+            if (reportConnectionErrors) {
+                config.onError(`Connection error: ${String(error)}`);
+            }
             setState("disconnected");
             return;
         }
 
         ws.onopen = () => {
             setState("connected");
-            // Bağlantı açıldığında bekleyen pairing veya reconnect mesajını gönder
+            if (transportMode === "relay" && relayAccessToken !== null && ws !== null) {
+                ws.send(JSON.stringify({
+                    type: "relay.connect",
+                    role: "mobile",
+                    accessToken: relayAccessToken,
+                }));
+            }
             if (pendingPairMessage !== null) {
                 sendRaw(pendingPairMessage);
                 pendingPairMessage = null;
             }
-            if (pendingReconnectMessage !== null) {
-                sendRaw(pendingReconnectMessage);
-                pendingReconnectMessage = null;
+            if (pendingResumeMessage !== null) {
+                sendRaw(pendingResumeMessage);
+                pendingResumeMessage = null;
             }
         };
 
@@ -291,7 +350,9 @@ export function createWSClient(config: WSClientConfig) {
         };
 
         ws.onerror = () => {
-            config.onError("WebSocket connection error");
+            if (reportConnectionErrors) {
+                config.onError("WebSocket connection error");
+            }
         };
     }
 
@@ -299,52 +360,48 @@ export function createWSClient(config: WSClientConfig) {
         reconnectAttempt = 0;
         serverUrl = qrPayload.url;
         expectedFingerprint = qrPayload.certFingerprint;
+        transportMode = qrPayload.transportMode;
+        relayAccessToken = qrPayload.relayAccessToken ?? null;
         lastServerSeq = 0;
-        // Önceki reconnect mesajını temizle — yeni pairing başlıyor
-        pendingReconnectMessage = null;
+        reconnectOnClose = true;
+        reportConnectionErrors = true;
+        pendingResumeMessage = null;
         pendingPairMessage = buildMessage("auth.pair", {
             pairingToken: qrPayload.token,
+            transportMode: qrPayload.transportMode,
         });
-        connectToURL(serverUrl);
-    }
-
-    // NOT: JWT URL query string ile iletiliyor — WebSocket bağlantısında header mekanizması
-    // React Native'de mevcut değil. Bridge server'da TLS ile koruma sağlanmalıdır.
-    // Bu bilinen bir kısıtlamadır — wss:// kullanıldığında güvenlidir.
-    function connectWithJWT(token: string): void {
-        jwt = token;
-        if (serverUrl === null) {
-            config.onError("Server URL unknown — reconnect with QR code");
-            return;
-        }
-
-        const authenticatedUrl = new URL(serverUrl);
-        authenticatedUrl.searchParams.set("token", token);
-
-        // Önceki pairing mesajını temizle — JWT reconnect yapılıyor
-        pendingPairMessage = null;
-        pendingReconnectMessage = buildMessage("reconnect", { lastSeenSeq: lastServerSeq });
-        connectToURL(authenticatedUrl.toString());
-        // NOT: Reconnect sonrası session.history otomatik olarak bridge server'dan replay ile gelir.
-        // Eksik mesajlar lastSeenSeq ile yakalanır.
+        connectToURL(serverUrl, {
+            reconnectOnFailure: true,
+            reportErrors: true,
+        });
     }
 
     return {
         connectWithQR,
 
-        connectWithJWT,
-
-        // Kal\u0131c\u0131 kimlik bilgilerinden client'\u0131 hidratla. connectWithJWT/resume \u00f6ncesi \u00e7a\u011fr\u0131l\u0131r.
         seedStoredCredentials(params: {
-            jwt: string;
+            deviceCredential: string;
             serverUrl: string;
             certFingerprint: string | null;
+            transportMode: TransportMode;
+            relayAccessToken: string | null;
         }): void {
-            jwt = params.jwt;
+            deviceCredential = params.deviceCredential;
             serverUrl = params.serverUrl;
             expectedFingerprint = params.certFingerprint;
+            transportMode = params.transportMode;
+            relayAccessToken = params.relayAccessToken;
             lastServerSeq = 0;
             reconnectAttempt = 0;
+        },
+
+        getPersistableConnection() {
+            return {
+                serverUrl,
+                certFingerprint: expectedFingerprint,
+                transportMode,
+                relayAccessToken,
+            };
         },
 
         send,
@@ -354,18 +411,22 @@ export function createWSClient(config: WSClientConfig) {
         },
 
         sendMessage(type: ClientMessage["type"], payload: Record<string, unknown>): Promise<void> {
-            const msg = buildMessage(type, payload);
-            return send(msg);
+            return send(buildMessage(type, payload));
         },
 
         disconnect(): void {
-            jwt = null;
+            deviceCredential = null;
+            sessionToken = null;
             serverUrl = null;
             expectedFingerprint = null;
+            transportMode = null;
+            relayAccessToken = null;
             lastServerSeq = 0;
+            reconnectOnClose = false;
+            reportConnectionErrors = true;
             reconnectAttempt = 0;
             pendingPairMessage = null;
-            pendingReconnectMessage = null;
+            pendingResumeMessage = null;
             cleanup();
             setState("disconnected");
             rejectPendingMessages("Connection closed");
@@ -375,19 +436,8 @@ export function createWSClient(config: WSClientConfig) {
             return state;
         },
 
-        resume(): boolean {
-            if (jwt === null || serverUrl === null) {
-                return false;
-            }
-
-            if (state === "authenticated" || state === "connected" || state === "connecting") {
-                return true;
-            }
-
-            reconnectAttempt = 0;
-            connectWithJWT(jwt);
-            return true;
+        resume(options: ResumeOptions): boolean {
+            return resumeConnection(options);
         },
-
     };
 }

@@ -3,8 +3,10 @@
 export const DEFAULT_WS_PORT = 9876;
 export const PAIRING_TOKEN_BYTES = 32;
 export const PAIRING_TOKEN_TTL_MS = 2 * 60 * 1000; // 2 minutes (security review: reduced from 5)
-export const JWT_TTL_SECONDS = 24 * 60 * 60; // 24 hours
-export const JWT_REFRESH_THRESHOLD_MS = 12 * 60 * 60 * 1000; // 12 hours — token refreshed after this
+export const AUTH_FRAME_TIMEOUT_MS = 5_000;
+export const DEVICE_CREDENTIAL_TTL_SECONDS = 30 * 24 * 60 * 60; // 30 days
+export const SESSION_TOKEN_TTL_SECONDS = 24 * 60 * 60; // 24 hours
+export const SESSION_TOKEN_REFRESH_THRESHOLD_MS = 12 * 60 * 60 * 1000; // 12 hours — token refreshed after this
 export const JWT_SECRET_ROTATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days — secret rotation interval
 export const JWT_SECRET_GRACE_MS = 24 * 60 * 60 * 1000; // 1 day — old secret grace period
 export const HEARTBEAT_INTERVAL_MS = 30 * 1000;
@@ -20,7 +22,8 @@ export const CONFIG_DIR_NAME = ".copilot-mobile";
 export const CERT_FILENAME = "cert.pem";
 export const KEY_FILENAME = "key.pem";
 export const JWT_SECRET_FILENAME = "jwt-secret.key";
-export const QR_PAYLOAD_VERSION = 1;
+export const COMPANION_ID_FILENAME = "companion-id";
+export const QR_PAYLOAD_VERSION = 2;
 // Runtime WS protocol version. Client/server uyumsuzlu\u011fu bu alana g\u00f6re tespit edilir.
 export const PROTOCOL_VERSION = 1;
 export const MODEL_UNKNOWN = "unknown";

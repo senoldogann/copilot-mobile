@@ -1,12 +1,13 @@
 import { Platform } from "react-native";
-import * as Notifications from "expo-notifications";
 import Constants from "expo-constants";
 import { useConnectionStore } from "../stores/connection-store";
 
 const SESSION_EVENTS_CHANNEL_ID = "session-events";
 
 let initialized = false;
-let permissionRequested = false;
+let notificationResponseSubscription: { remove: () => void } | null = null;
+let lastHandledNotificationId: string | null = null;
+let notificationsModulePromise: Promise<typeof import("expo-notifications") | null> | null = null;
 
 // expo-notifications remote-push functionality was removed from Expo Go in SDK 53.
 // Only initialize when running as a real dev-build or production build.
@@ -14,16 +15,64 @@ function isExpoGo(): boolean {
     return (Constants.appOwnership === "expo") || (Constants.executionEnvironment === "storeClient");
 }
 
-function hasNotificationPermission(settings: Notifications.NotificationPermissionsStatus): boolean {
+async function getNotificationsModule(): Promise<typeof import("expo-notifications") | null> {
+    if (isExpoGo()) {
+        return null;
+    }
+
+    if (notificationsModulePromise === null) {
+        notificationsModulePromise = import("expo-notifications")
+            .then((module) => module)
+            .catch((error) => {
+                useConnectionStore.getState().setError(
+                    `Failed to load notifications module: ${error instanceof Error ? error.message : String(error)}`
+                );
+                return null;
+            });
+    }
+
+    return notificationsModulePromise;
+}
+
+function hasNotificationPermission(
+    notifications: typeof import("expo-notifications"),
+    settings: Awaited<ReturnType<(typeof import("expo-notifications"))["getPermissionsAsync"]>>
+): boolean {
     return settings.granted
-        || settings.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
+        || settings.ios?.status === notifications.IosAuthorizationStatus.PROVISIONAL;
+}
+
+function readNotificationSessionId(
+    response: Awaited<ReturnType<(typeof import("expo-notifications"))["getLastNotificationResponseAsync"]>>
+): string | null {
+    const sessionId = response?.notification.request.content.data?.["sessionId"];
+    return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
+}
+
+function getNotificationResponseId(
+    response: Awaited<ReturnType<(typeof import("expo-notifications"))["getLastNotificationResponseAsync"]>>
+): string {
+    return response?.notification.request.identifier ?? "";
+}
+
+function shouldHandleNotificationResponse(
+    response: Awaited<ReturnType<(typeof import("expo-notifications"))["getLastNotificationResponseAsync"]>>
+): boolean {
+    const responseId = getNotificationResponseId(response);
+    if (responseId.length === 0 || responseId === lastHandledNotificationId) {
+        return false;
+    }
+
+    lastHandledNotificationId = responseId;
+    return true;
 }
 
 export async function initializeNotifications(): Promise<void> {
-    if (isExpoGo()) return;
+    const notifications = await getNotificationsModule();
+    if (notifications === null) return;
 
     if (!initialized) {
-        Notifications.setNotificationHandler({
+        notifications.setNotificationHandler({
             handleNotification: async () => ({
                 shouldShowBanner: true,
                 shouldShowList: true,
@@ -35,30 +84,31 @@ export async function initializeNotifications(): Promise<void> {
     }
 
     if (Platform.OS === "android") {
-        await Notifications.setNotificationChannelAsync(SESSION_EVENTS_CHANNEL_ID, {
+        await notifications.setNotificationChannelAsync(SESSION_EVENTS_CHANNEL_ID, {
             name: "Session events",
-            importance: Notifications.AndroidImportance.DEFAULT,
+            importance: notifications.AndroidImportance.DEFAULT,
             vibrationPattern: [0, 250, 120, 250],
-            lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+            lockscreenVisibility: notifications.AndroidNotificationVisibility.PUBLIC,
         });
     }
 }
 
 async function ensureNotificationPermission(options: { allowPrompt: boolean }): Promise<boolean> {
-    if (isExpoGo()) return false;
+    const notifications = await getNotificationsModule();
+    if (notifications === null) return false;
+
     await initializeNotifications();
 
-    const currentSettings = await Notifications.getPermissionsAsync();
-    if (hasNotificationPermission(currentSettings)) {
+    const currentSettings = await notifications.getPermissionsAsync();
+    if (hasNotificationPermission(notifications, currentSettings)) {
         return true;
     }
 
-    if (!options.allowPrompt || permissionRequested) {
+    if (!options.allowPrompt) {
         return false;
     }
 
-    permissionRequested = true;
-    const requestedSettings = await Notifications.requestPermissionsAsync({
+    const requestedSettings = await notifications.requestPermissionsAsync({
         ios: {
             allowAlert: true,
             allowBadge: false,
@@ -66,11 +116,47 @@ async function ensureNotificationPermission(options: { allowPrompt: boolean }): 
         },
     });
 
-    return hasNotificationPermission(requestedSettings);
+    return hasNotificationPermission(notifications, requestedSettings);
 }
 
 export async function prepareNotificationPermissions(): Promise<boolean> {
     return ensureNotificationPermission({ allowPrompt: true });
+}
+
+export async function initializeNotificationRouting(
+    onSessionSelected: (sessionId: string) => void
+): Promise<void> {
+    const notifications = await getNotificationsModule();
+    if (notifications === null) {
+        return;
+    }
+
+    await initializeNotifications();
+
+    if (notificationResponseSubscription === null) {
+        notificationResponseSubscription = notifications.addNotificationResponseReceivedListener((response) => {
+            if (!shouldHandleNotificationResponse(response)) {
+                return;
+            }
+
+            const sessionId = readNotificationSessionId(response);
+            if (sessionId !== null) {
+                onSessionSelected(sessionId);
+                void notifications.clearLastNotificationResponseAsync();
+            }
+        });
+    }
+
+    const initialResponse = await notifications.getLastNotificationResponseAsync();
+    if (!shouldHandleNotificationResponse(initialResponse)) {
+        return;
+    }
+
+    const sessionId = readNotificationSessionId(initialResponse);
+    if (sessionId !== null) {
+        onSessionSelected(sessionId);
+        await notifications.clearLastNotificationResponseAsync();
+    }
 }
 
 export async function notifySessionCompleted(input: {
@@ -83,8 +169,13 @@ export async function notifySessionCompleted(input: {
         return;
     }
 
+    const notifications = await getNotificationsModule();
+    if (notifications === null) {
+        return;
+    }
+
     try {
-        await Notifications.scheduleNotificationAsync({
+        await notifications.scheduleNotificationAsync({
             content: {
                 title: input.title,
                 body: input.body,
@@ -102,9 +193,11 @@ export async function notifySessionCompleted(input: {
 }
 
 export async function dismissCompletionNotifications(): Promise<void> {
-    if (isExpoGo()) return;
+    const notifications = await getNotificationsModule();
+    if (notifications === null) return;
+
     try {
-        await Notifications.dismissAllNotificationsAsync();
+        await notifications.dismissAllNotificationsAsync();
     } catch (error) {
         useConnectionStore.getState().setError(
             `Failed to clear completion notifications: ${error instanceof Error ? error.message : String(error)}`

@@ -53,6 +53,10 @@ function Dot({ delay, active }: { delay: number; active: boolean }) {
 }
 
 export function ActivityDots({ active, intent }: Props) {
+    if (!active) {
+        return null;
+    }
+
     return (
         <View style={styles.container}>
             <View style={styles.dotsRow}>
@@ -79,6 +83,7 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         gap: 5,
+        marginLeft: 8,
     },
     dot: {
         width: 5,

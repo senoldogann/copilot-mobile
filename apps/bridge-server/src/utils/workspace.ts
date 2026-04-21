@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { readdir, lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, open, readFile, readdir, realpath } from "node:fs/promises";
 import { promisify } from "node:util";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
@@ -14,7 +14,9 @@ const execFileAsync = promisify(execFile);
 const MAX_TREE_ENTRIES_PER_DIRECTORY = 250;
 const MAX_WORKSPACE_TREE_DEPTH = 5;
 const MAX_WORKSPACE_COMMIT_LIMIT = 50;
+const MAX_WORKSPACE_RESOLVE_MATCHES = 10;
 const GIT_OPERATION_TIMEOUT_MS = 30_000;
+const FALLBACK_RESOLVE_IGNORED_DIRS = new Set([".git", "node_modules", "Pods", "build", "dist", ".expo"]);
 
 type GitCommandResult = {
     success: boolean;
@@ -24,6 +26,14 @@ type GitCommandResult = {
     signal?: string | null | undefined;
     message?: string | undefined;
 };
+
+export function resolveWorkspaceRoot(context: SessionContext): string {
+    return resolve(context.workspaceRoot);
+}
+
+export function resolveSessionCwd(context: SessionContext): string {
+    return resolve(context.sessionCwd);
+}
 
 function toPosixRelativePath(rootPath: string, absolutePath: string): string {
     const rel = relative(rootPath, absolutePath);
@@ -37,6 +47,178 @@ function toPosixRelativePath(rootPath: string, absolutePath: string): string {
 function isWithinRoot(rootPath: string, candidatePath: string): boolean {
     const rel = relative(resolve(rootPath), resolve(candidatePath));
     return rel.length === 0 || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function stripLineSuffix(rawPath: string): string {
+    return rawPath.replace(/:\d+(-\d+)?$/, "");
+}
+
+function normalizeWorkspaceReference(rawPath: string): string {
+    return stripLineSuffix(rawPath.trim()).replace(/\\/g, "/");
+}
+
+async function pathExists(path: string): Promise<boolean> {
+    try {
+        await lstat(path);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+function candidateFromAbsolutePath(rootPath: string, absolutePath: string): string | null {
+    if (!isWithinRoot(rootPath, absolutePath)) {
+        return null;
+    }
+
+    return toPosixRelativePath(rootPath, absolutePath);
+}
+
+function candidateFromSessionPath(
+    rootPath: string,
+    sessionCwd: string,
+    rawPath: string
+): string | null {
+    if (rawPath.startsWith("./") || rawPath.startsWith("../")) {
+        return candidateFromAbsolutePath(rootPath, resolve(sessionCwd, rawPath));
+    }
+
+    return null;
+}
+
+function candidateFromWorkspaceNamePrefix(rootPath: string, rawPath: string): string | null {
+    const workspaceName = basename(rootPath);
+    if (workspaceName.length === 0 || !rawPath.startsWith(`${workspaceName}/`)) {
+        return null;
+    }
+
+    const trimmed = rawPath.slice(workspaceName.length + 1);
+    return trimmed.length > 0 ? trimmed : ".";
+}
+
+function shouldSearchBySuffix(rawPath: string): boolean {
+    return rawPath.startsWith(".../") || rawPath.startsWith("…/");
+}
+
+async function listWorkspaceCandidatesFromFilesystem(
+    rootPath: string,
+    currentPath: string
+): Promise<Array<string>> {
+    const entries = await readdir(currentPath, { withFileTypes: true });
+    const candidates: Array<string> = [];
+
+    for (const entry of entries) {
+        if (entry.name === ".git") {
+            continue;
+        }
+
+        const nextPath = resolve(currentPath, entry.name);
+        if (!isWithinRoot(rootPath, nextPath)) {
+            continue;
+        }
+
+        if (entry.isDirectory()) {
+            if (FALLBACK_RESOLVE_IGNORED_DIRS.has(entry.name)) {
+                continue;
+            }
+            candidates.push(...await listWorkspaceCandidatesFromFilesystem(rootPath, nextPath));
+            continue;
+        }
+
+        if (entry.isFile() || entry.isSymbolicLink()) {
+            candidates.push(toPosixRelativePath(rootPath, nextPath));
+        }
+    }
+
+    return candidates;
+}
+
+async function listWorkspaceCandidates(rootPath: string): Promise<ReadonlyArray<string>> {
+    const gitResult = await runGit(rootPath, ["ls-files", "--cached", "--others", "--exclude-standard"]);
+    if (gitResult.success) {
+        return gitResult.stdout
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0);
+    }
+
+    return listWorkspaceCandidatesFromFilesystem(rootPath, rootPath);
+}
+
+function matchWorkspaceCandidates(
+    candidates: ReadonlyArray<string>,
+    rawPath: string
+): Array<string> {
+    const normalizedPath = normalizeWorkspaceReference(rawPath);
+    const suffix = shouldSearchBySuffix(normalizedPath)
+        ? normalizedPath.slice(4)
+        : normalizedPath;
+
+    if (suffix.length === 0) {
+        return [];
+    }
+
+    return candidates.filter((candidate) =>
+        candidate === suffix || candidate.endsWith(`/${suffix}`)
+    );
+}
+
+export async function resolveWorkspaceReference(
+    context: SessionContext,
+    rawPath: string
+): Promise<{
+    workspaceRelativePath?: string;
+    matches?: ReadonlyArray<string>;
+    error?: string;
+}> {
+    const rootPath = resolveWorkspaceRoot(context);
+    const sessionCwd = resolveSessionCwd(context);
+    const normalizedPath = normalizeWorkspaceReference(rawPath);
+
+    if (normalizedPath.length === 0) {
+        return { error: "Path is empty" };
+    }
+
+    const directCandidates = [
+        isAbsolute(normalizedPath) ? candidateFromAbsolutePath(rootPath, normalizedPath) : null,
+        candidateFromSessionPath(rootPath, sessionCwd, normalizedPath),
+        candidateFromWorkspaceNamePrefix(rootPath, normalizedPath),
+        !shouldSearchBySuffix(normalizedPath) ? normalizedPath : null,
+    ];
+
+    for (const candidate of directCandidates) {
+        if (candidate === null || candidate.length === 0) {
+            continue;
+        }
+
+        const absoluteCandidate = resolve(rootPath, candidate);
+        if (!isWithinRoot(rootPath, absoluteCandidate)) {
+            continue;
+        }
+
+        if (await pathExists(absoluteCandidate)) {
+            return {
+                workspaceRelativePath: toPosixRelativePath(rootPath, absoluteCandidate),
+            };
+        }
+    }
+
+    const matches = matchWorkspaceCandidates(await listWorkspaceCandidates(rootPath), normalizedPath);
+    if (matches.length === 1) {
+        const matchedPath = matches[0];
+        if (matchedPath !== undefined) {
+            return { workspaceRelativePath: matchedPath };
+        }
+    }
+
+    if (matches.length > 1) {
+        return {
+            matches: matches.slice(0, MAX_WORKSPACE_RESOLVE_MATCHES),
+            error: `Ambiguous workspace path: ${normalizedPath}`,
+        };
+    }
+
+    return { error: `File not found in workspace: ${normalizedPath}` };
 }
 
 function normalizeGitStatus(indexStatus: string, worktreeStatus: string): GitFileChange["status"] {
@@ -281,19 +463,24 @@ function parseGitLog(stdout: string): Array<GitCommitSummary> {
 
 export async function buildWorkspaceTree(
     rootPath: string,
-    requestedPath = ".",
+    requestedWorkspaceRelativePath = ".",
     maxDepth = 3
-): Promise<{ rootPath: string; requestedPath: string; tree: WorkspaceTreeNode; truncated: boolean }> {
+): Promise<{
+    workspaceRoot: string;
+    requestedWorkspaceRelativePath: string;
+    tree: WorkspaceTreeNode;
+    truncated: boolean;
+}> {
     const normalizedDepth = Math.min(Math.max(0, maxDepth), MAX_WORKSPACE_TREE_DEPTH);
-    const absolutePath = resolve(rootPath, requestedPath);
+    const absolutePath = resolve(rootPath, requestedWorkspaceRelativePath);
     if (!isWithinRoot(rootPath, absolutePath)) {
-        throw new Error(`Requested path is outside the workspace root: ${requestedPath}`);
+        throw new Error(`Requested path is outside the workspace root: ${requestedWorkspaceRelativePath}`);
     }
 
     const tree = await buildTreeNode(rootPath, absolutePath, normalizedDepth);
     return {
-        rootPath: resolve(rootPath),
-        requestedPath: toPosixRelativePath(rootPath, absolutePath),
+        workspaceRoot: resolve(rootPath),
+        requestedWorkspaceRelativePath: toPosixRelativePath(rootPath, absolutePath),
         tree: tree.node,
         truncated: tree.truncated,
     };
@@ -323,7 +510,7 @@ export async function buildWorkspaceGitSummary(
     context: SessionContext,
     commitLimit = 10
 ): Promise<{
-    rootPath: string;
+    workspaceRoot: string;
     gitRoot: string | null;
     repository?: string;
     branch?: string;
@@ -332,15 +519,15 @@ export async function buildWorkspaceGitSummary(
     truncated: boolean;
 }> {
     const normalizedCommitLimit = Math.min(Math.max(1, commitLimit), MAX_WORKSPACE_COMMIT_LIMIT);
-    const rootPath = resolve(context.cwd);
-    const gitRootCandidate = resolve(context.gitRoot ?? context.cwd);
+    const workspaceRoot = resolveWorkspaceRoot(context);
+    const gitRootCandidate = resolveWorkspaceRoot(context);
     const topLevelResult = await runGit(gitRootCandidate, ["rev-parse", "--show-toplevel"]);
     if (!topLevelResult.success || topLevelResult.stdout.trim().length === 0) {
         return {
-            rootPath,
+            workspaceRoot,
             gitRoot: null,
-            repository: context.repository,
-            branch: context.branch,
+            ...(context.repository !== undefined ? { repository: context.repository } : {}),
+            ...(context.branch !== undefined ? { branch: context.branch } : {}),
             uncommittedChanges: [],
             recentCommits: [],
             truncated: false,
@@ -374,19 +561,16 @@ export async function buildWorkspaceGitSummary(
     const branchResult = context.branch !== undefined
         ? { success: true, stdout: context.branch, stderr: "" }
         : await runGit(gitRoot, ["rev-parse", "--abbrev-ref", "HEAD"]);
-    const repositoryResult = context.repository !== undefined
-        ? { success: true, stdout: context.repository, stderr: "" }
-        : await runGit(gitRoot, ["config", "--get", "remote.origin.url"]);
+    const repository = context.repository;
+    const branch = context.branch ?? (branchResult.success && branchResult.stdout.trim().length > 0
+        ? branchResult.stdout.trim()
+        : undefined);
 
     return {
-        rootPath,
+        workspaceRoot,
         gitRoot,
-        repository: context.repository ?? (repositoryResult.success && repositoryResult.stdout.trim().length > 0
-            ? repositoryResult.stdout.trim()
-            : undefined),
-        branch: context.branch ?? (branchResult.success && branchResult.stdout.trim().length > 0
-            ? branchResult.stdout.trim()
-            : undefined),
+        ...(repository !== undefined ? { repository } : {}),
+        ...(branch !== undefined ? { branch } : {}),
         uncommittedChanges: statusResult.stdout
             .split(/\r?\n/)
             .map((line) => line.trimEnd())
@@ -409,7 +593,7 @@ export async function performWorkspaceGitOperation(
     context: SessionContext,
     operation: WorkspaceOperation
 ): Promise<GitCommandResult> {
-    const cwd = resolve(context.gitRoot ?? context.cwd);
+    const cwd = resolveWorkspaceRoot(context);
     const args = operation === "pull"
         ? ["pull", "--ff-only", "--no-rebase"]
         : ["push"];
@@ -452,13 +636,11 @@ function inferMimeType(filePath: string): string {
 
 export async function readWorkspaceFile(
     context: SessionContext,
-    requestedPath: string,
+    workspaceRelativePath: string,
     maxBytes = MAX_FILE_READ_BYTES
 ): Promise<{ content: string; mimeType: string; truncated: boolean; error?: string }> {
-    const root = resolve(context.cwd);
-    const absPath = isAbsolute(requestedPath)
-        ? resolve(requestedPath)
-        : resolve(root, requestedPath);
+    const root = resolveWorkspaceRoot(context);
+    const absPath = resolve(root, workspaceRelativePath);
 
     if (!isWithinRoot(root, absPath)) {
         return { content: "", mimeType: "text/plain", truncated: false, error: "Path is outside workspace root" };
@@ -474,10 +656,7 @@ export async function readWorkspaceFile(
         if (!stat.isFile()) {
             return { content: "", mimeType: "text/plain", truncated: false, error: "Path is not a file" };
         }
-        // Symlink traversal koruması: realpath sonrası root içinde mi doğrula.
-        if (stat.isSymbolicLink()) {
-            return { content: "", mimeType: "text/plain", truncated: false, error: "Symbolic links are not allowed" };
-        }
+
         const realAbsPath = await realpath(absPath);
         if (!isWithinRoot(root, realAbsPath)) {
             return { content: "", mimeType: "text/plain", truncated: false, error: "Path escapes workspace root via symlink" };
@@ -488,10 +667,14 @@ export async function readWorkspaceFile(
 
         let content: string;
         if (truncated) {
-            // Only read up to limitedBytes
-            const raw = await readFile(absPath);
-            const slice = raw.slice(0, limitedBytes);
-            content = slice.toString("utf-8");
+            const file = await open(absPath, "r");
+            try {
+                const buffer = Buffer.alloc(limitedBytes);
+                const { bytesRead } = await file.read(buffer, 0, limitedBytes, 0);
+                content = buffer.subarray(0, bytesRead).toString("utf-8");
+            } finally {
+                await file.close();
+            }
         } else {
             content = await readFile(absPath, "utf-8");
         }
@@ -511,12 +694,10 @@ export async function readWorkspaceFile(
 // kullanarak tamamen ekleme olarak gösterir.
 export async function readWorkspaceDiff(
     context: SessionContext,
-    requestedPath: string
+    workspaceRelativePath: string
 ): Promise<{ diff: string; error?: string }> {
-    const root = resolve(context.cwd);
-    const absPath = isAbsolute(requestedPath)
-        ? resolve(requestedPath)
-        : resolve(root, requestedPath);
+    const root = resolveWorkspaceRoot(context);
+    const absPath = resolve(root, workspaceRelativePath);
 
     if (!isWithinRoot(root, absPath)) {
         return { diff: "", error: "Path is outside workspace root" };

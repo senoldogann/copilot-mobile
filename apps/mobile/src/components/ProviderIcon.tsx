@@ -155,19 +155,20 @@ export function PaperclipIcon({ size = 16, color = "#a0a3a2" }: { size?: number;
     );
 }
 
-export function MicIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+export function AgentIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <Path
-                d="M12 2a3 3 0 0 0-3 3v7a3 3 0 1 0 6 0V5a3 3 0 0 0-3-3Z"
-                fill={color}
-            />
-            <Path
-                d="M19 10v2a7 7 0 0 1-14 0v-2M12 19v3M8 22h8"
-                stroke={color}
-                strokeWidth={2}
-                strokeLinecap="round"
-            />
+            <G stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M9 6.5V5a3 3 0 0 1 6 0v1.5" />
+                <Path d="M7.5 8.5A2.5 2.5 0 0 1 10 6h4a2.5 2.5 0 0 1 2.5 2.5V14A3.5 3.5 0 0 1 13 17.5h-2A3.5 3.5 0 0 1 7.5 14V8.5Z" />
+                <Circle cx="10" cy="11" r="0.9" fill={color} stroke="none" />
+                <Circle cx="14" cy="11" r="0.9" fill={color} stroke="none" />
+                <Path d="M10 14.2c.8.5 3.2.5 4 0" />
+                <Path d="M12 17.5V20" />
+                <Path d="M9 20h6" />
+                <Path d="M5.5 10H4" />
+                <Path d="M20 10h-1.5" />
+            </G>
         </Svg>
     );
 }
@@ -337,6 +338,20 @@ export function SparklesIcon({ size = 28, color = "#a371f7" }: { size?: number; 
                 d="M18.5 14.5c.3 0 .5.2.6.4l.4 1.2c.2.6.6 1 1.2 1.2l1.2.4c.2.1.4.3.4.6s-.2.5-.4.6l-1.2.4c-.6.2-1 .6-1.2 1.2l-.4 1.2c-.1.2-.3.4-.6.4s-.5-.2-.6-.4l-.4-1.2a1.8 1.8 0 0 0-1.2-1.2l-1.2-.4a.6.6 0 0 1-.4-.6c0-.3.2-.5.4-.6l1.2-.4c.6-.2 1-.6 1.2-1.2l.4-1.2c.1-.2.3-.4.6-.4Z"
                 fill={color}
             />
+        </Svg>
+    );
+}
+
+export function BrainIcon({ size = 16, color = "#a371f7" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M10.1 4.3C8.7 3.5 7 4 6.2 5.2c-1.3.1-2.3 1.1-2.3 2.4 0 .7.3 1.4.8 1.8-.5.5-.8 1.2-.8 2 0 1.2.9 2.3 2.2 2.5.2 1.5 1.4 2.6 2.9 2.6.5 0 1-.1 1.4-.3.6 1.1 1.8 1.8 3.1 1.8" />
+                <Path d="M13.9 4.3c1.4-.8 3.1-.3 3.9.9 1.3.1 2.3 1.1 2.3 2.4 0 .7-.3 1.4-.8 1.8.5.5.8 1.2.8 2 0 1.2-.9 2.3-2.2 2.5-.2 1.5-1.4 2.6-2.9 2.6-.5 0-1-.1-1.4-.3-.6 1.1-1.8 1.8-3.1 1.8" />
+                <Path d="M12 5.5v12.8" />
+                <Path d="M9.4 7.7c.8.1 1.4.7 1.6 1.4M8.7 11c1 .1 1.8.8 2.1 1.7M9.5 15c.7.1 1.3.5 1.7 1.1" />
+                <Path d="M14.6 7.7c-.8.1-1.4.7-1.6 1.4M15.3 11c-1 .1-1.8.8-2.1 1.7M14.5 15c-.7.1-1.3.5-1.7 1.1" />
+            </G>
         </Svg>
     );
 }
