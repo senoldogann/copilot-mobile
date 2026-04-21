@@ -19,8 +19,10 @@ const BAND = 60;
 const DURATION = 1600;
 
 // ─── SunshineText ─────────────────────────────────────────────────────────────
-// SVG Text + AnimatedLinearGradient: gradient fill soldan sağa kayar.
-// Harflerin kendi şeklinden ışık geçiyor gibi görünür — arka plan etkilenmez.
+// İki SVG Text katmanı:
+//   1. Soluk (textTertiary) metin — her zaman görünür
+//   2. Parlak (textPrimary) metin — animated Mask bandıyla kliplenir
+// Böylece ışık yalnızca harf şekillerinden geçer; arka plan etkilenmez.
 
 type SunshineTextProps = {
     active: boolean;
@@ -33,8 +35,9 @@ type SunshineTextProps = {
 export function SunshineText({ active, text, textStyle, style, numberOfLines }: SunshineTextProps) {
     const [dims, setDims] = useState({ width: 0, height: 0 });
     const sweepX = useSharedValue(-BAND);
-    // Her instance için benzersiz gradient ID
-    const gradId = useRef(`sun_${Math.random().toString(36).slice(2, 8)}`).current;
+    // Her instance için çakışmayan ID'ler
+    const maskId = useRef(`msk_${Math.random().toString(36).slice(2, 8)}`).current;
+    const gradId = useRef(`mgr_${Math.random().toString(36).slice(2, 8)}`).current;
 
     useEffect(() => {
         cancelAnimation(sweepX);
@@ -51,11 +54,7 @@ export function SunshineText({ active, text, textStyle, style, numberOfLines }: 
         return () => cancelAnimation(sweepX);
     }, [active, dims.width, sweepX]);
 
-    // x1/x2 animasyonu: gradient bandı userSpaceOnUse koordinatlarında kayar
-    const gradProps = useAnimatedProps(() => ({
-        x1: sweepX.value,
-        x2: sweepX.value + BAND,
-    }));
+    const bandProps = useAnimatedProps(() => ({ x: sweepX.value }));
 
     const handleLayout = useCallback(
         (e: LayoutChangeEvent) => setDims({ width: e.nativeEvent.layout.width, height: e.nativeEvent.layout.height }),
@@ -64,46 +63,48 @@ export function SunshineText({ active, text, textStyle, style, numberOfLines }: 
 
     const fz = (textStyle.fontSize ?? 13) as number;
     const fw = String(textStyle.fontWeight ?? "normal");
-    const ff = textStyle.fontFamily;
-    // SVG Text'in y konumu: baseline yaklaşımı (container yüksekliğinin ~%82'si)
+    const ff = textStyle.fontFamily as string | undefined;
+    // SVG Text y = baseline ≈ container yüksekliğinin %82'si
     const baseline = dims.height > 0 ? dims.height * 0.82 : fz;
 
-    const svgTextProps = ff !== undefined
-        ? { fontFamily: ff }
-        : {};
+    const sharedTextProps = {
+        x: 0 as number,
+        y: baseline,
+        fontSize: fz,
+        fontWeight: fw,
+        ...(ff !== undefined ? { fontFamily: ff } : {}),
+    };
 
     return (
         <View style={style} onLayout={handleLayout}>
             {!active || dims.width === 0 || dims.height === 0 ? (
                 <Text style={textStyle} numberOfLines={numberOfLines ?? 1}>{text}</Text>
             ) : (
-                <Svg width={dims.width} height={dims.height} style={styles.svgClip}>
+                <Svg width={dims.width} height={dims.height}>
                     <Defs>
-                        {/* spreadMethod="pad": gradient dışındaki piksellerle kenar renkleri kullanılır (ikisi de textTertiary) */}
-                        <AnimatedLinearGradient
-                            id={gradId}
-                            gradientUnits="userSpaceOnUse"
-                            y1={0}
-                            y2={0}
-                            animatedProps={gradProps}
-                        >
-                            <Stop offset="0" stopColor={colors.textTertiary} stopOpacity="1" />
-                            <Stop offset="0.25" stopColor="#8e9bac" stopOpacity="1" />
-                            <Stop offset="0.5" stopColor={colors.textPrimary} stopOpacity="1" />
-                            <Stop offset="0.75" stopColor="#8e9bac" stopOpacity="1" />
-                            <Stop offset="1" stopColor={colors.textTertiary} stopOpacity="1" />
-                        </AnimatedLinearGradient>
+                        {/* Mask gradient: siyah kenarlarda, beyaz ortada → yumuşak geçiş */}
+                        <LinearGradient id={gradId} x1="0" y1="0" x2="1" y2="0">
+                            <Stop offset="0" stopColor="black" stopOpacity="1" />
+                            <Stop offset="0.25" stopColor="white" stopOpacity="0.4" />
+                            <Stop offset="0.5" stopColor="white" stopOpacity="1" />
+                            <Stop offset="0.75" stopColor="white" stopOpacity="0.4" />
+                            <Stop offset="1" stopColor="black" stopOpacity="1" />
+                        </LinearGradient>
+                        {/* Animated mask: gradient bant soldan sağa kayar */}
+                        <Mask id={maskId}>
+                            <AnimatedRect
+                                animatedProps={bandProps}
+                                y={0}
+                                width={BAND}
+                                height={dims.height}
+                                fill={`url(#${gradId})`}
+                            />
+                        </Mask>
                     </Defs>
-                    <SvgText
-                        fill={`url(#${gradId})`}
-                        x={0}
-                        y={baseline}
-                        fontSize={fz}
-                        fontWeight={fw}
-                        {...svgTextProps}
-                    >
-                        {text}
-                    </SvgText>
+                    {/* Katman 1: soluk metin — her zaman görünür */}
+                    <SvgText fill={colors.textTertiary} {...sharedTextProps}>{text}</SvgText>
+                    {/* Katman 2: parlak metin — yalnızca mask bandında görünür */}
+                    <SvgText fill={colors.textPrimary} mask={`url(#${maskId})`} {...sharedTextProps}>{text}</SvgText>
                 </Svg>
             )}
         </View>
@@ -185,9 +186,6 @@ export function ShimmerHighlight(_props: LegacyProps) {
 
 const styles = StyleSheet.create({
     container: {
-        overflow: "hidden",
-    },
-    svgClip: {
         overflow: "hidden",
     },
 });
