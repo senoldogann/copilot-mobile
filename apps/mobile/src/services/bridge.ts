@@ -423,6 +423,24 @@ export async function pushWorkspace(sessionId: string): Promise<void> {
     }
 }
 
+// Workspace branch switch — switches to an existing local branch
+export async function switchWorkspaceBranch(sessionId: string, branchName: string): Promise<void> {
+    const c = getClient();
+    const workspaceStore = useWorkspaceStore.getState();
+    workspaceStore.setBranchSwitching(true);
+    try {
+        await c.sendMessage("workspace.branch.switch", {
+            sessionId,
+            branchName,
+        });
+    } catch (error) {
+        workspaceStore.setBranchSwitching(false);
+        workspaceStore.setError(
+            `Failed to switch branch: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+}
+
 export function resumeBridgeConnection(): boolean {
     if (client === null) {
         return false;

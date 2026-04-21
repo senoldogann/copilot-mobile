@@ -2,10 +2,12 @@
 
 import { create } from "zustand";
 import type {
+    GitBranchSummary,
     GitCommitSummary,
     GitFileChange,
     SessionContext,
     WorkspaceOperation,
+    WorkspaceBranchSwitchResultPayload,
     WorkspaceTreeNode,
     WorkspaceGitSummaryMessage,
     WorkspaceTreeMessage,
@@ -24,6 +26,7 @@ export type WorkspaceStore = {
     gitRoot: string | null;
     repository: string | null;
     branch: string | null;
+    branches: ReadonlyArray<GitBranchSummary>;
     uncommittedChanges: ReadonlyArray<GitFileChange>;
     recentCommits: ReadonlyArray<GitCommitSummary>;
     gitTruncated: boolean;
@@ -33,6 +36,7 @@ export type WorkspaceStore = {
     isLoadingGit: boolean;
     isPulling: boolean;
     isPushing: boolean;
+    isSwitchingBranch: boolean;
     operationMessage: string | null;
     error: string | null;
     setTab: (tab: WorkspaceTab) => void;
@@ -45,12 +49,14 @@ export type WorkspaceStore = {
     clearRequestLoadingState: () => void;
     setWorkspaceTree: (payload: WorkspaceTreeMessage["payload"]) => void;
     setWorkspaceGitSummary: (payload: WorkspaceGitSummaryMessage["payload"]) => void;
+    setBranchSwitching: (loading: boolean) => void;
     setWorkspaceOperationState: (
         operation: WorkspaceOperation,
         loading: boolean,
         message?: string | null
     ) => void;
     setWorkspaceOperationResult: (payload: WorkspaceOperationResultPayload) => void;
+    setWorkspaceBranchSwitchResult: (payload: WorkspaceBranchSwitchResultPayload) => void;
     setError: (error: string | null) => void;
 };
 
@@ -65,6 +71,7 @@ type WorkspaceState = Pick<
     | "gitRoot"
     | "repository"
     | "branch"
+    | "branches"
     | "uncommittedChanges"
     | "recentCommits"
     | "gitTruncated"
@@ -74,6 +81,7 @@ type WorkspaceState = Pick<
     | "isLoadingGit"
     | "isPulling"
     | "isPushing"
+    | "isSwitchingBranch"
     | "operationMessage"
     | "error"
 >;
@@ -88,6 +96,7 @@ const initialState: WorkspaceState = {
     gitRoot: null,
     repository: null,
     branch: null,
+    branches: [],
     uncommittedChanges: [],
     recentCommits: [],
     gitTruncated: false,
@@ -97,6 +106,7 @@ const initialState: WorkspaceState = {
     isLoadingGit: false,
     isPulling: false,
     isPushing: false,
+    isSwitchingBranch: false,
     operationMessage: null,
     error: null,
 };
@@ -235,6 +245,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
             gitRoot: payload.gitRoot,
             repository: payload.repository ?? null,
             branch: payload.branch ?? null,
+            branches: payload.branches,
             uncommittedChanges: payload.uncommittedChanges,
             recentCommits: payload.recentCommits,
             gitTruncated: payload.truncated,
@@ -245,6 +256,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
                 [payload.workspaceRoot]: true,
             },
         })),
+
+    setBranchSwitching: (loading) =>
+        set({
+            isSwitchingBranch: loading,
+            ...(loading ? { error: null, operationMessage: null } : {}),
+        }),
 
     setWorkspaceOperationState: (operation, loading, message) =>
         set((state) => ({
@@ -264,6 +281,18 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
                 ? (payload.message ?? `${payload.operation} completed`)
                 : null,
             error: payload.success ? null : (payload.message ?? "Workspace operation failed"),
+        })),
+
+    setWorkspaceBranchSwitchResult: (payload) =>
+        set((state) => ({
+            sessionId: payload.sessionId,
+            context: payload.context,
+            branch: payload.success ? payload.branchName : state.branch,
+            isSwitchingBranch: false,
+            operationMessage: payload.success
+                ? (payload.message ?? `Switched to ${payload.branchName}`)
+                : null,
+            error: payload.success ? null : (payload.message ?? `Failed to switch to ${payload.branchName}`),
         })),
 
     setError: (error) => set({ error }),

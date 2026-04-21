@@ -15,6 +15,7 @@ import {
     requestWorkspaceTree,
     requestWorkspaceDiff,
     requestWorkspaceFile,
+    switchWorkspaceBranch,
     onWorkspaceDiffResponse,
     onWorkspaceFileResponse,
 } from "../services/bridge";
@@ -71,6 +72,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             gitRoot: s.gitRoot,
             repository: s.repository,
             branch: s.branch,
+            branches: s.branches,
             uncommittedChanges: s.uncommittedChanges,
             recentCommits: s.recentCommits,
             tab: s.tab,
@@ -79,12 +81,14 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             isLoadingGit: s.isLoadingGit,
             isPulling: s.isPulling,
             isPushing: s.isPushing,
+            isSwitchingBranch: s.isSwitchingBranch,
             operationMessage: s.operationMessage,
             error: s.error,
         })),
     );
 
     const [viewMode, setViewMode] = useState<ViewMode>("paragraph");
+    const [branchMenuOpen, setBranchMenuOpen] = useState<boolean>(false);
     const [commitMenuOpen, setCommitMenuOpen] = useState<boolean>(false);
     const [changesFilter, setChangesFilter] = useState<"uncommitted" | "recent">("uncommitted");
     const [changesFilterMenuOpen, setChangesFilterMenuOpen] = useState<boolean>(false);
@@ -145,7 +149,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             void requestWorkspaceFile(activeSessionId, viewer.path);
             return () => { finish(); unsub(); };
         }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [viewer?.path, viewer?.mode, activeSessionId]);
 
     useEffect(() => {
@@ -167,6 +171,11 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         void requestWorkspaceGitSummary(activeSessionId, 10);
     }, [visible, activeSessionId, isConnected]);
 
+    const hasRepo = workspace.gitRoot !== null;
+    const treeRoot = workspace.tree;
+    const rootTreeLoading = workspace.loadingTreePaths["__root__"] === true;
+    const canRefresh = activeSessionId !== null && isConnected;
+
     const refreshWorkspace = useCallback(() => {
         if (activeSessionId === null) {
             useWorkspaceStore
@@ -185,21 +194,37 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     }, [activeSessionId, isConnected]);
 
     const handlePull = useCallback(() => {
+        setBranchMenuOpen(false);
         setCommitMenuOpen(false);
         if (activeSessionId === null || !isConnected) return;
         void pullWorkspace(activeSessionId);
     }, [activeSessionId, isConnected]);
 
     const handlePush = useCallback(() => {
+        setBranchMenuOpen(false);
         setCommitMenuOpen(false);
         if (activeSessionId === null || !isConnected) return;
         void pushWorkspace(activeSessionId);
     }, [activeSessionId, isConnected]);
 
-    const hasRepo = workspace.gitRoot !== null;
-    const treeRoot = workspace.tree;
-    const rootTreeLoading = workspace.loadingTreePaths["__root__"] === true;
-    const canRefresh = activeSessionId !== null && isConnected;
+    const handleToggleBranchMenu = useCallback(() => {
+        if (activeSessionId === null || !isConnected || !hasRepo) {
+            return;
+        }
+
+        setCommitMenuOpen(false);
+        setChangesFilterMenuOpen(false);
+        setBranchMenuOpen((value) => !value);
+    }, [activeSessionId, hasRepo, isConnected]);
+
+    const handleSwitchBranch = useCallback((branchName: string) => {
+        if (activeSessionId === null || !isConnected || workspace.isSwitchingBranch) {
+            return;
+        }
+
+        setBranchMenuOpen(false);
+        void switchWorkspaceBranch(activeSessionId, branchName);
+    }, [activeSessionId, isConnected, workspace.isSwitchingBranch]);
 
     const branchLabel = workspace.branch ?? activeContext?.branch ?? "main";
     const rootLabel = useMemo(() => {
@@ -339,12 +364,23 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         <View style={styles.content}>
             {/* Branch + Commit pill */}
             <View style={styles.branchRow}>
-                <View style={styles.branchLeft}>
-                    <GitBranchIcon size={15} color={colors.textSecondary} />
-                    <Text style={styles.branchName} numberOfLines={1}>
-                        {branchLabel}
-                    </Text>
-                </View>
+                <Pressable
+                    style={({ pressed }) => [
+                        styles.branchPicker,
+                        pressed && styles.pressed,
+                        (!hasRepo || !isConnected || workspace.isSwitchingBranch) && styles.branchPickerDisabled,
+                    ]}
+                    onPress={handleToggleBranchMenu}
+                    disabled={!hasRepo || !isConnected || workspace.isSwitchingBranch}
+                >
+                    <View style={styles.branchLeft}>
+                        <GitBranchIcon size={15} color={colors.textSecondary} />
+                        <Text style={styles.branchName} numberOfLines={1}>
+                            {branchLabel}
+                        </Text>
+                        <ChevronDownIcon size={12} color={colors.textTertiary} />
+                    </View>
+                </Pressable>
                 <View style={styles.commitGroup}>
                     <Pressable
                         style={({ pressed }) => [
@@ -367,6 +403,44 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     </Pressable>
                 </View>
             </View>
+
+            {branchMenuOpen && (
+                <View style={styles.popover}>
+                    {workspace.branches.length === 0 ? (
+                        <View style={styles.branchEmptyState}>
+                            <Text style={styles.branchEmptyText}>No local branches found.</Text>
+                        </View>
+                    ) : workspace.branches.flatMap((branchItem, index) => {
+                        const rows: Array<React.ReactNode> = [
+                            <Pressable
+                                key={branchItem.name}
+                                style={({ pressed }) => [
+                                    styles.popoverItem,
+                                    pressed && !branchItem.current && styles.popoverItemPressed,
+                                    branchItem.current && styles.branchPopoverItemCurrent,
+                                ]}
+                                onPress={() => handleSwitchBranch(branchItem.name)}
+                                disabled={branchItem.current || workspace.isSwitchingBranch}
+                            >
+                                <GitBranchIcon
+                                    size={14}
+                                    color={branchItem.current ? colors.textPrimary : colors.textTertiary}
+                                />
+                                <Text style={styles.popoverLabel}>{branchItem.name}</Text>
+                                {branchItem.current && (
+                                    <Text style={styles.branchCurrentLabel}>Current</Text>
+                                )}
+                            </Pressable>,
+                        ];
+
+                        if (index < workspace.branches.length - 1) {
+                            rows.push(<View key={`${branchItem.name}_sep`} style={styles.popoverSep} />);
+                        }
+
+                        return rows;
+                    })}
+                </View>
+            )}
 
             {commitMenuOpen && (
                 <View style={styles.popover}>
@@ -600,7 +674,9 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             visible={visible}
             onClose={() => {
                 setViewer(null);
+                setBranchMenuOpen(false);
                 setCommitMenuOpen(false);
+                setChangesFilterMenuOpen(false);
                 onClose();
             }}
             iconName="folder"
@@ -843,6 +919,12 @@ const styles = StyleSheet.create({
         gap: spacing.sm,
         paddingVertical: spacing.xs,
     },
+    branchPicker: {
+        flex: 1,
+        minHeight: 36,
+        justifyContent: "center",
+    },
+    branchPickerDisabled: { opacity: 0.55 },
     branchLeft: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
     branchName: {
         fontSize: fontSize.sm,
@@ -896,9 +978,23 @@ const styles = StyleSheet.create({
         paddingVertical: 9,
         paddingHorizontal: spacing.md,
     },
+    branchPopoverItemCurrent: { opacity: 0.72 },
     popoverItemPressed: { backgroundColor: colors.bgTertiary },
     popoverLabel: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: "500" },
     popoverSep: { height: 1, backgroundColor: colors.borderMuted, marginHorizontal: spacing.sm },
+    branchCurrentLabel: {
+        marginLeft: "auto",
+        fontSize: fontSize.xs,
+        color: colors.textTertiary,
+    },
+    branchEmptyState: {
+        paddingHorizontal: spacing.md,
+        paddingVertical: spacing.sm,
+    },
+    branchEmptyText: {
+        fontSize: fontSize.sm,
+        color: colors.textTertiary,
+    },
 
     // Segmented "Uncommitted ▾" header
     segmentRow: {

@@ -618,6 +618,38 @@ export function handleServerMessage(message: ServerMessage): void {
             if (!isActiveSession(message.payload.sessionId)) break;
             const workspaceStore = useWorkspaceStore.getState();
             workspaceStore.setWorkspaceGitSummary(message.payload);
+            sessionStore.setSessions(
+                sessionStore.sessions.map((session) => {
+                    if (session.id !== message.payload.sessionId) {
+                        return session;
+                    }
+
+                    const nextContext = {
+                        ...(session.context ?? message.payload.context),
+                        ...message.payload.context,
+                        ...(message.payload.gitRoot !== null ? { gitRoot: message.payload.gitRoot } : {}),
+                        ...(message.payload.repository !== undefined ? { repository: message.payload.repository } : {}),
+                        ...(message.payload.branch !== undefined ? { branch: message.payload.branch } : {}),
+                    };
+
+                    return {
+                        ...session,
+                        context: nextContext,
+                    };
+                })
+            );
+            break;
+        }
+
+        case "workspace.branch.switch.result": {
+            if (!isActiveSession(message.payload.sessionId)) break;
+            const workspaceStore = useWorkspaceStore.getState();
+            workspaceStore.setWorkspaceBranchSwitchResult(message.payload);
+            if (message.payload.success) {
+                void import("./bridge").then(({ requestWorkspaceGitSummary }) =>
+                    requestWorkspaceGitSummary(message.payload.sessionId, 10)
+                );
+            }
             break;
         }
 

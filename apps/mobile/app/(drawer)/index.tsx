@@ -82,8 +82,13 @@ function ChatHeader() {
         router.replace("/scan");
     }, [router]);
 
+    const handleOpenWorkspaceChanges = React.useCallback(() => {
+        useWorkspaceStore.getState().setTab("changes");
+        setWorkspaceOpen(true);
+    }, []);
+
     const activeSession = sessions.find((s) => s.id === activeSessionId);
-    const branchName = branch ?? "main";
+    const branchName = branch ?? activeSession?.context?.branch ?? "main";
     const repoName = workspaceRoot !== null
         ? basename(workspaceRoot)
         : activeSession?.context?.workspaceRoot !== undefined
@@ -103,13 +108,22 @@ function ChatHeader() {
                     <View style={headerStyles.menuLine} />
                 </Pressable>
 
-                <View style={headerStyles.branchContainer}>
+                <Pressable
+                    style={({ pressed }) => [
+                        headerStyles.branchContainer,
+                        pressed && headerStyles.branchContainerPressed,
+                    ]}
+                    onPress={handleOpenWorkspaceChanges}
+                    hitSlop={8}
+                    accessibilityLabel="Open workspace branch menu"
+                >
                     <View style={headerStyles.branchRow}>
                         <GitBranchIcon size={12} color={colors.textTertiary} />
                         <Text style={headerStyles.branchText} numberOfLines={1}>{branchName}</Text>
+                        <ChevronDownIcon size={11} color={colors.textTertiary} />
                     </View>
                     <Text style={headerStyles.repoText} numberOfLines={1}>{repoName}</Text>
-                </View>
+                </Pressable>
 
                 <View style={headerStyles.rightContainer}>
                     <Pressable
@@ -618,6 +632,9 @@ const headerStyles = StyleSheet.create({
     branchContainer: {
         flex: 1,
         paddingLeft: spacing.sm,
+    },
+    branchContainerPressed: {
+        opacity: 0.78,
     },
     branchRow: {
         flexDirection: "row",

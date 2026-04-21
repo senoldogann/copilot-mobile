@@ -3,6 +3,7 @@
 import type { ClientMessage, ServerMessage, TransportMode } from "@copilot-mobile/shared";
 import {
     PROTOCOL_VERSION,
+    SESSION_TOKEN_TTL_SECONDS,
     SESSION_TOKEN_REFRESH_THRESHOLD_MS,
     clientMessageSchema,
 } from "@copilot-mobile/shared";
@@ -104,11 +105,15 @@ export function createMessageHandler(
         });
     }
 
-    function mintSessionToken(deviceId: string): { token: string; expiresAt: number } {
+    function getSessionTokenExpiresAt(issuedAt: number): number {
+        return issuedAt + (SESSION_TOKEN_TTL_SECONDS * 1000);
+    }
+
+    function mintSessionToken(deviceId: string, issuedAt: number): { token: string; expiresAt: number } {
         const token = createSessionToken(deviceId);
         return {
             token,
-            expiresAt: Date.now() + (24 * 60 * 60 * 1000),
+            expiresAt: getSessionTokenExpiresAt(issuedAt),
         };
     }
 
@@ -117,10 +122,11 @@ export function createMessageHandler(
         const elapsed = Date.now() - state.tokenIssuedAt;
         if (elapsed < SESSION_TOKEN_REFRESH_THRESHOLD_MS) return;
 
-        const nextToken = mintSessionToken(state.deviceId);
+        const issuedAt = Date.now();
+        const nextToken = mintSessionToken(state.deviceId, issuedAt);
         state.sessionToken = nextToken.token;
         state.sessionTokenExpiresAt = nextToken.expiresAt;
-        state.tokenIssuedAt = Date.now();
+        state.tokenIssuedAt = issuedAt;
 
         send({
             ...makeBase(),
@@ -142,14 +148,15 @@ export function createMessageHandler(
 
         const deviceId = generateMessageId();
         const deviceCredential = createDeviceCredential(deviceId);
-        const sessionToken = mintSessionToken(deviceId);
+        const issuedAt = Date.now();
+        const sessionToken = mintSessionToken(deviceId, issuedAt);
 
         state.authenticated = true;
         state.deviceId = deviceId;
         state.deviceCredential = deviceCredential;
         state.sessionToken = sessionToken.token;
         state.sessionTokenExpiresAt = sessionToken.expiresAt;
-        state.tokenIssuedAt = Date.now();
+        state.tokenIssuedAt = issuedAt;
         state.transportMode = transportMode;
 
         sendAuthenticatedMessage("pair", 0);
@@ -187,13 +194,14 @@ export function createMessageHandler(
             }
         }
 
-        const nextSessionToken = mintSessionToken(verifiedDeviceId);
+        const issuedAt = Date.now();
+        const nextSessionToken = mintSessionToken(verifiedDeviceId, issuedAt);
         state.authenticated = true;
         state.deviceId = verifiedDeviceId;
         state.deviceCredential = payload.deviceCredential;
         state.sessionToken = nextSessionToken.token;
         state.sessionTokenExpiresAt = nextSessionToken.expiresAt;
-        state.tokenIssuedAt = Date.now();
+        state.tokenIssuedAt = issuedAt;
         state.transportMode = payload.transportMode;
 
         const missedMessages = messageBuffer.filter((message) => message.seq > payload.lastSeenSeq);
@@ -360,6 +368,12 @@ export function createMessageHandler(
 
                 case "workspace.push":
                     return sessionManager.pushWorkspace(message.payload.sessionId);
+
+                case "workspace.branch.switch":
+                    return sessionManager.switchWorkspaceBranch(
+                        message.payload.sessionId,
+                        message.payload.branchName
+                    );
 
                 case "workspace.file.request":
                     return sessionManager.readWorkspaceFile(

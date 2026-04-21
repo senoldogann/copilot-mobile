@@ -71,6 +71,11 @@ const gitCommitSummarySchema = z.object({
     files: z.array(z.string().min(1)).readonly(),
 });
 
+const gitBranchSummarySchema = z.object({
+    name: z.string().min(1),
+    current: z.boolean(),
+});
+
 const sessionInfoSchema = z.object({
     id: z.string().min(1),
     model: z.string().min(1),
@@ -217,6 +222,18 @@ const workspaceOperationResultPayloadSchema = z.object({
     sessionId: z.string().min(1),
     context: sessionContextSchema,
     operation: z.enum(["pull", "push"]),
+    success: z.boolean(),
+    stdout: z.string().optional(),
+    stderr: z.string().optional(),
+    exitCode: z.number().int().optional(),
+    signal: z.string().nullable().optional(),
+    message: z.string().optional(),
+});
+
+const workspaceBranchSwitchResultPayloadSchema = z.object({
+    sessionId: z.string().min(1),
+    context: sessionContextSchema,
+    branchName: z.string().min(1),
     success: z.boolean(),
     stdout: z.string().optional(),
     stderr: z.string().optional(),
@@ -450,10 +467,16 @@ const workspaceGitSummarySchema = baseBridgeMessageSchema.extend({
         gitRoot: z.string().min(1).nullable(),
         repository: z.string().optional(),
         branch: z.string().optional(),
+        branches: z.array(gitBranchSummarySchema).readonly(),
         uncommittedChanges: z.array(gitFileChangeSchema),
         recentCommits: z.array(gitCommitSummarySchema),
         truncated: z.boolean(),
     }),
+});
+
+const workspaceBranchSwitchResultSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.branch.switch.result"),
+    payload: workspaceBranchSwitchResultPayloadSchema,
 });
 
 const workspacePullResultSchema = baseBridgeMessageSchema.extend({
@@ -542,6 +565,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     planExitRequestSchema,
     workspaceTreeSchema,
     workspaceGitSummarySchema,
+    workspaceBranchSwitchResultSchema,
     workspacePullResultSchema,
     workspacePushResultSchema,
     workspaceResolveResponseSchema,
@@ -679,6 +703,14 @@ const workspacePushSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceBranchSwitchSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.branch.switch"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        branchName: z.string().min(1),
+    }),
+});
+
 const workspaceFileRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.file.request"),
     payload: z.object({
@@ -729,6 +761,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     workspaceGitSummaryRequestSchema,
     workspacePullSchema,
     workspacePushSchema,
+    workspaceBranchSwitchSchema,
     workspaceResolveRequestSchema,
     workspaceFileRequestSchema,
     workspaceDiffRequestSchema,
@@ -752,14 +785,6 @@ export const qrPayloadSchema = z.object({
     relayAccessToken: z.string().min(1).optional(),
     version: z.number().int().positive(),
 }).superRefine((value, context) => {
-    if (value.url.startsWith("wss://") && value.transportMode === "direct" && value.certFingerprint === null) {
-        context.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: ["certFingerprint"],
-            message: "A secure WebSocket QR payload requires a certificate fingerprint",
-        });
-    }
-
     if (value.transportMode === "relay" && value.relayAccessToken === undefined) {
         context.addIssue({
             code: z.ZodIssueCode.custom,
@@ -794,7 +819,9 @@ import type {
     WorkspaceTreeNode,
     GitFileChange,
     GitCommitSummary,
+    GitBranchSummary,
     WorkspaceOperationResultPayload,
+    WorkspaceBranchSwitchResultPayload,
 } from "./protocol.js";
 
 type _AssertServerTypes = z.infer<typeof serverMessageSchema>["type"] extends ServerMessage["type"] ? true : never;
@@ -822,9 +849,22 @@ type _AssertGitCommitSummaryReverse = GitCommitSummary extends z.infer<typeof gi
 const _checkGitCommitSummary: _AssertGitCommitSummary & _AssertGitCommitSummaryReverse = true;
 void _checkGitCommitSummary;
 
+type _AssertGitBranchSummary = z.infer<typeof gitBranchSummarySchema> extends GitBranchSummary ? true : never;
+type _AssertGitBranchSummaryReverse = GitBranchSummary extends z.infer<typeof gitBranchSummarySchema> ? true : never;
+const _checkGitBranchSummary: _AssertGitBranchSummary & _AssertGitBranchSummaryReverse = true;
+void _checkGitBranchSummary;
+
 type _AssertWorkspaceOperationResult =
     z.infer<typeof workspaceOperationResultPayloadSchema> extends WorkspaceOperationResultPayload ? true : never;
 type _AssertWorkspaceOperationResultReverse =
     WorkspaceOperationResultPayload extends z.infer<typeof workspaceOperationResultPayloadSchema> ? true : never;
 const _checkWorkspaceOperationResult: _AssertWorkspaceOperationResult & _AssertWorkspaceOperationResultReverse = true;
 void _checkWorkspaceOperationResult;
+
+type _AssertWorkspaceBranchSwitchResult =
+    z.infer<typeof workspaceBranchSwitchResultPayloadSchema> extends WorkspaceBranchSwitchResultPayload ? true : never;
+type _AssertWorkspaceBranchSwitchResultReverse =
+    WorkspaceBranchSwitchResultPayload extends z.infer<typeof workspaceBranchSwitchResultPayloadSchema> ? true : never;
+const _checkWorkspaceBranchSwitchResult:
+    _AssertWorkspaceBranchSwitchResult & _AssertWorkspaceBranchSwitchResultReverse = true;
+void _checkWorkspaceBranchSwitchResult;

@@ -236,6 +236,36 @@ function createItemId(): string {
     return `item-${Date.now()}-${itemCounter}`;
 }
 
+function findTrailingAssistantInsertIndex(items: ReadonlyArray<ChatItem>): number {
+    let index = items.length;
+
+    while (index > 0) {
+        const item = items[index - 1];
+        if (item === undefined || item.type !== "assistant" || item.isStreaming) {
+            break;
+        }
+        index -= 1;
+    }
+
+    return index < items.length ? index : -1;
+}
+
+function insertChatItemBeforeTrailingAssistant(
+    items: ReadonlyArray<ChatItem>,
+    nextItem: ChatItem
+): Array<ChatItem> {
+    const insertIndex = findTrailingAssistantInsertIndex(items);
+    if (insertIndex === -1) {
+        return [...items, nextItem];
+    }
+
+    return [
+        ...items.slice(0, insertIndex),
+        nextItem,
+        ...items.slice(insertIndex),
+    ];
+}
+
 function sortSessionsByActivity(sessions: ReadonlyArray<SessionInfo>): Array<SessionInfo> {
     return [...sessions].sort((left, right) => right.lastActiveAt - left.lastActiveAt);
 }
@@ -614,7 +644,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
                 timestamp: Date.now(),
                 isStreaming: true,
             };
-            return { chatItems: [...s.chatItems, item] };
+            return { chatItems: insertChatItemBeforeTrailingAssistant(s.chatItems, item) };
         });
     },
 
@@ -635,13 +665,15 @@ export const useSessionStore = create<SessionStore>((set) => ({
             }
 
             if (!updatedExisting && content !== undefined && content.trim().length > 0) {
-                items.push({
-                    id: createItemId(),
-                    type: "thinking",
-                    content,
-                    timestamp: Date.now(),
-                    isStreaming: false,
-                });
+                return {
+                    chatItems: insertChatItemBeforeTrailingAssistant(items, {
+                        id: createItemId(),
+                        type: "thinking",
+                        content,
+                        timestamp: Date.now(),
+                        isStreaming: false,
+                    }),
+                };
             }
 
             return { chatItems: items };

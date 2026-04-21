@@ -40,6 +40,14 @@ function isDirectHostname(hostname: string): boolean {
     return secondOctet >= 16 && secondOctet <= 31;
 }
 
+function isAllowedPublicWebSocketUrl(parsedUrl: URL): boolean {
+    if (parsedUrl.protocol === "wss:") {
+        return true;
+    }
+
+    return parsedUrl.protocol === "ws:" && isDirectHostname(parsedUrl.hostname);
+}
+
 function getRequiredPublicWebSocketUrl(): string {
     const publicWebSocketUrl = process.env[REQUIRED_PUBLIC_URL_ENV];
     if (typeof publicWebSocketUrl !== "string" || publicWebSocketUrl.trim().length === 0) {
@@ -57,21 +65,13 @@ function getRequiredPublicWebSocketUrl(): string {
         );
     }
 
-    if (parsedUrl.protocol === "wss:") {
+    if (isAllowedPublicWebSocketUrl(parsedUrl)) {
         return publicWebSocketUrl;
     }
 
-    if (parsedUrl.protocol === "ws:" && isDirectHostname(parsedUrl.hostname)) {
-        return publicWebSocketUrl;
-    }
-
-    if (parsedUrl.protocol !== "wss:") {
-        throw new Error(
-            `${REQUIRED_PUBLIC_URL_ENV} must use wss://, or ws:// only for localhost/private-network development URLs. Received: ${publicWebSocketUrl}`
-        );
-    }
-
-    return publicWebSocketUrl;
+    throw new Error(
+        `${REQUIRED_PUBLIC_URL_ENV} must use wss://, or ws:// only for localhost/private-network development URLs. Received: ${publicWebSocketUrl}`
+    );
 }
 
 function getOptionalRelayBaseUrl(): string | null {
@@ -187,15 +187,32 @@ async function main(): Promise<void> {
     printPairingQRCode(qrCode);
 
     // Graceful shutdown
-    const shutdown = async () => {
-        console.log("\nShutting down...");
-        relayProxy?.shutdown();
-        await wsServer.shutdown();
-        process.exit(0);
+    let shuttingDown = false;
+    const shutdown = async (signal: string) => {
+        if (shuttingDown) {
+            return;
+        }
+
+        shuttingDown = true;
+        console.log(`\nShutting down after ${signal}...`);
+
+        try {
+            relayProxy?.shutdown();
+            await wsServer.shutdown();
+            await copilotClient.shutdown();
+            process.exit(0);
+        } catch (error) {
+            console.error("Failed during shutdown:", error);
+            process.exit(1);
+        }
     };
 
-    process.on("SIGINT", shutdown);
-    process.on("SIGTERM", shutdown);
+    process.on("SIGINT", () => {
+        void shutdown("SIGINT");
+    });
+    process.on("SIGTERM", () => {
+        void shutdown("SIGTERM");
+    });
 }
 
 main().catch((err) => {

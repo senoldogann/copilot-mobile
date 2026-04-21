@@ -216,14 +216,14 @@ export function createWSClient(config: WSClientConfig) {
 
         reconnectTimer = setTimeout(() => {
             reconnectTimer = null;
-            void resumeConnection({
+            void resumeConnectionWithCurrentBackoff({
                 reconnectOnFailure: true,
                 reportErrors: true,
             });
         }, delay);
     }
 
-    function resumeConnection(options: ResumeOptions): boolean {
+    function resumeConnectionWithCurrentBackoff(options: ResumeOptions): boolean {
         if (deviceCredential === null || serverUrl === null || transportMode === null) {
             return false;
         }
@@ -232,7 +232,6 @@ export function createWSClient(config: WSClientConfig) {
             return true;
         }
 
-        reconnectAttempt = 0;
         reconnectOnClose = options.reconnectOnFailure;
         reportConnectionErrors = options.reportErrors;
         pendingPairMessage = null;
@@ -244,6 +243,11 @@ export function createWSClient(config: WSClientConfig) {
         });
         connectToURL(serverUrl, options);
         return true;
+    }
+
+    function resumeConnection(options: ResumeOptions): boolean {
+        reconnectAttempt = 0;
+        return resumeConnectionWithCurrentBackoff(options);
     }
 
     function handleMessage(data: string): void {

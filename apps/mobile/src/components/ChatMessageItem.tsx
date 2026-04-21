@@ -70,13 +70,13 @@ function parseInlineMarkdown(text: string): ReadonlyArray<MarkdownSegment> {
 
 // Detect file paths in plain text
 function isFilePath(text: string): boolean {
-    return /^[a-zA-Z0-9_\-./\\…]+\.[a-zA-Z]{1,10}(:\d+)?$/.test(text) &&
+    return /^[a-zA-Z0-9_\-./\\…]+\.[a-zA-Z]{1,10}(:\d+(?:-\d+)?)?$/.test(text) &&
         text.includes(".");
 }
 
 function parseFilePaths(text: string): ReadonlyArray<MarkdownSegment> {
-    // Match file paths like src/foo/bar.ts, ./file.tsx, .../foo.ts, packages/shared/index.ts
-    const fileRegex = /(?:^|\s)((?:(?:\.{3}|…)\/|\.\/|\.\.\/|[a-zA-Z0-9_\-]+\/)*[a-zA-Z0-9_\-]+\.[a-zA-Z]{1,10}(?::\d+(?:-\d+)?)?)(?=\s|$|[,.)}\]])/g;
+    // Match file paths like /repo/src/foo.ts, src/foo.ts, ./file.tsx, .../foo.ts, packages/shared/index.ts
+    const fileRegex = /(?:^|\s)((?:(?:\/|(?:\.{3}|…)\/|\.\/|\.\.\/|[a-zA-Z0-9_\-]+\/))*[a-zA-Z0-9_\-]+\.[a-zA-Z]{1,10}(?::\d+(?:-\d+)?)?)(?=\s|$|[,.)}\]])/g;
     const segments: Array<MarkdownSegment> = [];
     let lastIndex = 0;
     let match: RegExpExecArray | null;
