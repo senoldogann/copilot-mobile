@@ -416,7 +416,8 @@ export function createBridgeServer(
                         connectionId,
                     });
                 },
-            }
+            },
+            options?.getRelayMobileAccessToken
         );
 
         ws.on("message", async (data: Buffer) => {

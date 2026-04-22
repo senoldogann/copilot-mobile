@@ -25,6 +25,7 @@ import { armBackgroundCompletion, clearBackgroundCompletion } from "./background
 let currentAppState: AppStateStatus = getAppVisibilityState();
 let runtimeInitialized = false;
 let runtimeBootstrapId = 0;
+let mobileStateHydrated = false;
 
 function createRuntimeBootstrapId(): number {
     runtimeBootstrapId += 1;
@@ -59,6 +60,7 @@ function syncOnForeground(): void {
     const sessionStore = useSessionStore.getState();
     const connectionStore = useConnectionStore.getState();
     const activeSessionId = sessionStore.activeSessionId;
+    const hasVisibleChatState = sessionStore.chatItems.length > 0 || sessionStore.isAssistantTyping;
 
     void dismissCompletionNotifications();
     void prepareNotificationPermissions();
@@ -73,7 +75,9 @@ function syncOnForeground(): void {
     }
 
     if (activeSessionId !== null) {
-        sessionStore.setSessionLoading(true);
+        sessionStore.setSessionLoading(
+            connectionStore.state !== "authenticated" || !hasVisibleChatState
+        );
     }
 
     if (connectionStore.state === "authenticated") {
@@ -125,6 +129,7 @@ async function hydrateMobileState(bootstrapId: number): Promise<void> {
     }
 
     if (sessionStore.activeSessionId !== null) {
+        mobileStateHydrated = true;
         return;
     }
 
@@ -135,15 +140,19 @@ async function hydrateMobileState(bootstrapId: number): Promise<void> {
     if (storedActiveSessionId !== null) {
         sessionStore.setActiveSession(storedActiveSessionId);
     }
+
+    mobileStateHydrated = true;
 }
 
-function startRuntimeBootstrap(): void {
+function startRuntimeBootstrap(options: { rehydrate: boolean }): void {
     const bootstrapId = createRuntimeBootstrapId();
 
     void (async () => {
-        await hydrateMobileState(bootstrapId);
-        if (!isRuntimeBootstrapCurrent(bootstrapId)) {
-            return;
+        if (options.rehydrate && !mobileStateHydrated) {
+            await hydrateMobileState(bootstrapId);
+            if (!isRuntimeBootstrapCurrent(bootstrapId)) {
+                return;
+            }
         }
         await tryResumeFromStoredCredentials({
             reconnectOnFailure: true,
@@ -172,7 +181,6 @@ function handleAppStateChange(nextAppState: AppStateStatus): void {
     }
 
     clearBackgroundCompletion();
-    startRuntimeBootstrap();
     syncOnForeground();
 }
 
@@ -193,12 +201,13 @@ export function initializeAppRuntime(): () => void {
             force: false,
         });
     }
-    startRuntimeBootstrap();
+    startRuntimeBootstrap({ rehydrate: true });
     const subscription = AppState.addEventListener("change", handleAppStateChange);
 
     return () => {
         createRuntimeBootstrapId();
         subscription.remove();
         runtimeInitialized = false;
+        mobileStateHydrated = false;
     };
 }

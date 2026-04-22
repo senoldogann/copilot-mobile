@@ -8,6 +8,7 @@ import { ToolIcon, SubagentIcon, SkillIcon } from "./Icons";
 import type { FeatherName } from "./Icons";
 import { SunshineText } from "./ShimmerHighlight";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
+import { isSubagentToolName, parseToolArgumentsText } from "../utils/tool-introspection";
 
 type Props = { item: ToolItem };
 
@@ -19,7 +20,7 @@ const EMPTY_PARSED_ARGS: ParsedArgs = {};
 
 function classifyTool(toolName: string): ToolKind {
     const t = toolName.toLowerCase();
-    if (t === "task" || t.includes("subagent")) return "agent";
+    if (isSubagentToolName(t)) return "agent";
     if (t === "skill") return "skill";
     if (t.includes("edit") || t.includes("str_replace")) return "edit";
     if (t.includes("create") || t.includes("write")) return "create";
@@ -62,42 +63,27 @@ interface ParsedArgs {
 }
 
 function parseArgs(text: string | undefined): ParsedArgs {
-    if (text === undefined || text.trim() === "") return {};
-    try {
-        const obj = JSON.parse(text) as Record<string, unknown>;
-        const result: ParsedArgs = { raw: obj };
-        const p = str(obj.path ?? obj.file ?? obj.filename ?? obj.filepath);
-        if (p !== undefined) result.path = p;
-        const os = str(obj.old_str ?? obj.old ?? obj.original);
-        if (os !== undefined) result.oldStr = os;
-        const ns = str(obj.new_str ?? obj.new ?? obj.replacement ?? obj.content);
-        if (ns !== undefined) result.newStr = ns;
-        const cmd = str(obj.command ?? obj.cmd);
-        if (cmd !== undefined) result.command = cmd;
-        const ct = str(obj.content ?? obj.file_text ?? obj.text);
-        if (ct !== undefined) result.content = ct;
-        const q = str(obj.query ?? obj.search ?? obj.pattern ?? obj.glob);
-        if (q !== undefined) result.query = q;
-        const pt = str(obj.pattern ?? obj.glob ?? obj.query);
-        if (pt !== undefined) result.pattern = pt;
-        const th = str(obj.thought ?? obj.thinking);
-        if (th !== undefined) result.thought = th;
-        const description = str(obj.description ?? obj.title ?? obj.summary);
-        if (description !== undefined) result.description = description;
-        const prompt = str(obj.prompt ?? obj.initialPrompt);
-        if (prompt !== undefined) result.prompt = prompt;
-        const agentName = str(obj.name ?? obj.agent_name ?? obj.agent);
-        if (agentName !== undefined) result.agentName = agentName;
-        const agentType = str(obj.agent_type ?? obj.agentType ?? obj.provider);
-        if (agentType !== undefined) result.agentType = agentType;
-        const skill = str(obj.skill);
-        if (skill !== undefined) result.skill = skill;
-        return result;
-    } catch { return {}; }
-}
+    const parsed = parseToolArgumentsText(text);
+    if (parsed === null) {
+        return {};
+    }
 
-function str(v: unknown): string | undefined {
-    return typeof v === "string" && v.length > 0 ? v : undefined;
+    return {
+        raw: parsed.raw,
+        ...(parsed.path !== undefined ? { path: parsed.path } : {}),
+        ...(parsed.oldStr !== undefined ? { oldStr: parsed.oldStr } : {}),
+        ...(parsed.newStr !== undefined ? { newStr: parsed.newStr } : {}),
+        ...(parsed.command !== undefined ? { command: parsed.command } : {}),
+        ...(parsed.content !== undefined ? { content: parsed.content } : {}),
+        ...(parsed.query !== undefined ? { query: parsed.query } : {}),
+        ...(parsed.pattern !== undefined ? { pattern: parsed.pattern } : {}),
+        ...(parsed.thought !== undefined ? { thought: parsed.thought } : {}),
+        ...(parsed.description !== undefined ? { description: parsed.description } : {}),
+        ...(parsed.prompt !== undefined ? { prompt: parsed.prompt } : {}),
+        ...(parsed.agentName !== undefined ? { agentName: parsed.agentName } : {}),
+        ...(parsed.agentType !== undefined ? { agentType: parsed.agentType } : {}),
+        ...(parsed.skill !== undefined ? { skill: parsed.skill } : {}),
+    };
 }
 
 function shortPath(p: string | undefined): string {

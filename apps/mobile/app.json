@@ -14,8 +14,8 @@
       "supportsTablet": true,
       "bundleIdentifier": "dev.senoldogan.copilot-mobile",
       "infoPlist": {
-        "NSCameraUsageDescription": "Camera is required to connect to the bridge server via QR code",
-        "NSLocalNetworkUsageDescription": "Local network access is required to connect to your Copilot Bridge running on your computer",
+        "NSCameraUsageDescription": "Camera access is required to scan the QR code shown by your Mac companion",
+        "NSLocalNetworkUsageDescription": "Local network access helps your iPhone discover and connect to your Mac companion during setup",
         "NSBonjourServices": [
           "_expo._tcp",
           "_react-native._tcp"
@@ -41,10 +41,10 @@
         },
         "plugins": [
             "expo-router",
-            [
+      [
         "expo-camera",
         {
-          "cameraPermission": "Camera permission is required for QR code scanning"
+          "cameraPermission": "Camera access is required to scan the QR code shown by your Mac companion"
         }
       ],
       [
@@ -59,7 +59,8 @@
       [
         "expo-notifications",
         {
-          "color": "#161918"
+          "color": "#161918",
+          "enableBackgroundRemoteNotifications": true
         }
       ]
     ]

@@ -62,6 +62,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     chatItems: [],
     isAssistantTyping: false,
+    isAbortRequested: false,
     currentIntent: null,
     agentTodos: [],
 
@@ -108,6 +109,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
             return {
                 activeSessionId: sessionId,
+                isAbortRequested: false,
                 permissionPrompt: nextPermissionPrompt ?? null,
                 permissionPromptQueue: nextPermissionPromptQueue,
                 deferredPermissionPrompts: nextDeferredPermissionPrompts,
@@ -160,6 +162,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             return {
                 sessions: state.sessions.filter((session) => session.id !== sessionId),
                 activeSessionId: nextActiveSessionId,
+                ...(state.activeSessionId === sessionId ? { isAbortRequested: false } : {}),
                 sessionUsage: nextUsage,
                 deferredPermissionPrompts: nextDeferredPermissionPrompts,
                 deferredUserInputPrompts: nextDeferredUserInputPrompts,
@@ -372,6 +375,8 @@ export const useSessionStore = create<SessionStore>((set) => ({
     },
 
     setAssistantTyping: (typing) => set({ isAssistantTyping: typing }),
+
+    setAbortRequested: (requested) => set({ isAbortRequested: requested }),
 
     setCurrentIntent: (intent) => set({ currentIntent: intent }),
 
@@ -809,6 +814,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
         set({
             chatItems: [...items],
             isAssistantTyping: false,
+            isAbortRequested: false,
             permissionPrompt: null,
             permissionPromptQueue: [],
             userInputPrompt: null,
@@ -819,6 +825,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
         set({
             chatItems: [],
             isAssistantTyping: false,
+            isAbortRequested: false,
             currentIntent: null,
             agentTodos: [],
             permissionPrompt: null,
@@ -849,6 +856,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
             chatItems: [],
             isAssistantTyping: false,
+            isAbortRequested: false,
             currentIntent: null,
             agentTodos: [],
             permissionPrompt: null,

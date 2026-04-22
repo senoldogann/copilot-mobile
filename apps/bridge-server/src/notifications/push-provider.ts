@@ -50,127 +50,265 @@ function sleep(milliseconds: number): Promise<void> {
     });
 }
 
+type SessionPushEventType = "completion" | "permission_prompt" | "user_input_prompt";
+
 export function createPushProvider() {
+    async function sendSessionPush(input: {
+        pushToken: string;
+        sessionId: string;
+        title: string;
+        body: string;
+    }): Promise<PushSendResult> {
+        if (!isExpoPushToken(input.pushToken)) {
+            return {
+                ok: false,
+                invalidToken: true,
+                retryable: false,
+                error: "Push token is not a valid Expo push token",
+            };
+        }
+
+        for (let attempt = 1; attempt <= PUSH_MAX_ATTEMPTS; attempt += 1) {
+            let result: PushSendResult;
+            let response: Response;
+
+            try {
+                response = await fetch(EXPO_PUSH_ENDPOINT, {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/json",
+                        accept: "application/json",
+                    },
+                    body: JSON.stringify({
+                        to: input.pushToken,
+                        title: input.title,
+                        body: input.body,
+                        sound: "default",
+                        priority: "high",
+                        ttl: 3600,
+                        channelId: SESSION_EVENTS_CHANNEL_ID,
+                        data: {
+                            sessionId: input.sessionId,
+                            kind: "session-event",
+                        },
+                    }),
+                    signal: AbortSignal.timeout(PUSH_REQUEST_TIMEOUT_MS),
+                });
+            } catch (error) {
+                result = {
+                    ok: false,
+                    invalidToken: false,
+                    retryable: true,
+                    error: error instanceof Error ? error.message : String(error),
+                };
+
+                if (attempt < PUSH_MAX_ATTEMPTS) {
+                    console.warn("[notifications] Retryable Expo push transport failure", {
+                        sessionId: input.sessionId,
+                        attempt,
+                        maxAttempts: PUSH_MAX_ATTEMPTS,
+                        error: result.error,
+                    });
+                    await sleep(PUSH_RETRY_DELAY_MS * attempt);
+                    continue;
+                }
+
+                return result;
+            }
+
+            const rawBody = await response.text();
+            if (!response.ok) {
+                result = {
+                    ok: false,
+                    invalidToken: false,
+                    retryable: response.status >= 500,
+                    error: `Expo push request failed with status ${response.status}`,
+                    details: rawBody,
+                };
+            } else {
+                let parsed: unknown;
+                try {
+                    parsed = JSON.parse(rawBody) as unknown;
+                } catch {
+                    return {
+                        ok: false,
+                        invalidToken: false,
+                        retryable: false,
+                        error: "Expo push response was not valid JSON",
+                        details: rawBody,
+                    };
+                }
+
+                const ticket = readFirstTicket(parsed);
+                if (ticket?.status === "ok") {
+                    return { ok: true };
+                }
+
+                const providerError = ticket?.details?.error;
+                result = {
+                    ok: false,
+                    invalidToken: providerError === "DeviceNotRegistered",
+                    retryable: false,
+                    error: ticket?.message ?? "Expo push rejected the session notification",
+                    ...(providerError !== undefined ? { details: providerError } : {}),
+                };
+            }
+
+            if (!result.retryable || attempt >= PUSH_MAX_ATTEMPTS) {
+                return result;
+            }
+
+            console.warn("[notifications] Retryable Expo push rejection", {
+                sessionId: input.sessionId,
+                attempt,
+                maxAttempts: PUSH_MAX_ATTEMPTS,
+                error: result.error,
+                details: result.details,
+            });
+            await sleep(PUSH_RETRY_DELAY_MS * attempt);
+        }
+
+        return {
+            ok: false,
+            invalidToken: false,
+            retryable: false,
+            error: "Expo push retry loop exhausted without a terminal result",
+        };
+    }
+
+    async function sendBackgroundSyncPush(input: {
+        pushToken: string;
+        sessionId: string;
+        eventType: SessionPushEventType;
+    }): Promise<PushSendResult> {
+        if (!isExpoPushToken(input.pushToken)) {
+            return {
+                ok: false,
+                invalidToken: true,
+                retryable: false,
+                error: "Push token is not a valid Expo push token",
+            };
+        }
+
+        for (let attempt = 1; attempt <= PUSH_MAX_ATTEMPTS; attempt += 1) {
+            let result: PushSendResult;
+            let response: Response;
+
+            try {
+                response = await fetch(EXPO_PUSH_ENDPOINT, {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/json",
+                        accept: "application/json",
+                    },
+                    body: JSON.stringify({
+                        to: input.pushToken,
+                        priority: "high",
+                        ttl: 600,
+                        _contentAvailable: true,
+                        data: {
+                            sessionId: input.sessionId,
+                            kind: "session-sync",
+                            eventType: input.eventType,
+                        },
+                    }),
+                    signal: AbortSignal.timeout(PUSH_REQUEST_TIMEOUT_MS),
+                });
+            } catch (error) {
+                result = {
+                    ok: false,
+                    invalidToken: false,
+                    retryable: true,
+                    error: error instanceof Error ? error.message : String(error),
+                };
+
+                if (attempt < PUSH_MAX_ATTEMPTS) {
+                    console.warn("[notifications] Retryable Expo background sync transport failure", {
+                        sessionId: input.sessionId,
+                        eventType: input.eventType,
+                        attempt,
+                        maxAttempts: PUSH_MAX_ATTEMPTS,
+                        error: result.error,
+                    });
+                    await sleep(PUSH_RETRY_DELAY_MS * attempt);
+                    continue;
+                }
+
+                return result;
+            }
+
+            const rawBody = await response.text();
+            if (!response.ok) {
+                result = {
+                    ok: false,
+                    invalidToken: false,
+                    retryable: response.status >= 500,
+                    error: `Expo background sync push failed with status ${response.status}`,
+                    details: rawBody,
+                };
+            } else {
+                let parsed: unknown;
+                try {
+                    parsed = JSON.parse(rawBody) as unknown;
+                } catch {
+                    return {
+                        ok: false,
+                        invalidToken: false,
+                        retryable: false,
+                        error: "Expo background sync push response was not valid JSON",
+                        details: rawBody,
+                    };
+                }
+
+                const ticket = readFirstTicket(parsed);
+                if (ticket?.status === "ok") {
+                    return { ok: true };
+                }
+
+                const providerError = ticket?.details?.error;
+                result = {
+                    ok: false,
+                    invalidToken: providerError === "DeviceNotRegistered",
+                    retryable: false,
+                    error: ticket?.message ?? "Expo background sync push was rejected",
+                    ...(providerError !== undefined ? { details: providerError } : {}),
+                };
+            }
+
+            if (!result.retryable || attempt >= PUSH_MAX_ATTEMPTS) {
+                return result;
+            }
+
+            console.warn("[notifications] Retryable Expo background sync rejection", {
+                sessionId: input.sessionId,
+                eventType: input.eventType,
+                attempt,
+                maxAttempts: PUSH_MAX_ATTEMPTS,
+                error: result.error,
+                details: result.details,
+            });
+            await sleep(PUSH_RETRY_DELAY_MS * attempt);
+        }
+
+        return {
+            ok: false,
+            invalidToken: false,
+            retryable: false,
+            error: "Expo background sync retry loop exhausted without a terminal result",
+        };
+    }
+
     return {
+        sendSessionPush,
+        sendBackgroundSyncPush,
+
         async sendCompletionPush(input: {
             pushToken: string;
             sessionId: string;
             title: string;
             body: string;
         }): Promise<PushSendResult> {
-            if (!isExpoPushToken(input.pushToken)) {
-                return {
-                    ok: false,
-                    invalidToken: true,
-                    retryable: false,
-                    error: "Push token is not a valid Expo push token",
-                };
-            }
-
-            for (let attempt = 1; attempt <= PUSH_MAX_ATTEMPTS; attempt += 1) {
-                let result: PushSendResult;
-                let response: Response;
-
-                try {
-                    response = await fetch(EXPO_PUSH_ENDPOINT, {
-                        method: "POST",
-                        headers: {
-                            "content-type": "application/json",
-                            accept: "application/json",
-                        },
-                        body: JSON.stringify({
-                            to: input.pushToken,
-                            title: input.title,
-                            body: input.body,
-                            sound: "default",
-                            channelId: SESSION_EVENTS_CHANNEL_ID,
-                            data: {
-                                sessionId: input.sessionId,
-                                kind: "session-complete",
-                            },
-                        }),
-                        signal: AbortSignal.timeout(PUSH_REQUEST_TIMEOUT_MS),
-                    });
-                } catch (error) {
-                    result = {
-                        ok: false,
-                        invalidToken: false,
-                        retryable: true,
-                        error: error instanceof Error ? error.message : String(error),
-                    };
-
-                    if (attempt < PUSH_MAX_ATTEMPTS) {
-                        console.warn("[notifications] Retryable Expo push transport failure", {
-                            sessionId: input.sessionId,
-                            attempt,
-                            maxAttempts: PUSH_MAX_ATTEMPTS,
-                            error: result.error,
-                        });
-                        await sleep(PUSH_RETRY_DELAY_MS * attempt);
-                        continue;
-                    }
-
-                    return result;
-                }
-
-                const rawBody = await response.text();
-                if (!response.ok) {
-                    result = {
-                        ok: false,
-                        invalidToken: false,
-                        retryable: response.status >= 500,
-                        error: `Expo push request failed with status ${response.status}`,
-                        details: rawBody,
-                    };
-                } else {
-                    let parsed: unknown;
-                    try {
-                        parsed = JSON.parse(rawBody) as unknown;
-                    } catch {
-                        return {
-                            ok: false,
-                            invalidToken: false,
-                            retryable: false,
-                            error: "Expo push response was not valid JSON",
-                            details: rawBody,
-                        };
-                    }
-
-                    const ticket = readFirstTicket(parsed);
-                    if (ticket?.status === "ok") {
-                        return { ok: true };
-                    }
-
-                    const providerError = ticket?.details?.error;
-                    result = {
-                        ok: false,
-                        invalidToken: providerError === "DeviceNotRegistered",
-                        retryable: false,
-                        error: ticket?.message ?? "Expo push rejected the completion notification",
-                        ...(providerError !== undefined ? { details: providerError } : {}),
-                    };
-                }
-
-                if (!result.retryable || attempt >= PUSH_MAX_ATTEMPTS) {
-                    return result;
-                }
-
-                console.warn("[notifications] Retryable Expo push rejection", {
-                    sessionId: input.sessionId,
-                    attempt,
-                    maxAttempts: PUSH_MAX_ATTEMPTS,
-                    error: result.error,
-                    details: result.details,
-                });
-                await sleep(PUSH_RETRY_DELAY_MS * attempt);
-            }
-
-            return {
-                ok: false,
-                invalidToken: false,
-                retryable: false,
-                error: "Expo push retry loop exhausted without a terminal result",
-            };
+            return sendSessionPush(input);
         },
     };
 }

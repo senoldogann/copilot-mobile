@@ -112,6 +112,7 @@ export type SessionStore = {
     bridgeSettings: BridgeSettings;
     chatItems: ReadonlyArray<ChatItem>;
     isAssistantTyping: boolean;
+    isAbortRequested: boolean;
     currentIntent: string | null;
     agentTodos: ReadonlyArray<AgentTodo>;
     permissionPrompt: PermissionPrompt | null;
@@ -153,6 +154,7 @@ export type SessionStore = {
     appendAssistantDelta: (delta: string, index: number) => void;
     finalizeAssistantMessage: (content: string) => void;
     setAssistantTyping: (typing: boolean) => void;
+    setAbortRequested: (requested: boolean) => void;
     appendThinkingDelta: (delta: string, index: number) => void;
     finalizeThinking: (content?: string) => void;
     addToolStart: (

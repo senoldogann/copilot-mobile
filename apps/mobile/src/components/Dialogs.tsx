@@ -115,7 +115,7 @@ export function UserInputDialog({ prompt, onRespond }: InputProps) {
                 behavior={Platform.OS === "ios" ? "padding" : "height"}
                 keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
             >
-                <Pressable style={styles.card} onPress={(event) => event.stopPropagation()}>
+                <Pressable style={[styles.card, styles.inputCard]} onPress={(event) => event.stopPropagation()}>
                     <View style={styles.cardHeader}>
                         <Text style={styles.cardTitle}>Input Request</Text>
                     </View>
@@ -273,6 +273,10 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         shadowOffset: { width: 0, height: 8 },
         elevation: 12,
     },
+    inputCard: {
+        maxHeight: "86%",
+        minHeight: 380,
+    },
     keyboardAvoidingLayer: {
         width: "100%",
         alignItems: "center",
@@ -305,6 +309,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     },
     scrollArea: {
         flexShrink: 1,
+        flexGrow: 1,
         marginBottom: theme.spacing.md,
     },
     scrollContent: {
@@ -401,6 +406,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     },
     choiceList: {
         gap: theme.spacing.sm,
+        paddingBottom: theme.spacing.xs,
     },
     choiceButton: {
         borderRadius: theme.borderRadius.sm,
@@ -408,7 +414,9 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         borderColor: theme.colors.border,
         backgroundColor: theme.colors.bg,
         paddingHorizontal: theme.spacing.md,
-        paddingVertical: theme.spacing.sm,
+        paddingVertical: theme.spacing.md,
+        minHeight: 52,
+        justifyContent: "center",
     },
     choiceButtonText: {
         color: theme.colors.textPrimary,

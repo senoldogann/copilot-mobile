@@ -48,6 +48,12 @@ function ConnectingSpinner() {
     );
 }
 
+const companionSetupSteps = [
+    "Requires a Mac that stays powered on while you use the app.",
+    "On your Mac run npm install -g copilot-mobile, then copilot-mobile login and copilot-mobile up.",
+    "Scan the QR code once to pair. After that, your iPhone reconnects through the Mac companion.",
+] as const;
+
 export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Props) {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
@@ -73,9 +79,18 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
                 </View>
                 <Text style={styles.title}>Connect to your Mac companion</Text>
                 <Text style={styles.subtitle}>
-                    Scan the QR code from your desktop{"\n"}
-                    companion to start chatting
+                    Copilot Mobile works with a Mac companion. Finish the Mac setup first, then scan the pairing QR code.
                 </Text>
+                <View style={styles.requirementsCard}>
+                    {companionSetupSteps.map((step, index) => (
+                        <View key={step} style={styles.requirementRow}>
+                            <View style={styles.requirementBadge}>
+                                <Text style={styles.requirementBadgeText}>{index + 1}</Text>
+                            </View>
+                            <Text style={styles.requirementText}>{step}</Text>
+                        </View>
+                    ))}
+                </View>
                 <Pressable
                     style={({ pressed }) => [
                         styles.scanButton,
@@ -183,6 +198,41 @@ function createStyles(theme: AppTheme) {
             textAlign: "center",
             lineHeight: 20,
             marginBottom: 28,
+        },
+        requirementsCard: {
+            width: "100%",
+            borderRadius: theme.borderRadius.lg,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.bgSecondary,
+            padding: theme.spacing.md,
+            gap: theme.spacing.sm,
+            marginBottom: theme.spacing.lg,
+        },
+        requirementRow: {
+            flexDirection: "row",
+            alignItems: "flex-start",
+            gap: theme.spacing.sm,
+        },
+        requirementBadge: {
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            backgroundColor: theme.colors.accent,
+            justifyContent: "center",
+            alignItems: "center",
+            marginTop: 1,
+        },
+        requirementBadgeText: {
+            color: theme.colors.textOnAccent,
+            fontSize: theme.fontSize.sm,
+            fontWeight: "700",
+        },
+        requirementText: {
+            flex: 1,
+            color: theme.colors.textSecondary,
+            fontSize: theme.fontSize.sm,
+            lineHeight: 18,
         },
         scanButton: {
             backgroundColor: theme.colors.accent,

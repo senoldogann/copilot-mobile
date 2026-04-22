@@ -11,6 +11,8 @@ import {
     Image,
     ScrollView,
     Alert,
+    AppState,
+    Keyboard,
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import * as ImagePicker from "expo-image-picker";
@@ -574,6 +576,7 @@ export function ChatInput({
     onSend,
     onAbort,
     isTyping,
+    isAbortPending,
     disabled,
     queuedDrafts,
     editingDraft,
@@ -841,6 +844,25 @@ export function ChatInput({
             setShowSendMenu(false);
         }
     }, [isTyping]);
+
+    useEffect(() => {
+        const subscription = AppState.addEventListener("change", (nextState) => {
+            if (nextState === "active") {
+                return;
+            }
+
+            Keyboard.dismiss();
+            setShowModelPicker(false);
+            setShowEffortPicker(false);
+            setShowSendMenu(false);
+            setShowContextWindowSheet(false);
+            setIsFocused(false);
+        });
+
+        return () => {
+            subscription.remove();
+        };
+    }, []);
 
     const canSend = input.trim().length > 0 && !disabled;
 
@@ -1135,10 +1157,14 @@ export function ChatInput({
                     {isTyping ? (
                         <View style={toolbarStyles.sendControlWrap}>
                             <Pressable
-                                style={styles.abortButton}
+                                style={[
+                                    styles.abortButton,
+                                    isAbortPending && styles.abortButtonPending,
+                                ]}
                                 onPress={onAbort}
+                                disabled={isAbortPending}
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                accessibilityLabel="Stop request"
+                                accessibilityLabel={isAbortPending ? "Stopping request" : "Stop request"}
                             >
                                 <View style={styles.abortIcon} />
                             </Pressable>

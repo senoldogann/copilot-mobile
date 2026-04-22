@@ -1,7 +1,6 @@
 import { useSessionStore } from "../stores/session-store";
 import { isAppActive } from "./app-visibility";
 import { notifySessionCompleted } from "./notifications";
-import { shouldSuppressLocalCompletionNotifications } from "./notifications";
 
 const MAX_TRACKED_BACKGROUND_SESSIONS = 100;
 const pendingCompletionSessions = new Set<string>();
@@ -96,11 +95,6 @@ export function notifyIfBackgroundCompletion(sessionId: string): void {
     notifiedCompletionSessions.add(sessionId);
     enforceTrackedSessionLimit();
 
-    if (shouldSuppressLocalCompletionNotifications()) {
-        latestAssistantContentBySession.delete(sessionId);
-        return;
-    }
-
     const sessionStore = useSessionStore.getState();
     const session = sessionStore.sessions.find((item) => item.id === sessionId);
     const cachedAssistantContent = latestAssistantContentBySession.get(sessionId);
@@ -122,6 +116,26 @@ export function notifyIfBackgroundCompletion(sessionId: string): void {
         : "Open Copilot Mobile to review the latest session output.";
 
     latestAssistantContentBySession.delete(sessionId);
+
+    void notifySessionCompleted({ sessionId, title, body });
+}
+
+export function notifyBackgroundCompletionFailure(sessionId: string, errorMessage: string): void {
+    if (isAppActive() || !pendingCompletionSessions.has(sessionId)) {
+        return;
+    }
+
+    pendingCompletionSessions.delete(sessionId);
+    latestAssistantContentBySession.delete(sessionId);
+    notifiedCompletionSessions.add(sessionId);
+    enforceTrackedSessionLimit();
+
+    const sessionStore = useSessionStore.getState();
+    const session = sessionStore.sessions.find((item) => item.id === sessionId);
+    const title = session?.title?.trim().length
+        ? session.title.trim()
+        : "Copilot run failed";
+    const body = sanitizeNotificationText(errorMessage);
 
     void notifySessionCompleted({ sessionId, title, body });
 }

@@ -198,6 +198,11 @@ function normalizeRepositoryLabel(repository: string): string {
     return trimmed;
 }
 
+function isSessionAlreadyDeletedError(error: unknown): boolean {
+    return error instanceof Error
+        && /session not found|no such session|unknown session|file not found/i.test(error.message);
+}
+
 function adaptSessionInfoFromMetadata(metadata: SessionMetadata): SessionInfo {
     const context = adaptSessionContext(metadata);
 
@@ -1233,8 +1238,12 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             }
             try {
                 await client.deleteSession(sessionId);
-            } catch (err: unknown) {
-                console.warn(`[sdk] Session ${sessionId} delete error (may already be deleted):`, err);
+            } catch (error: unknown) {
+                if (isSessionAlreadyDeletedError(error)) {
+                    return;
+                }
+
+                throw error;
             }
         },
 

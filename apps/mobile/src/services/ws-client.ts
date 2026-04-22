@@ -352,6 +352,9 @@ export function createWSClient(config: WSClientConfig) {
             deviceCredential = message.payload.deviceCredential;
             sessionToken = message.payload.sessionToken;
             transportMode = message.payload.transportMode;
+            if (message.payload.relayAccessToken !== undefined) {
+                relayAccessToken = message.payload.relayAccessToken;
+            }
             reconnectOnClose = true;
             reportConnectionErrors = true;
             setState("authenticated");

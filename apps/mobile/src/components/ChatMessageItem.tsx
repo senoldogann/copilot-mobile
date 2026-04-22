@@ -20,6 +20,13 @@ type Props = {
     item: ChatItem;
 };
 
+const scrollPassThroughResponderProps = {
+    onStartShouldSetResponder: () => false,
+    onMoveShouldSetResponder: () => false,
+    onStartShouldSetResponderCapture: () => false,
+    onMoveShouldSetResponderCapture: () => false,
+};
+
 
 
 // --- Lightweight Markdown Renderer ---
@@ -320,7 +327,11 @@ function MarkdownContent({
     const blocks = useMemo(() => parseMarkdown(content), [content]);
 
     return (
-        <View style={mdStyles.container} pointerEvents="box-none">
+        <View
+            style={mdStyles.container}
+            pointerEvents="box-none"
+            {...scrollPassThroughResponderProps}
+        >
             {blocks.map((block, i) => {
                 switch (block.kind) {
                     case "heading":
@@ -493,8 +504,12 @@ function AssistantBubble({
 }) {
     const styles = useThemedStyles(createStyles);
     return (
-        <View style={styles.assistantRow}>
-            <View style={styles.assistantBubble} pointerEvents="box-none">
+        <View style={styles.assistantRow} {...scrollPassThroughResponderProps}>
+            <View
+                style={styles.assistantBubble}
+                pointerEvents="box-none"
+                {...scrollPassThroughResponderProps}
+            >
                 <MarkdownContent content={content} isStreaming={isStreaming} />
             </View>
         </View>

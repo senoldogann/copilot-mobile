@@ -66,7 +66,9 @@ export function createDropdownStyles(theme: AppTheme) {
             borderBottomColor: theme.colors.border,
         },
         itemSelected: {
-            backgroundColor: theme.colors.bgElevated,
+            backgroundColor: theme.resolvedScheme === "light"
+                ? theme.colors.accentMuted
+                : theme.colors.bgElevated,
         },
         itemDisabled: {
             opacity: 0.4,
@@ -77,7 +79,7 @@ export function createDropdownStyles(theme: AppTheme) {
             flex: 1,
         },
         checkmark: {
-            color: theme.colors.textSecondary,
+            color: theme.colors.accent,
             fontSize: theme.fontSize.base,
             fontWeight: "700",
             marginRight: theme.spacing.sm,
@@ -88,7 +90,7 @@ export function createDropdownStyles(theme: AppTheme) {
             fontSize: theme.fontSize.base,
         },
         itemTextSelected: {
-            color: theme.colors.textOnAccent,
+            color: theme.colors.textPrimary,
             fontWeight: "600",
         },
         itemTextDisabled: {
@@ -383,6 +385,10 @@ export function createStyles(theme: AppTheme) {
             backgroundColor: theme.colors.error,
             justifyContent: "center",
             alignItems: "center",
+        },
+        abortButtonPending: {
+            backgroundColor: theme.colors.warning,
+            opacity: 0.85,
         },
         abortIcon: {
             width: 10,

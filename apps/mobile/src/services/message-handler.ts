@@ -11,9 +11,12 @@ import {
     armBackgroundCompletion,
     appendBackgroundCompletionPreview,
     clearBackgroundCompletion,
+    notifyBackgroundCompletionFailure,
     notifyIfBackgroundCompletion,
     replaceBackgroundCompletionPreview,
 } from "./background-completion";
+import { isAppActive } from "./app-visibility";
+import { notifySessionActionRequired } from "./notifications";
 import {
     dispatchWorkspaceDiffResponse,
     dispatchWorkspaceFileResponse,
@@ -22,6 +25,11 @@ import {
 } from "./workspace-events";
 
 let transientConnectionErrorTimer: ReturnType<typeof setTimeout> | null = null;
+const STREAM_DELTA_BATCH_WINDOW_MS = 48;
+const assistantDeltaBuffers = new Map<string, string>();
+const assistantDeltaTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const thinkingDeltaBuffers = new Map<string, string>();
+const thinkingDeltaTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function scheduleTransientConnectionErrorClear(expectedMessage: string): void {
     if (transientConnectionErrorTimer !== null) {
@@ -36,6 +44,93 @@ function scheduleTransientConnectionErrorClear(expectedMessage: string): void {
         }
         transientConnectionErrorTimer = null;
     }, 4000);
+}
+
+function clearBufferedStreamTimer(
+    timers: Map<string, ReturnType<typeof setTimeout>>,
+    sessionId: string
+): void {
+    const timer = timers.get(sessionId);
+    if (timer === undefined) {
+        return;
+    }
+
+    clearTimeout(timer);
+    timers.delete(sessionId);
+}
+
+function flushAssistantDeltaBuffer(sessionId: string): void {
+    clearBufferedStreamTimer(assistantDeltaTimers, sessionId);
+    const delta = assistantDeltaBuffers.get(sessionId);
+    assistantDeltaBuffers.delete(sessionId);
+
+    if (delta === undefined || delta.length === 0) {
+        return;
+    }
+
+    appendBackgroundCompletionPreview(sessionId, delta);
+
+    const sessionStore = useSessionStore.getState();
+    if (sessionStore.activeSessionId !== sessionId) {
+        return;
+    }
+
+    armBackgroundCompletion(sessionId);
+    sessionStore.setAssistantTyping(true);
+    sessionStore.appendAssistantDelta(delta, 0);
+}
+
+function flushThinkingDeltaBuffer(sessionId: string): void {
+    clearBufferedStreamTimer(thinkingDeltaTimers, sessionId);
+    const delta = thinkingDeltaBuffers.get(sessionId);
+    thinkingDeltaBuffers.delete(sessionId);
+
+    if (delta === undefined || delta.length === 0) {
+        return;
+    }
+
+    const sessionStore = useSessionStore.getState();
+    if (sessionStore.activeSessionId !== sessionId) {
+        return;
+    }
+
+    armBackgroundCompletion(sessionId);
+    sessionStore.appendThinkingDelta(delta, 0);
+}
+
+function scheduleAssistantDeltaFlush(sessionId: string, delta: string): void {
+    if (delta.length === 0) {
+        return;
+    }
+
+    assistantDeltaBuffers.set(sessionId, `${assistantDeltaBuffers.get(sessionId) ?? ""}${delta}`);
+    if (assistantDeltaTimers.has(sessionId)) {
+        return;
+    }
+
+    assistantDeltaTimers.set(sessionId, setTimeout(() => {
+        flushAssistantDeltaBuffer(sessionId);
+    }, STREAM_DELTA_BATCH_WINDOW_MS));
+}
+
+function scheduleThinkingDeltaFlush(sessionId: string, delta: string): void {
+    if (delta.length === 0) {
+        return;
+    }
+
+    thinkingDeltaBuffers.set(sessionId, `${thinkingDeltaBuffers.get(sessionId) ?? ""}${delta}`);
+    if (thinkingDeltaTimers.has(sessionId)) {
+        return;
+    }
+
+    thinkingDeltaTimers.set(sessionId, setTimeout(() => {
+        flushThinkingDeltaBuffer(sessionId);
+    }, STREAM_DELTA_BATCH_WINDOW_MS));
+}
+
+function flushSessionStreamBuffers(sessionId: string): void {
+    flushAssistantDeltaBuffer(sessionId);
+    flushThinkingDeltaBuffer(sessionId);
 }
 
 function isNonFatalProtocolError(code: string): boolean {
@@ -57,6 +152,23 @@ function rememberWorkspaceDirectory(workspaceRoot: string | undefined): void {
     }
 
     useWorkspaceDirectoryStore.getState().addDirectory(workspaceRoot);
+}
+
+function readSessionNotificationTitle(sessionId: string, fallback: string): string {
+    const session = useSessionStore.getState().sessions.find((item) => item.id === sessionId);
+    if (session?.title?.trim().length) {
+        return session.title.trim();
+    }
+
+    const conversation = useChatHistoryStore.getState().conversations.find((item) => item.sessionId === sessionId);
+    if (
+        conversation?.title?.trim().length
+        && conversation.title.trim() !== "New Chat"
+    ) {
+        return conversation.title.trim();
+    }
+
+    return fallback;
 }
 
 function mapHistoryItemToChatItem(item: SessionHistoryItem): ChatItem {
@@ -376,6 +488,7 @@ export function handleServerMessage(message: ServerMessage): void {
         case "session.created": {
             sessionStore.setSessionLoading(false);
             sessionStore.setActiveSession(message.payload.session.id);
+            sessionStore.setAbortRequested(false);
             sessionStore.upsertSession(message.payload.session);
             clearBackgroundCompletion(message.payload.session.id);
 
@@ -404,6 +517,7 @@ export function handleServerMessage(message: ServerMessage): void {
         case "session.resumed": {
             sessionStore.setSessionLoading(false);
             sessionStore.setActiveSession(message.payload.session.id);
+            sessionStore.setAbortRequested(false);
             sessionStore.upsertSession(message.payload.session);
             clearBackgroundCompletion(message.payload.session.id);
             void import("./bridge").then(({ syncSessionPreferences }) =>
@@ -429,8 +543,10 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.idle": {
+            flushSessionStreamBuffers(message.payload.sessionId);
             notifyIfBackgroundCompletion(message.payload.sessionId);
             if (!isActiveSession(message.payload.sessionId)) break;
+            sessionStore.setAbortRequested(false);
             sessionStore.setAssistantTyping(false);
             sessionStore.finalizeThinking();
             break;
@@ -463,6 +579,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "assistant.message": {
+            flushAssistantDeltaBuffer(message.payload.sessionId);
             replaceBackgroundCompletionPreview(message.payload.sessionId, message.payload.content);
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.finalizeAssistantMessage(message.payload.content);
@@ -470,15 +587,12 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "assistant.message_delta": {
-            appendBackgroundCompletionPreview(message.payload.sessionId, message.payload.delta);
-            if (!isActiveSession(message.payload.sessionId)) break;
-            armBackgroundCompletion(message.payload.sessionId);
-            sessionStore.setAssistantTyping(true);
-            sessionStore.appendAssistantDelta(message.payload.delta, message.payload.index);
+            scheduleAssistantDeltaFlush(message.payload.sessionId, message.payload.delta);
             break;
         }
 
         case "assistant.reasoning": {
+            flushThinkingDeltaBuffer(message.payload.sessionId);
             if (!isActiveSession(message.payload.sessionId)) break;
             armBackgroundCompletion(message.payload.sessionId);
             sessionStore.finalizeThinking(message.payload.content);
@@ -486,9 +600,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "assistant.reasoning_delta": {
-            if (!isActiveSession(message.payload.sessionId)) break;
-            armBackgroundCompletion(message.payload.sessionId);
-            sessionStore.appendThinkingDelta(message.payload.delta, message.payload.index);
+            scheduleThinkingDeltaFlush(message.payload.sessionId, message.payload.delta);
             break;
         }
 
@@ -549,6 +661,18 @@ export function handleServerMessage(message: ServerMessage): void {
                 commandText: message.payload.fullCommandText ?? null,
                 details: collectPermissionDetails(message.payload.metadata),
             });
+            if (!isAppActive()) {
+                const promptSummary = message.payload.fullCommandText
+                    ?? message.payload.fileName
+                    ?? message.payload.toolName
+                    ?? message.payload.kind;
+                void notifySessionActionRequired({
+                    sessionId: message.payload.sessionId,
+                    requestId: message.payload.requestId,
+                    title: readSessionNotificationTitle(message.payload.sessionId, "Copilot needs approval"),
+                    body: `Approval needed: ${promptSummary}`,
+                });
+            }
             break;
         }
 
@@ -562,6 +686,14 @@ export function handleServerMessage(message: ServerMessage): void {
                     ? { allowFreeform: message.payload.allowFreeform }
                     : {}),
             });
+            if (!isAppActive()) {
+                void notifySessionActionRequired({
+                    sessionId: message.payload.sessionId,
+                    requestId: message.payload.requestId,
+                    title: readSessionNotificationTitle(message.payload.sessionId, "Copilot needs input"),
+                    body: `Input needed: ${message.payload.prompt}`,
+                });
+            }
             break;
         }
 
@@ -602,6 +734,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
             if (isNonFatalProtocolError(message.payload.code)) {
                 const errorMessage = `[${message.payload.code}] ${message.payload.message}`;
+                sessionStore.setAbortRequested(false);
                 connectionStore.setError(errorMessage);
                 scheduleTransientConnectionErrorClear(errorMessage);
                 break;
@@ -610,6 +743,7 @@ export function handleServerMessage(message: ServerMessage): void {
             clearBackgroundCompletion();
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
+            sessionStore.setAbortRequested(false);
             // Clear open dialogs after a fatal error so they do not stay stuck onscreen.
             sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
@@ -656,7 +790,9 @@ export function handleServerMessage(message: ServerMessage): void {
                 if (message.payload.busy) {
                     armBackgroundCompletion(message.payload.sessionId);
                 } else {
+                    flushSessionStreamBuffers(message.payload.sessionId);
                     notifyIfBackgroundCompletion(message.payload.sessionId);
+                    sessionStore.setAbortRequested(false);
                 }
                 sessionStore.setAssistantTyping(message.payload.busy);
             }
@@ -664,6 +800,11 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.error": {
+            flushSessionStreamBuffers(message.payload.sessionId);
+            notifyBackgroundCompletionFailure(
+                message.payload.sessionId,
+                `[${message.payload.errorType}] ${message.payload.message}`
+            );
             clearBackgroundCompletion(message.payload.sessionId);
             sessionStore.clearSessionPrompts(message.payload.sessionId);
             if (sessionStore.activeSessionId === message.payload.sessionId) {
@@ -671,6 +812,7 @@ export function handleServerMessage(message: ServerMessage): void {
             }
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
+            sessionStore.setAbortRequested(false);
             sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
             sessionStore.setPlanExitPrompt(null);

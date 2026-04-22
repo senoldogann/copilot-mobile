@@ -119,7 +119,8 @@ function normalizeToolCompletionStatus(
 }
 
 function isSessionNotFoundResumeError(error: unknown): boolean {
-    return error instanceof Error && /session not found/i.test(error.message);
+    return error instanceof Error
+        && /session not found|no such session|unknown session|file not found/i.test(error.message);
 }
 
 export function createSessionManager(
@@ -466,6 +467,11 @@ export function createSessionManager(
             };
 
             emit(promptMessage);
+            const promptSummary = request.commandText
+                ?? request.fileName
+                ?? request.toolName
+                ?? request.kind;
+            completionNotifier.notifyPermissionPrompt(sessionId, requestId, promptSummary);
 
             // Wait for mobile response, with timeout
             return new Promise<boolean>((resolve) => {
@@ -498,6 +504,7 @@ export function createSessionManager(
             };
 
             emit(promptMessage);
+            completionNotifier.notifyUserInputPrompt(sessionId, requestId, request.question);
 
             return new Promise<string>((resolve) => {
                 const onTimeout = createInputTimeout(requestId, resolve);
@@ -690,8 +697,6 @@ export function createSessionManager(
                 }
                 let historyFetchStarted = false;
                 let historyDelivered = false;
-                let liveActivityObserved = false;
-                let shouldFetchHistoryOnIdle = false;
                 let historyFetchDelayTimer: ReturnType<typeof setTimeout> | null = null;
                 const queuedResumeMessages: Array<ServerMessage> = [];
 
@@ -703,8 +708,6 @@ export function createSessionManager(
                 session.unsubscribeAll();
                 wireSessionEvents(session, (message) => {
                     if (isLiveSessionActivityMessage(message.type)) {
-                        liveActivityObserved = true;
-                        shouldFetchHistoryOnIdle = true;
                         if (!historyDelivered) {
                             queuedResumeMessages.push(message);
                             return;
@@ -775,19 +778,8 @@ export function createSessionManager(
                         });
                 };
 
-                session.onIdle(() => {
-                    if (shouldFetchHistoryOnIdle) {
-                        shouldFetchHistoryOnIdle = false;
-                        fetchHistory();
-                    }
-                });
-
                 historyFetchDelayTimer = setTimeout(() => {
                     historyFetchDelayTimer = null;
-                    if (liveActivityObserved) {
-                        shouldFetchHistoryOnIdle = true;
-                        return;
-                    }
                     fetchHistory();
                 }, 350);
             } catch (err) {
@@ -907,12 +899,26 @@ export function createSessionManager(
             }
         },
 
-        abortMessage(sessionId: string): void {
+        async abortMessage(sessionId: string): Promise<void> {
             const session = activeSessions.get(sessionId);
-            if (session !== undefined) {
-                session.abort();
+            if (session === undefined) {
+                return;
             }
-            setSessionBusy(sessionId, false);
+
+            try {
+                await session.abort();
+            } catch (error) {
+                const message = error instanceof Error ? error.message : "Abort request failed";
+                send({
+                    ...makeBase(),
+                    type: "error",
+                    payload: {
+                        code: "ABORT_FAILED",
+                        message,
+                        retry: true,
+                    },
+                });
+            }
         },
 
         respondToPermission(requestId: string, approved: boolean): void {

@@ -260,7 +260,24 @@ const authAuthenticatedSchema = baseBridgeMessageSchema.extend({
         sessionTokenExpiresAt: z.number().int().positive(),
         transportMode: transportModeSchema,
         certFingerprint: z.string().regex(CERT_FINGERPRINT_PATTERN).nullable(),
+        relayAccessToken: z.string().min(1).optional(),
         replayedCount: z.number().int().nonnegative(),
+    }).superRefine((value, ctx) => {
+        if (value.transportMode === "relay" && value.relayAccessToken === undefined) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["relayAccessToken"],
+                message: "relayAccessToken is required for relay auth payloads",
+            });
+        }
+
+        if (value.transportMode === "direct" && value.relayAccessToken !== undefined) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["relayAccessToken"],
+                message: "relayAccessToken is not allowed for direct auth payloads",
+            });
+        }
     }),
 });
 

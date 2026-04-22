@@ -143,8 +143,13 @@ export default function ScanScreen() {
                 <Text style={styles.instructions}>
                     {isPairing
                         ? "Connecting to your Mac companion..."
-                        : "Scan the QR code from your Mac companion dashboard"}
+                        : "Scan the QR code shown by copilot-mobile up on your Mac"}
                 </Text>
+                {!isPairing && (
+                    <Text style={styles.instructionsCaption}>
+                        Keep your Mac on and signed in with GitHub Copilot. After pairing, you can reconnect even when your iPhone is on a different network.
+                    </Text>
+                )}
             </View>
 
             {scanned && !isPairing && (
@@ -191,6 +196,15 @@ function createStyles(theme: AppTheme) {
             color: theme.colors.textOnAccent,
             textAlign: "center",
             paddingHorizontal: 32,
+        },
+        instructionsCaption: {
+            marginTop: 12,
+            fontSize: 13,
+            lineHeight: 18,
+            color: theme.colors.textOnAccent,
+            textAlign: "center",
+            paddingHorizontal: 36,
+            opacity: 0.9,
         },
         text: {
             fontSize: 18,

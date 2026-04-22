@@ -57,17 +57,23 @@ export type WorkspaceDirectorySearchMatch = {
 let client: ReturnType<typeof createWSClient> | null = null;
 const STALE_DIRECT_CREDENTIAL_GRACE_MS = 3_000;
 const NOTIFICATION_UNREGISTER_TIMEOUT_MS = 1_500;
+const DELETE_SESSION_BASE_TIMEOUT_MS = 6_000;
+const DELETE_SESSION_MAX_TIMEOUT_MS = 20_000;
+const DELETE_SESSION_PER_ITEM_TIMEOUT_MS = 300;
+const DELETE_SESSION_REFRESH_INTERVAL_MS = 300;
+const DELETE_SESSION_SEND_DELAY_MS = 40;
+
+export type RemoteDeleteSessionsResult = {
+    deletedSessionIds: ReadonlyArray<string>;
+    failedSessionIds: ReadonlyArray<string>;
+};
 
 function mapPresenceState(nextAppState: AppStateStatus): NotificationPresenceState {
     if (nextAppState === "active") {
         return "active";
     }
 
-    if (nextAppState === "background") {
-        return "background";
-    }
-
-    return "inactive";
+    return "background";
 }
 
 async function syncRemoteNotificationRegistrationInternal(
@@ -141,6 +147,79 @@ async function unregisterRemoteNotificationsBeforeDisconnect(
     }
 }
 
+function sleep(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, milliseconds);
+    });
+}
+
+async function waitForRemoteSessionDeletion(
+    c: ReturnType<typeof createWSClient>,
+    sessionIds: ReadonlyArray<string>
+): Promise<RemoteDeleteSessionsResult> {
+    const pendingSessionIds = new Set(sessionIds);
+    const timeoutMs = Math.min(
+        DELETE_SESSION_BASE_TIMEOUT_MS + (sessionIds.length * DELETE_SESSION_PER_ITEM_TIMEOUT_MS),
+        DELETE_SESSION_MAX_TIMEOUT_MS
+    );
+    const startedAt = Date.now();
+
+    while (pendingSessionIds.size > 0 && (Date.now() - startedAt) < timeoutMs) {
+        await c.sendMessage("session.list", {});
+        await sleep(DELETE_SESSION_REFRESH_INTERVAL_MS);
+
+        const listedSessionIds = new Set(
+            getBridgeSessionState().sessions.map((item) => item.id)
+        );
+        for (const sessionId of [...pendingSessionIds]) {
+            if (!listedSessionIds.has(sessionId)) {
+                pendingSessionIds.delete(sessionId);
+            }
+        }
+    }
+
+    return {
+        deletedSessionIds: sessionIds.filter((sessionId) => !pendingSessionIds.has(sessionId)),
+        failedSessionIds: [...pendingSessionIds],
+    };
+}
+
+async function deleteSessionsRemotely(
+    c: ReturnType<typeof createWSClient>,
+    sessionIds: ReadonlyArray<string>
+): Promise<RemoteDeleteSessionsResult> {
+    const uniqueSessionIds = [...new Set(sessionIds)];
+    if (uniqueSessionIds.length === 0) {
+        return { deletedSessionIds: [], failedSessionIds: [] };
+    }
+
+    const requestedSessionIds: Array<string> = [];
+    const failedToRequestSessionIds: Array<string> = [];
+
+    for (const sessionId of uniqueSessionIds) {
+        try {
+            await c.sendMessage("session.delete", { sessionId });
+            requestedSessionIds.push(sessionId);
+        } catch (error) {
+            console.warn("[Bridge] session.delete request failed", {
+                sessionId,
+                error,
+            });
+            failedToRequestSessionIds.push(sessionId);
+        }
+
+        if (uniqueSessionIds.length > 1) {
+            await sleep(DELETE_SESSION_SEND_DELAY_MS);
+        }
+    }
+
+    const settledDeletes = await waitForRemoteSessionDeletion(c, requestedSessionIds);
+    return {
+        deletedSessionIds: settledDeletes.deletedSessionIds,
+        failedSessionIds: [...failedToRequestSessionIds, ...settledDeletes.failedSessionIds],
+    };
+}
+
 function getClient(): ReturnType<typeof createWSClient> {
     if (client === null) {
         const nextClient = createWSClient({
@@ -157,7 +236,8 @@ function getClient(): ReturnType<typeof createWSClient> {
                             certFingerprint: persistableConnection.certFingerprint,
                             deviceId: message.payload.deviceId,
                             transportMode: persistableConnection.transportMode,
-                            relayAccessToken: persistableConnection.relayAccessToken,
+                            relayAccessToken: message.payload.relayAccessToken
+                                ?? persistableConnection.relayAccessToken,
                         });
                     }
                 }
@@ -341,7 +421,11 @@ export async function abortMessage(sessionId: string): Promise<void> {
     try {
         await c.sendMessage("message.abort", { sessionId });
     } catch (error) {
+        setBridgeConnectionError(
+            `Failed to stop message: ${error instanceof Error ? error.message : String(error)}`
+        );
         console.warn("[Bridge] message.abort failed", { sessionId, error });
+        throw error;
     }
 }
 
@@ -419,9 +503,24 @@ export async function listSessions(): Promise<void> {
 export async function deleteSession(sessionId: string): Promise<void> {
     const c = getClient();
     try {
-        await c.sendMessage("session.delete", { sessionId });
+        const result = await deleteSessionsRemotely(c, [sessionId]);
+        if (result.failedSessionIds.length > 0) {
+            throw new Error(`Session ${sessionId} could not be deleted remotely`);
+        }
     } catch (error) {
         setBridgeConnectionError("Failed to delete session");
+        throw error;
+    }
+}
+
+export async function deleteSessions(
+    sessionIds: ReadonlyArray<string>
+): Promise<RemoteDeleteSessionsResult> {
+    const c = getClient();
+    try {
+        return await deleteSessionsRemotely(c, sessionIds);
+    } catch (error) {
+        setBridgeConnectionError("Failed to delete sessions");
         throw error;
     }
 }
@@ -435,6 +534,18 @@ export async function resumeSession(sessionId: string): Promise<void> {
     } catch (error) {
         setBridgeConnectionError("Failed to resume session");
         throw error;
+    }
+}
+
+export async function prefetchSessionState(sessionId: string): Promise<void> {
+    const c = getClient();
+    try {
+        await c.sendMessage("session.resume", { sessionId });
+    } catch (error) {
+        console.warn("[Bridge] session.resume prefetch failed", {
+            sessionId,
+            error,
+        });
     }
 }
 

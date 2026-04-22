@@ -20,6 +20,7 @@ export type ChatInputProps = {
     onSend: (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => void;
     onAbort: () => void;
     isTyping: boolean;
+    isAbortPending: boolean;
     disabled: boolean;
     queuedDrafts: ReadonlyArray<QueuedDraft>;
     editingDraft: QueuedDraft | null;

@@ -3,6 +3,7 @@ import type { createPushProvider } from "./push-provider.js";
 
 type DeviceRegistry = ReturnType<typeof createDeviceRegistry>;
 type PushProvider = ReturnType<typeof createPushProvider>;
+type SessionPushEventType = "completion" | "permission_prompt" | "user_input_prompt";
 
 type SessionCycleState = {
     deviceId: string | null;
@@ -21,6 +22,8 @@ type CompletedCycleSnapshot = {
     latestError: string | null;
     title: string | null;
 };
+
+const MAX_NOTIFIED_REQUEST_IDS = 200;
 
 function sanitizeNotificationText(input: string): string {
     const singleLine = input.replace(/\s+/g, " ").trim();
@@ -44,16 +47,7 @@ function createInitialCycleState(): SessionCycleState {
 }
 
 function isPushEligible(deviceRegistry: DeviceRegistry, deviceId: string): boolean {
-    if (!deviceRegistry.isConnected(deviceId)) {
-        return true;
-    }
-
-    const presence = deviceRegistry.getPresence(deviceId);
-    if (presence === null) {
-        return true;
-    }
-
-    return presence.state === "background";
+    return !deviceRegistry.isConnected(deviceId);
 }
 
 function buildNotificationPayload(state: CompletedCycleSnapshot, sessionId: string): {
@@ -83,6 +77,7 @@ export function createCompletionNotifier(deps: {
     pushProvider: PushProvider;
 }) {
     const sessionStates = new Map<string, SessionCycleState>();
+    const notifiedRequestIds = new Set<string>();
 
     function getSessionState(sessionId: string): SessionCycleState {
         const existing = sessionStates.get(sessionId);
@@ -110,6 +105,13 @@ export function createCompletionNotifier(deps: {
             return;
         }
 
+        void notifyForBackgroundSync({
+            deviceId: snapshot.deviceId,
+            pushToken: registration.pushToken,
+            sessionId,
+            eventType: "completion",
+        });
+
         const result = await deps.pushProvider.sendCompletionPush({
             pushToken: registration.pushToken,
             ...buildNotificationPayload(snapshot, sessionId),
@@ -134,6 +136,107 @@ export function createCompletionNotifier(deps: {
 
         if (result.invalidToken) {
             deps.deviceRegistry.unregisterPushTarget(snapshot.deviceId);
+        }
+    }
+
+    function rememberRequestNotification(requestId: string): void {
+        notifiedRequestIds.add(requestId);
+        if (notifiedRequestIds.size <= MAX_NOTIFIED_REQUEST_IDS) {
+            return;
+        }
+
+        const oldestRequestId = notifiedRequestIds.values().next().value;
+        if (typeof oldestRequestId === "string") {
+            notifiedRequestIds.delete(oldestRequestId);
+        }
+    }
+
+    async function notifyForPrompt(input: {
+        sessionId: string;
+        requestId: string;
+        title: string;
+        body: string;
+        eventType: SessionPushEventType;
+    }): Promise<void> {
+        if (notifiedRequestIds.has(input.requestId)) {
+            return;
+        }
+
+        const sessionState = sessionStates.get(input.sessionId);
+        if (sessionState === undefined || sessionState.deviceId === null) {
+            return;
+        }
+
+        if (!isPushEligible(deps.deviceRegistry, sessionState.deviceId)) {
+            return;
+        }
+
+        const registration = deps.deviceRegistry.getPushTarget(sessionState.deviceId);
+        if (registration === null) {
+            return;
+        }
+
+        void notifyForBackgroundSync({
+            deviceId: sessionState.deviceId,
+            pushToken: registration.pushToken,
+            sessionId: input.sessionId,
+            eventType: input.eventType,
+        });
+
+        const result = await deps.pushProvider.sendSessionPush({
+            pushToken: registration.pushToken,
+            sessionId: input.sessionId,
+            title: input.title,
+            body: sanitizeNotificationText(input.body),
+        });
+
+        if (result.ok) {
+            rememberRequestNotification(input.requestId);
+            return;
+        }
+
+        console.warn("[notifications] Failed to send prompt push", {
+            sessionId: input.sessionId,
+            requestId: input.requestId,
+            error: result.error,
+            details: result.details,
+            retryable: result.retryable,
+            invalidToken: result.invalidToken,
+        });
+
+        if (result.invalidToken) {
+            deps.deviceRegistry.unregisterPushTarget(sessionState.deviceId);
+        }
+    }
+
+    async function notifyForBackgroundSync(input: {
+        deviceId: string;
+        pushToken: string;
+        sessionId: string;
+        eventType: SessionPushEventType;
+    }): Promise<void> {
+        const result = await deps.pushProvider.sendBackgroundSyncPush({
+            pushToken: input.pushToken,
+            sessionId: input.sessionId,
+            eventType: input.eventType,
+        });
+
+        if (result.ok) {
+            return;
+        }
+
+        console.warn("[notifications] Failed to send background sync push", {
+            sessionId: input.sessionId,
+            deviceId: input.deviceId,
+            eventType: input.eventType,
+            error: result.error,
+            details: result.details,
+            retryable: result.retryable,
+            invalidToken: result.invalidToken,
+        });
+
+        if (result.invalidToken) {
+            deps.deviceRegistry.unregisterPushTarget(input.deviceId);
         }
     }
 
@@ -175,6 +278,30 @@ export function createCompletionNotifier(deps: {
         recordSessionError(sessionId: string, errorType: string, message: string): void {
             const state = getSessionState(sessionId);
             state.latestError = `[${errorType}] ${message}`;
+        },
+
+        notifyPermissionPrompt(sessionId: string, requestId: string, summary: string): void {
+            const state = getSessionState(sessionId);
+            const title = state.title?.trim().length ? state.title.trim() : "Copilot needs approval";
+            void notifyForPrompt({
+                sessionId,
+                requestId,
+                title,
+                body: `Approval needed: ${summary}`,
+                eventType: "permission_prompt",
+            });
+        },
+
+        notifyUserInputPrompt(sessionId: string, requestId: string, prompt: string): void {
+            const state = getSessionState(sessionId);
+            const title = state.title?.trim().length ? state.title.trim() : "Copilot needs input";
+            void notifyForPrompt({
+                sessionId,
+                requestId,
+                title,
+                body: `Input needed: ${prompt}`,
+                eventType: "user_input_prompt",
+            });
         },
 
         onBusyStateChanged(sessionId: string, busy: boolean): void {

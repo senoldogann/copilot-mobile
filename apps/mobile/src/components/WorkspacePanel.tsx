@@ -990,9 +990,7 @@ return StyleSheet.create({
 }
 
 function createTreeStyles(theme: AppTheme) {
-const emphasisTextColor = theme.resolvedScheme === "light"
-    ? theme.colors.textAssistant
-    : theme.colors.textPrimary;
+const emphasisTextColor = theme.colors.textPrimary;
 
 return StyleSheet.create({
     tree: { gap: 0, paddingBottom: theme.spacing.sm },
@@ -1039,9 +1037,7 @@ return StyleSheet.create({
 }
 
 function createStyles(theme: AppTheme) {
-const emphasizedLabelColor = theme.resolvedScheme === "light"
-    ? theme.colors.textAssistant
-    : theme.colors.textPrimary;
+const emphasizedLabelColor = theme.colors.textPrimary;
 const supportingLabelColor = theme.resolvedScheme === "light"
     ? theme.colors.textSecondary
     : theme.colors.textTertiary;

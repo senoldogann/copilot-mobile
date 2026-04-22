@@ -468,6 +468,7 @@ export type AuthAuthenticatedMessage = BaseBridgeMessage & {
         sessionTokenExpiresAt: number;
         transportMode: TransportMode;
         certFingerprint: string | null;
+        relayAccessToken?: string;
         replayedCount: number;
     };
 };

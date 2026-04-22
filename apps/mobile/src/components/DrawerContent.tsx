@@ -9,6 +9,11 @@ import {
     StyleSheet,
     Alert,
     ActivityIndicator,
+    Keyboard,
+    KeyboardAvoidingView,
+    Modal,
+    Platform,
+    TextInput,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
@@ -19,7 +24,7 @@ import { useConnectionStore } from "../stores/connection-store";
 import { useChatHistoryStore, type Conversation } from "../stores/chat-history-store";
 import { useSessionStore } from "../stores/session-store";
 import {
-    deleteSession,
+    deleteSessions,
     listSessions,
     resumeSession,
 } from "../services/bridge";
@@ -30,7 +35,6 @@ import {
     buildArchivedConversationMetadata,
     buildCloudConversationMetadata,
     buildCopilotCliMetadata,
-    buildLocalDraftMetadata,
     isRecentCloudSync,
     type DrawerMetadataChip,
     type DrawerMetadataChipTone,
@@ -41,12 +45,6 @@ import { CopilotBadge } from "./CopilotBadge";
 import { useWorkspaceDirectoryStore } from "../stores/workspace-directory-store";
 import { WorkspacePickerModal } from "./WorkspacePickerModal";
 
-type LocalWorkspaceGroup = {
-    workspace: string;
-    displayName: string;
-    drafts: ReadonlyArray<Conversation>;
-};
-
 type CloudConversationGroup = {
     workspace: string;
     displayName: string;
@@ -54,7 +52,13 @@ type CloudConversationGroup = {
 };
 
 type CloudFilter = "all" | "recent" | "stale";
-type ProviderSectionKey = "drafts" | "local" | "cloud";
+type RenameTarget = {
+    conversationId: string | null;
+    sessionId: string | null;
+    title: string;
+    preview: string;
+    workspaceRoot: string | null;
+};
 
 function basenamePath(value: string): string {
     const parts = value.split(/[\\/]/).filter(Boolean);
@@ -72,26 +76,12 @@ function buildProviderWorkspaceKeys(
     return workspaces.map((workspace) => makeWorkspaceSectionKey(provider, workspace));
 }
 
-function buildLocalWorkspaceGroups(
-    draftConversations: ReadonlyArray<Conversation>
-): ReadonlyArray<LocalWorkspaceGroup> {
-    const workspacePaths = new Set<string>();
-
-    for (const conversation of draftConversations) {
-        if (conversation.workspaceRoot !== null) {
-            workspacePaths.add(conversation.workspaceRoot);
-        }
+function matchesWorkspaceScope(workspaceKey: string, workspaceRoot: string | null): boolean {
+    if (workspaceKey === "__none__") {
+        return workspaceRoot === null;
     }
 
-    return [...workspacePaths]
-        .sort((left, right) => left.localeCompare(right))
-        .map((workspace) => ({
-            workspace,
-            displayName: basenamePath(workspace),
-            drafts: draftConversations
-                .filter((conversation) => conversation.workspaceRoot === workspace)
-                .sort((left, right) => right.updatedAt - left.updatedAt),
-        }));
+    return workspaceRoot === workspaceKey;
 }
 
 function buildCloudConversationGroups(
@@ -145,13 +135,14 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     const connectionState = useConnectionStore((s) => s.state);
     const savedWorkspaceDirectories = useWorkspaceDirectoryStore((s) => s.directories);
     const [expandedWorkspaces, setExpandedWorkspaces] = useState<Set<string>>(new Set());
-    const [collapsedSections, setCollapsedSections] = useState<Set<ProviderSectionKey>>(new Set(["drafts"]));
     const [isRefreshing, setIsRefreshing] = useState(false);
     const [workspaceSelectionMode, setWorkspaceSelectionMode] = useState<string | null>(null);
     const [selectedWorkspaceEntryKeys, setSelectedWorkspaceEntryKeys] = useState<Set<string>>(new Set());
     const [workspacePickerOpen, setWorkspacePickerOpen] = useState(false);
     const [cloudFilter, setCloudFilter] = useState<CloudFilter>("all");
     const [resumeResultsBySessionId, setResumeResultsBySessionId] = useState<Readonly<Record<string, DrawerResumeResult>>>({});
+    const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
+    const [renameValue, setRenameValue] = useState("");
     const refreshInFlightRef = useRef(false);
 
     const linkedConversationBySessionId = useMemo(
@@ -227,14 +218,6 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
             .sort((left, right) => right.updatedAt - left.updatedAt),
         [conversations],
     );
-    const unassignedDraftConversations = useMemo(
-        () => draftConversations.filter((conversation) => conversation.workspaceRoot === null),
-        [draftConversations],
-    );
-    const localWorkspaceGroups = useMemo(
-        () => buildLocalWorkspaceGroups(draftConversations),
-        [draftConversations],
-    );
     const archivedConversations = useMemo(
         () => conversations
             .filter((conversation) => conversation.archived)
@@ -270,13 +253,12 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
 
     const allExpandableWorkspaceKeys = useMemo(
         () => [
-            ...localWorkspaceGroups.map((group) => makeWorkspaceSectionKey("local", group.workspace)),
             ...copilotCliGroups.map((group) => makeWorkspaceSectionKey("copilot", group.workspace)),
             ...(showCloudSection
                 ? filteredCloudConversationGroups.map((group) => makeWorkspaceSectionKey("cloud", group.workspace))
                 : []),
         ],
-        [copilotCliGroups, filteredCloudConversationGroups, localWorkspaceGroups, showCloudSection],
+        [copilotCliGroups, filteredCloudConversationGroups, showCloudSection],
     );
 
     const allWorkspacesExpanded = allExpandableWorkspaceKeys.length > 0
@@ -286,21 +268,6 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         () => buildProviderWorkspaceKeys("cloud", filteredCloudConversationGroups.map((group) => group.workspace)),
         [filteredCloudConversationGroups],
     );
-
-    const isSectionCollapsed = (section: ProviderSectionKey) => collapsedSections.has(section);
-
-    const toggleSectionVisibility = (section: ProviderSectionKey) => {
-        cancelWorkspaceSelectionMode();
-        setCollapsedSections((prev) => {
-            const next = new Set(prev);
-            if (next.has(section)) {
-                next.delete(section);
-            } else {
-                next.add(section);
-            }
-            return next;
-        });
-    };
 
     const toggleAllWorkspaces = () => {
         cancelWorkspaceSelectionMode();
@@ -352,45 +319,44 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         setExpandedWorkspaces((prev) => new Set(prev).add(workspaceKey));
     };
 
-    const deleteSessionsBulk = async (sessionIds: ReadonlyArray<string>) => {
-        const uniqueSessionIds = [...new Set(sessionIds)];
-        if (uniqueSessionIds.length === 0) {
-            return;
-        }
-
+    const applyDeletedSessionsLocally = (sessionIds: ReadonlyArray<string>): void => {
         const sessionStore = useSessionStore.getState();
         const historyStore = useChatHistoryStore.getState();
 
-        const results: Array<PromiseSettledResult<string>> = [];
-
-        for (const sessionId of uniqueSessionIds) {
-            try {
-                await deleteSession(sessionId);
-                results.push({ status: "fulfilled", value: sessionId });
-            } catch (error) {
-                results.push({ status: "rejected", reason: error });
-            }
-
-            await new Promise((resolve) => setTimeout(resolve, 120));
-        }
-
-        const succeededSessionIds = results
-            .filter((result): result is PromiseFulfilledResult<string> => result.status === "fulfilled")
-            .map((result) => result.value);
-
-        for (const sessionId of succeededSessionIds) {
+        for (const sessionId of sessionIds) {
+            const isActiveSession = sessionStore.activeSessionId === sessionId;
             sessionStore.removeSession(sessionId);
             historyStore.removeBySessionId(sessionId);
-            if (sessionStore.activeSessionId === sessionId) {
+            if (isActiveSession) {
                 sessionStore.clearChatItems();
                 sessionStore.setSessionLoading(false);
             }
         }
+    };
 
-        const failedCount = uniqueSessionIds.length - succeededSessionIds.length;
-        if (failedCount > 0) {
-            Alert.alert("Partial failure", `${failedCount} sessions could not be deleted remotely.`);
+    const deleteSessionsBulk = async (
+        sessionIds: ReadonlyArray<string>,
+        options?: { showPartialFailureAlert?: boolean }
+    ): Promise<{
+        deletedSessionIds: ReadonlyArray<string>;
+        failedSessionIds: ReadonlyArray<string>;
+    }> => {
+        const uniqueSessionIds = [...new Set(sessionIds)];
+        if (uniqueSessionIds.length === 0) {
+            return { deletedSessionIds: [], failedSessionIds: [] };
         }
+
+        const result = await deleteSessions(uniqueSessionIds);
+        applyDeletedSessionsLocally(result.deletedSessionIds);
+
+        if (result.failedSessionIds.length > 0 && options?.showPartialFailureAlert !== false) {
+            Alert.alert(
+                "Partial failure",
+                `${result.failedSessionIds.length} sessions could not be deleted remotely and were kept in the sidebar.`
+            );
+        }
+
+        return result;
     };
 
     const deleteDraftConversationsByWorkspace = (workspaceKey: string) => {
@@ -415,30 +381,59 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     };
 
     const handleDeleteWorkspace = (group: WorkspaceGroup) => {
-        const sessionIds = group.entries.flatMap((entry) =>
-            entry.sessions.map((session) => session.id)
+        const matchingConversations = conversations.filter((conversation) =>
+            matchesWorkspaceScope(group.workspace, conversation.workspaceRoot)
         );
-        const conversationDraftCount = conversations.filter((conversation) =>
-            conversation.sessionId === null &&
-            (group.workspace === "__none__"
-                ? conversation.workspaceRoot === null
-                : conversation.workspaceRoot === group.workspace)
-        ).length;
+        const sessionIds = [
+            ...group.entries.flatMap((entry) => entry.sessions.map((session) => session.id)),
+            ...matchingConversations
+                .map((conversation) => conversation.sessionId)
+                .filter((sessionId): sessionId is string => sessionId !== null),
+        ];
+        const localConversationIds = matchingConversations
+            .filter((conversation) => conversation.sessionId === null)
+            .map((conversation) => conversation.id);
+        const linkedConversationCount = matchingConversations.length - localConversationIds.length;
+        const workspaceSectionKey = makeWorkspaceSectionKey("copilot", group.workspace);
 
         Alert.alert(
             "Remove workspace",
-            `Delete ${sessionIds.length} sessions and ${conversationDraftCount} drafts under ${group.displayName}?`,
+            `Delete ${sessionIds.length} sessions and ${matchingConversations.length} local chats under ${group.displayName}?`,
             [
                 { text: "Cancel", style: "cancel" },
                 {
                     text: "Delete",
                     style: "destructive",
-                    onPress: () => {
-                        if (group.workspace !== "__none__") {
-                            useWorkspaceDirectoryStore.getState().removeDirectory(group.workspace);
+                    onPress: async () => {
+                        cancelWorkspaceSelectionMode();
+                        const deleteResult = await deleteSessionsBulk(sessionIds, {
+                            showPartialFailureAlert: false,
+                        });
+                        if (localConversationIds.length > 0) {
+                            const historyStore = useChatHistoryStore.getState();
+                            for (const conversationId of localConversationIds) {
+                                historyStore.deleteConversation(conversationId);
+                            }
                         }
-                        deleteDraftConversationsByWorkspace(group.workspace);
-                        void deleteSessionsBulk(sessionIds);
+                        if (sessionIds.length === 0 && linkedConversationCount === 0) {
+                            deleteDraftConversationsByWorkspace(group.workspace);
+                        }
+                        if (deleteResult.failedSessionIds.length === 0) {
+                            setExpandedWorkspaces((prev) => {
+                                const next = new Set(prev);
+                                next.delete(workspaceSectionKey);
+                                return next;
+                            });
+                            if (group.workspace !== "__none__") {
+                                useWorkspaceDirectoryStore.getState().removeDirectory(group.workspace);
+                            }
+                            return;
+                        }
+
+                        Alert.alert(
+                            "Workspace kept",
+                            `${deleteResult.failedSessionIds.length} chats are still on your Mac, so ${group.displayName} was not removed from the workspace list.`
+                        );
                     },
                 },
             ]
@@ -561,10 +556,6 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     onPress: () => toggleAllWorkspaces(),
                 },
                 {
-                    text: "Add workspace",
-                    onPress: () => setWorkspacePickerOpen(true),
-                },
-                {
                     text: `Delete drafts (${draftConversations.length})`,
                     onPress: () => handleDeleteAllDrafts(),
                 },
@@ -614,12 +605,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
 
     const handleAddWorkspace = (workspacePath: string) => {
         useWorkspaceDirectoryStore.getState().addDirectory(workspacePath);
-        setExpandedWorkspaces((prev) => new Set(prev).add(makeWorkspaceSectionKey("local", workspacePath)));
-        setCollapsedSections((prev) => {
-            const next = new Set(prev);
-            next.delete("drafts");
-            return next;
-        });
+        setExpandedWorkspaces((prev) => new Set(prev).add(makeWorkspaceSectionKey("copilot", workspacePath)));
         setWorkspacePickerOpen(false);
         handleNewChat(workspacePath);
     };
@@ -649,6 +635,95 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         sessionStore.deferActivePrompts();
         sessionStore.setPlanExitPrompt(null);
         useConnectionStore.getState().setError(null);
+    };
+
+    const closeRenameModal = () => {
+        Keyboard.dismiss();
+        setRenameTarget(null);
+        setRenameValue("");
+    };
+
+    const ensureConversationForSession = (
+        sessionId: string,
+        fallbackTitle: string,
+        fallbackPreview: string,
+        fallbackWorkspaceRoot: string | null
+    ): Conversation => {
+        const historyStore = useChatHistoryStore.getState();
+        const existingConversation = historyStore.conversations.find((item) => item.sessionId === sessionId);
+        if (existingConversation !== undefined) {
+            return existingConversation;
+        }
+
+        const previousActiveConversationId = historyStore.activeConversationId;
+        const session = useSessionStore.getState().sessions.find((item) => item.id === sessionId);
+        const workspaceRoot = session?.context?.workspaceRoot ?? fallbackWorkspaceRoot;
+        const conversationId = historyStore.createConversation(sessionId, workspaceRoot);
+        historyStore.updateConversation(
+            conversationId,
+            fallbackTitle.trim().length > 0 ? fallbackTitle : "Chat",
+            fallbackPreview
+        );
+        historyStore.setActiveConversation(previousActiveConversationId);
+
+        const createdConversation = useChatHistoryStore.getState().conversations.find((item) => item.id === conversationId);
+        if (createdConversation === undefined) {
+            throw new Error(`Conversation cache missing after creating session link for ${sessionId}`);
+        }
+
+        return createdConversation;
+    };
+
+    const openRenameModal = (target: RenameTarget) => {
+        setRenameTarget(target);
+        setRenameValue(target.title.trim().length > 0 ? target.title : "New Chat");
+    };
+
+    const submitRename = () => {
+        if (renameTarget === null) {
+            return;
+        }
+
+        const nextTitle = renameValue.trim();
+        if (nextTitle.length === 0) {
+            Alert.alert("Rename chat", "Title cannot be empty.");
+            return;
+        }
+
+        const historyStore = useChatHistoryStore.getState();
+        if (renameTarget.conversationId !== null) {
+            const existingConversation = historyStore.conversations.find((item) => item.id === renameTarget.conversationId);
+            if (existingConversation === undefined) {
+                Alert.alert("Rename failed", "This chat is no longer available.");
+                return;
+            }
+
+            historyStore.updateConversation(
+                existingConversation.id,
+                nextTitle,
+                existingConversation.preview.length > 0 ? existingConversation.preview : renameTarget.preview
+            );
+            closeRenameModal();
+            return;
+        }
+
+        if (renameTarget.sessionId === null) {
+            Alert.alert("Rename failed", "This chat cannot be renamed right now.");
+            return;
+        }
+
+        const conversation = ensureConversationForSession(
+            renameTarget.sessionId,
+            renameTarget.title,
+            renameTarget.preview,
+            renameTarget.workspaceRoot
+        );
+        historyStore.updateConversation(
+            conversation.id,
+            nextTitle,
+            conversation.preview.length > 0 ? conversation.preview : renameTarget.preview
+        );
+        closeRenameModal();
     };
 
     const handleSelectDraft = (conversationId: string) => {
@@ -751,13 +826,11 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     style: "destructive",
                     onPress: async () => {
                         try {
-                            await deleteSession(sessionId);
-                            const sessionStore = useSessionStore.getState();
-                            sessionStore.removeSession(sessionId);
-                            useChatHistoryStore.getState().removeBySessionId(sessionId);
-                            if (sessionStore.activeSessionId === sessionId) {
-                                sessionStore.clearChatItems();
-                                sessionStore.setSessionLoading(false);
+                            const deleteResult = await deleteSessionsBulk([sessionId], {
+                                showPartialFailureAlert: false,
+                            });
+                            if (deleteResult.failedSessionIds.length > 0) {
+                                Alert.alert("Delete failed", "Could not delete session remotely.");
                             }
                         } catch {
                             Alert.alert("Delete failed", "Could not delete session remotely.");
@@ -768,19 +841,51 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         );
     };
 
+    const archiveSessionConversation = (
+        sessionId: string,
+        conversationId: string | null,
+        title: string,
+        preview: string,
+        workspaceRoot: string | null
+    ) => {
+        const historyStore = useChatHistoryStore.getState();
+        const targetConversation = conversationId !== null
+            ? historyStore.conversations.find((item) => item.id === conversationId)
+            : ensureConversationForSession(sessionId, title, preview, workspaceRoot);
+
+        if (targetConversation === undefined) {
+            Alert.alert("Archive failed", "This chat could not be archived.");
+            return;
+        }
+
+        historyStore.archiveConversation(targetConversation.id);
+    };
+
     // VS Code style three-dot menu: Archive / Delete
-    const openSessionMenu = (sessionId: string, conversationId: string | null, title: string) => {
+    const openSessionMenu = (
+        sessionId: string,
+        conversationId: string | null,
+        title: string,
+        preview: string,
+        workspaceRoot: string | null
+    ) => {
         Alert.alert(
             title.length > 0 ? title : "Chat",
             undefined,
             [
                 {
+                    text: "Rename",
+                    onPress: () => openRenameModal({
+                        conversationId,
+                        sessionId,
+                        title,
+                        preview,
+                        workspaceRoot,
+                    }),
+                },
+                {
                     text: "Archive",
-                    onPress: () => {
-                        if (conversationId !== null) {
-                            useChatHistoryStore.getState().archiveConversation(conversationId);
-                        }
-                    },
+                    onPress: () => archiveSessionConversation(sessionId, conversationId, title, preview, workspaceRoot),
                 },
                 {
                     text: "Delete",
@@ -792,30 +897,27 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         );
     };
 
-    const openDraftMenu = (conversationId: string, title: string) => {
-        Alert.alert(
-            title.length > 0 ? title : "Draft",
-            undefined,
-            [
-                {
-                    text: "Archive",
-                    onPress: () => useChatHistoryStore.getState().archiveConversation(conversationId),
-                },
-                {
-                    text: "Delete",
-                    style: "destructive",
-                    onPress: () => useChatHistoryStore.getState().deleteConversation(conversationId),
-                },
-                { text: "Cancel", style: "cancel" },
-            ]
-        );
-    };
-
-    const openArchivedMenu = (conversationId: string, title: string) => {
+    const openArchivedMenu = (
+        conversationId: string,
+        sessionId: string | null,
+        title: string,
+        preview: string,
+        workspaceRoot: string | null
+    ) => {
         Alert.alert(
             title.length > 0 ? title : "Archived",
             undefined,
             [
+                {
+                    text: "Rename",
+                    onPress: () => openRenameModal({
+                        conversationId,
+                        sessionId,
+                        title,
+                        preview,
+                        workspaceRoot,
+                    }),
+                },
                 {
                     text: "Restore",
                     onPress: () => useChatHistoryStore.getState().unarchiveConversation(conversationId),
@@ -830,11 +932,27 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         );
     };
 
-    const openCloudConversationMenu = (conversationId: string, sessionId: string | null, title: string) => {
+    const openCloudConversationMenu = (
+        conversationId: string,
+        sessionId: string | null,
+        title: string,
+        preview: string,
+        workspaceRoot: string | null
+    ) => {
         Alert.alert(
             title.length > 0 ? title : "Cloud conversation",
             undefined,
             [
+                {
+                    text: "Rename",
+                    onPress: () => openRenameModal({
+                        conversationId,
+                        sessionId,
+                        title,
+                        preview,
+                        workspaceRoot,
+                    }),
+                },
                 {
                     text: "Open cached copy",
                     onPress: () => handleSelectCloudConversation(conversationId, null),
@@ -900,30 +1018,32 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     }) => (
         <>
             <View style={styles.conversationTitleRow}>
-                <Text
-                    style={[
-                        styles.conversationTitle,
-                        params.active && styles.conversationTitleActive,
-                    ]}
-                    numberOfLines={1}
-                >
-                    {params.title}
-                </Text>
-                {params.duplicateCount !== undefined && params.duplicateCount > 0 && (
-                    <Text style={styles.conversationDuplicateCount}>
-                        ×{params.duplicateCount + 1}
+                <View style={styles.conversationTitleGroup}>
+                    <Text
+                        style={[
+                            styles.conversationTitle,
+                            params.active && styles.conversationTitleActive,
+                        ]}
+                        numberOfLines={1}
+                    >
+                        {params.title}
+                    </Text>
+                    {params.duplicateCount !== undefined && params.duplicateCount > 0 && (
+                        <Text style={styles.conversationDuplicateCount}>
+                            ×{params.duplicateCount + 1}
+                        </Text>
+                    )}
+                </View>
+                {params.metadata.lastSyncText !== null && (
+                    <Text style={styles.providerConversationMeta} numberOfLines={1}>
+                        {params.metadata.lastSyncText}
                     </Text>
                 )}
             </View>
-            {renderMetadataChips(params.metadata.chips)}
             <Text style={styles.conversationPreview} numberOfLines={1}>
                 {params.preview.length > 0 ? params.preview : params.emptyPreview}
             </Text>
-            {params.metadata.lastSyncText !== null && (
-                <Text style={styles.providerConversationMeta} numberOfLines={1}>
-                    {params.metadata.lastSyncText}
-                </Text>
-            )}
+            {renderMetadataChips(params.metadata.chips)}
         </>
     );
 
@@ -991,38 +1111,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 showsVerticalScrollIndicator={false}
             >
                 <View style={styles.providerSection}>
-                    <Pressable style={styles.providerHeaderRow} onPress={() => toggleSectionVisibility("local")}>
-                        <View style={styles.providerHeaderLeft}>
-                            <Feather
-                                name={isSectionCollapsed("local") ? "chevron-right" : "chevron-down"}
-                                size={14}
-                                color={theme.colors.textSecondary}
-                            />
-                            <Feather name="terminal" size={14} color={theme.colors.textSecondary} />
-                            <Text style={styles.providerHeaderText}>Local</Text>
-                        </View>
-                        <View style={styles.providerHeaderRight}>
-                            <Text style={styles.providerHeaderMeta}>
-                                {copilotCliGroups.length} workspaces
-                            </Text>
-                            {copilotCliGroups.length > 0 && (
-                                <Pressable
-                                    style={({ pressed }) => [
-                                        styles.providerHeaderAction,
-                                        pressed && styles.providerHeaderActionPressed,
-                                    ]}
-                                    onPress={() => toggleSectionVisibility("local")}
-                                    hitSlop={8}
-                                >
-                                    <Text style={styles.providerHeaderActionText}>
-                                        {isSectionCollapsed("local") ? "Show" : "Hide"}
-                                    </Text>
-                                </Pressable>
-                            )}
-                        </View>
-                    </Pressable>
-
-                    {!isSectionCollapsed("local") && copilotCliGroups.length === 0 && (
+                    {copilotCliGroups.length === 0 && (
                         <View style={styles.emptyState}>
                             <Text style={styles.emptyText}>
                                 No local sessions yet
@@ -1030,7 +1119,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                         </View>
                     )}
 
-                    {!isSectionCollapsed("local") && copilotCliGroups.map((group) => {
+                    {copilotCliGroups.map((group) => {
                         const expansionKey = makeWorkspaceSectionKey("copilot", group.workspace);
                         const isExpanded = expandedWorkspaces.has(expansionKey);
                         const workspaceRootForNewChat =
@@ -1159,7 +1248,13 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                                     onLongPress={() =>
                                                         workspaceSelectionMode === group.workspace
                                                             ? toggleWorkspaceEntrySelection(entry.key)
-                                                            : openSessionMenu(entry.primarySession.id, linkedId, entry.title)
+                                                            : openSessionMenu(
+                                                                entry.primarySession.id,
+                                                                linkedId,
+                                                                presentation.title,
+                                                                presentation.preview,
+                                                                group.workspace === "__none__" ? null : group.workspace,
+                                                            )
                                                     }
                                                     accessibilityLabel={entry.title.length > 0 ? entry.title : "Session"}
                                                 >
@@ -1175,7 +1270,13 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                                 {workspaceSelectionMode !== group.workspace && (
                                                     <Pressable
                                                         style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
-                                                        onPress={() => openSessionMenu(entry.primarySession.id, linkedId, entry.title)}
+                                                        onPress={() => openSessionMenu(
+                                                            entry.primarySession.id,
+                                                            linkedId,
+                                                            presentation.title,
+                                                            presentation.preview,
+                                                            group.workspace === "__none__" ? null : group.workspace,
+                                                        )}
                                                         hitSlop={8}
                                                         accessibilityLabel="More actions"
                                                     >
@@ -1185,180 +1286,6 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                             </View>
                                         );
                                     })}
-                            </View>
-                        );
-                    })}
-                </View>
-
-                <View style={styles.providerSection}>
-                    <Pressable style={styles.providerHeaderRow} onPress={() => toggleSectionVisibility("drafts")}>
-                        <View style={styles.providerHeaderLeft}>
-                            <Feather
-                                name={isSectionCollapsed("drafts") ? "chevron-right" : "chevron-down"}
-                                size={14}
-                                color={theme.colors.textSecondary}
-                            />
-                            <Feather name="edit-3" size={14} color={theme.colors.textSecondary} />
-                            <Text style={styles.providerHeaderText}>Drafts</Text>
-                        </View>
-                        <View style={styles.providerHeaderRight}>
-                            <Text style={styles.providerHeaderMeta}>
-                                {localWorkspaceGroups.length + (unassignedDraftConversations.length > 0 ? 1 : 0)} workspaces
-                            </Text>
-                            {(localWorkspaceGroups.length > 0 || unassignedDraftConversations.length > 0) && (
-                                <Pressable
-                                    style={({ pressed }) => [
-                                        styles.providerHeaderAction,
-                                        pressed && styles.providerHeaderActionPressed,
-                                    ]}
-                                    onPress={() => toggleSectionVisibility("drafts")}
-                                    hitSlop={8}
-                                >
-                                    <Text style={styles.providerHeaderActionText}>
-                                        {isSectionCollapsed("drafts") ? "Show" : "Hide"}
-                                    </Text>
-                                </Pressable>
-                            )}
-                        </View>
-                    </Pressable>
-
-                    {!isSectionCollapsed("drafts") && localWorkspaceGroups.length === 0 && unassignedDraftConversations.length === 0 && (
-                        <View style={styles.emptyState}>
-                            <Text style={styles.emptyText}>
-                                No drafts yet
-                            </Text>
-                        </View>
-                    )}
-
-                    {!isSectionCollapsed("drafts") && unassignedDraftConversations.length > 0 && (
-                        <View style={styles.workspaceGroup}>
-                            <View style={styles.sectionHeader}>
-                                <Text style={styles.sectionHeaderText}>Unassigned</Text>
-                            </View>
-                            {unassignedDraftConversations.map((conversation) => {
-                                const metadata = buildLocalDraftMetadata();
-                                return (
-                                    <View key={conversation.id} style={styles.conversationRow}>
-                                        <Pressable
-                                            style={({ pressed }) => [
-                                                styles.conversationItem,
-                                                styles.conversationItemFlex,
-                                                activeSessionId === null && activeConversationId === conversation.id && styles.conversationItemActive,
-                                                pressed && styles.conversationItemPressed,
-                                            ]}
-                                            onPress={() => handleSelectDraft(conversation.id)}
-                                            onLongPress={() => openDraftMenu(conversation.id, conversation.title)}
-                                            accessibilityLabel={conversation.title}
-                                        >
-                                            {renderConversationBody({
-                                                title: conversation.title,
-                                                active: activeSessionId === null && activeConversationId === conversation.id,
-                                                preview: conversation.preview,
-                                                emptyPreview: "Empty draft",
-                                                metadata,
-                                            })}
-                                        </Pressable>
-                                        <Pressable
-                                            style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
-                                            onPress={() => openDraftMenu(conversation.id, conversation.title)}
-                                            hitSlop={8}
-                                            accessibilityLabel="More actions"
-                                        >
-                                            <Feather name="more-horizontal" size={14} color={theme.colors.textTertiary} />
-                                        </Pressable>
-                                    </View>
-                                );
-                            })}
-                        </View>
-                    )}
-
-                    {!isSectionCollapsed("drafts") && localWorkspaceGroups.map((group) => {
-                        const expansionKey = makeWorkspaceSectionKey("local", group.workspace);
-                        const isExpanded = expandedWorkspaces.has(expansionKey);
-                        const localMenuGroup: WorkspaceGroup = {
-                            workspace: group.workspace,
-                            displayName: group.displayName,
-                            entries: [],
-                            totalSessions: 0,
-                        };
-
-                        return (
-                            <View key={group.workspace} style={styles.workspaceGroup}>
-                                <View style={styles.workspaceHeaderRow}>
-                                    <Pressable
-                                        style={styles.workspaceHeader}
-                                        onPress={() => toggleWorkspace(expansionKey)}
-                                    >
-                                        <Feather
-                                            name={isExpanded ? "chevron-down" : "chevron-right"}
-                                            size={12}
-                                            color={theme.colors.textTertiary}
-                                        />
-                                        <Feather name="folder" size={14} color={theme.colors.textTertiary} />
-                                        <Text style={styles.workspaceName} numberOfLines={1}>
-                                            {group.displayName}
-                                        </Text>
-                                        <Text style={styles.workspaceCount}>
-                                            {group.drafts.length}
-                                        </Text>
-                                    </Pressable>
-                                    <Pressable
-                                        style={({ pressed }) => [
-                                            styles.workspaceAddBtn,
-                                            pressed && styles.workspaceAddBtnPressed,
-                                        ]}
-                                        onPress={() => openWorkspaceMenu(localMenuGroup)}
-                                        hitSlop={8}
-                                        accessibilityLabel={`${group.displayName} menu`}
-                                    >
-                                        <Feather name="more-horizontal" size={14} color={theme.colors.textSecondary} />
-                                    </Pressable>
-                                    <Pressable
-                                        style={({ pressed }) => [
-                                            styles.workspaceAddBtn,
-                                            pressed && styles.workspaceAddBtnPressed,
-                                        ]}
-                                        onPress={() => handleNewChat(group.workspace)}
-                                        hitSlop={8}
-                                        accessibilityLabel={`New chat for ${group.displayName}`}
-                                    >
-                                        <Feather name="plus" size={14} color={theme.colors.textSecondary} />
-                                    </Pressable>
-                                </View>
-                                {isExpanded && group.drafts.map((conversation) => {
-                                    const metadata = buildLocalDraftMetadata();
-                                    return (
-                                        <View key={conversation.id} style={styles.conversationRow}>
-                                            <Pressable
-                                                style={({ pressed }) => [
-                                                    styles.conversationItem,
-                                                    styles.conversationItemFlex,
-                                                    activeSessionId === null && activeConversationId === conversation.id && styles.conversationItemActive,
-                                                    pressed && styles.conversationItemPressed,
-                                                ]}
-                                                onPress={() => handleSelectDraft(conversation.id)}
-                                                onLongPress={() => openDraftMenu(conversation.id, conversation.title)}
-                                                accessibilityLabel={conversation.title}
-                                            >
-                                                {renderConversationBody({
-                                                    title: conversation.title,
-                                                    active: activeSessionId === null && activeConversationId === conversation.id,
-                                                    preview: conversation.preview,
-                                                    emptyPreview: "Empty draft",
-                                                    metadata,
-                                                })}
-                                            </Pressable>
-                                            <Pressable
-                                                style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
-                                                onPress={() => openDraftMenu(conversation.id, conversation.title)}
-                                                hitSlop={8}
-                                                accessibilityLabel="More actions"
-                                            >
-                                                <Feather name="more-horizontal" size={14} color={theme.colors.textTertiary} />
-                                            </Pressable>
-                                        </View>
-                                    );
-                                })}
                             </View>
                         );
                     })}
@@ -1488,6 +1415,8 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                                     conversation.id,
                                                     remoteSessionAvailable ? conversation.sessionId : null,
                                                     conversation.title,
+                                                    conversation.preview,
+                                                    conversation.workspaceRoot,
                                                 )}
                                                 accessibilityLabel={conversation.title}
                                             >
@@ -1505,6 +1434,8 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                                     conversation.id,
                                                     remoteSessionAvailable ? conversation.sessionId : null,
                                                     conversation.title,
+                                                    conversation.preview,
+                                                    conversation.workspaceRoot,
                                                 )}
                                                 hitSlop={8}
                                                 accessibilityLabel="More actions"
@@ -1568,7 +1499,13 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                                     handleSelectDraft(conversation.id);
                                                 }
                                             }}
-                                            onLongPress={() => openArchivedMenu(conversation.id, conversation.title)}
+                                            onLongPress={() => openArchivedMenu(
+                                                conversation.id,
+                                                conversation.sessionId,
+                                                conversation.title,
+                                                conversation.preview,
+                                                conversation.workspaceRoot,
+                                            )}
                                             accessibilityLabel={conversation.title}
                                         >
                                             {renderConversationBody({
@@ -1581,7 +1518,13 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                         </Pressable>
                                         <Pressable
                                             style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
-                                            onPress={() => openArchivedMenu(conversation.id, conversation.title)}
+                                            onPress={() => openArchivedMenu(
+                                                conversation.id,
+                                                conversation.sessionId,
+                                                conversation.title,
+                                                conversation.preview,
+                                                conversation.workspaceRoot,
+                                            )}
                                             hitSlop={8}
                                             accessibilityLabel="More actions"
                                         >
@@ -1634,6 +1577,60 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     </Text>
                 </View>
             </View>
+
+            <Modal
+                visible={renameTarget !== null}
+                transparent
+                animationType="fade"
+                onRequestClose={closeRenameModal}
+            >
+                <Pressable style={styles.renameOverlay} onPress={closeRenameModal}>
+                    <KeyboardAvoidingView
+                        style={styles.renameKeyboardLayer}
+                        behavior={Platform.OS === "ios" ? "padding" : "height"}
+                        keyboardVerticalOffset={Platform.OS === "ios" ? 24 : 0}
+                    >
+                        <Pressable style={styles.renameCard} onPress={(event) => event.stopPropagation()}>
+                            <Text style={styles.renameTitle}>Rename chat</Text>
+                            <Text style={styles.renameSubtitle} numberOfLines={2}>
+                                {renameTarget?.preview.trim().length
+                                    ? renameTarget.preview
+                                    : "Choose a shorter, clearer title for this chat."}
+                            </Text>
+                            <TextInput
+                                style={styles.renameInput}
+                                value={renameValue}
+                                onChangeText={setRenameValue}
+                                placeholder="Chat title"
+                                placeholderTextColor={theme.colors.textPlaceholder}
+                                autoFocus
+                                returnKeyType="done"
+                                onSubmitEditing={submitRename}
+                            />
+                            <View style={styles.renameActions}>
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.renameSecondaryButton,
+                                        pressed && styles.renameSecondaryButtonPressed,
+                                    ]}
+                                    onPress={closeRenameModal}
+                                >
+                                    <Text style={styles.renameSecondaryButtonText}>Cancel</Text>
+                                </Pressable>
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.renamePrimaryButton,
+                                        pressed && styles.renamePrimaryButtonPressed,
+                                    ]}
+                                    onPress={submitRename}
+                                >
+                                    <Text style={styles.renamePrimaryButtonText}>Save</Text>
+                                </Pressable>
+                            </View>
+                        </Pressable>
+                    </KeyboardAvoidingView>
+                </Pressable>
+            </Modal>
 
             <WorkspacePickerModal
                 visible={workspacePickerOpen}
@@ -1864,9 +1861,9 @@ return StyleSheet.create({
         overflow: "hidden",
     },
     conversationItem: {
-        paddingVertical: 7,
+        paddingVertical: 6,
         paddingHorizontal: theme.spacing.md,
-        paddingLeft: 30,
+        paddingLeft: 26,
         borderRadius: theme.borderRadius.sm,
         marginBottom: 1,
     },
@@ -1940,18 +1937,27 @@ return StyleSheet.create({
         backgroundColor: theme.colors.bgSecondary,
     },
     conversationTitle: {
-        fontSize: theme.fontSize.md,
+        flex: 1,
+        fontSize: theme.fontSize.sm,
         color: theme.colors.textPrimary,
-        fontWeight: "400",
+        fontWeight: "500",
     },
     conversationTitleRow: {
         flexDirection: "row",
         alignItems: "center",
+        justifyContent: "space-between",
+        gap: theme.spacing.sm,
+    },
+    conversationTitleGroup: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
         gap: theme.spacing.xs,
+        minWidth: 0,
     },
     conversationTitleActive: {
         color: theme.colors.textPrimary,
-        fontWeight: "500",
+        fontWeight: "600",
     },
     conversationDuplicateCount: {
         fontSize: theme.fontSize.xs,
@@ -1968,9 +1974,11 @@ return StyleSheet.create({
         marginTop: 2,
     },
     providerConversationMeta: {
-        fontSize: theme.fontSize.xs,
+        flexShrink: 0,
+        maxWidth: "42%",
+        fontSize: 11,
         color: theme.colors.textSecondary,
-        marginTop: 2,
+        textAlign: "right",
     },
     metadataChipRow: {
         flexDirection: "row",
@@ -2085,6 +2093,91 @@ return StyleSheet.create({
     connectionText: {
         fontSize: theme.fontSize.xs,
         color: theme.colors.textTertiary,
+    },
+    renameOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: theme.colors.overlay,
+        justifyContent: "center",
+        alignItems: "center",
+        paddingHorizontal: theme.spacing.lg,
+    },
+    renameKeyboardLayer: {
+        width: "100%",
+        alignItems: "center",
+    },
+    renameCard: {
+        width: "100%",
+        maxWidth: 420,
+        borderRadius: theme.borderRadius.lg,
+        backgroundColor: theme.colors.bgSecondary,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        padding: theme.spacing.lg,
+        gap: theme.spacing.md,
+        shadowColor: theme.colors.bg,
+        shadowOpacity: 0.35,
+        shadowRadius: 22,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 12,
+    },
+    renameTitle: {
+        fontSize: theme.fontSize.base,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
+    },
+    renameSubtitle: {
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textSecondary,
+        lineHeight: 20,
+    },
+    renameInput: {
+        minHeight: 46,
+        borderRadius: theme.borderRadius.sm,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.bg,
+        color: theme.colors.textPrimary,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: 10,
+        fontSize: theme.fontSize.base,
+    },
+    renameActions: {
+        flexDirection: "row",
+        gap: theme.spacing.sm,
+    },
+    renameSecondaryButton: {
+        flex: 1,
+        minHeight: 44,
+        borderRadius: theme.borderRadius.sm,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.bg,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    renameSecondaryButtonPressed: {
+        backgroundColor: theme.colors.bgElevated,
+    },
+    renameSecondaryButtonText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "600",
+        color: theme.colors.textSecondary,
+    },
+    renamePrimaryButton: {
+        flex: 1,
+        minHeight: 44,
+        borderRadius: theme.borderRadius.sm,
+        backgroundColor: theme.colors.accent,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    renamePrimaryButtonPressed: {
+        backgroundColor: theme.colors.accentPressed,
+    },
+    renamePrimaryButtonText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "700",
+        color: theme.colors.textOnAccent,
     },
 });
 }

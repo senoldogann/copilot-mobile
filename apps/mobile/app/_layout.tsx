@@ -1,6 +1,7 @@
 // Kök layout — Stack navigator (çekmece grubu + modal ekranlar)
 
 import "expo-dev-client";
+import "../src/services/notification-background-task";
 import { Stack } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";

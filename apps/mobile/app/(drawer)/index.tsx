@@ -12,6 +12,7 @@ import {
     Modal,
     StyleSheet,
     TouchableWithoutFeedback,
+    AppState,
 } from "react-native";
 import type { NativeSyntheticEvent, NativeScrollEvent } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
@@ -31,6 +32,7 @@ import { ChatInput } from "../../src/components/ChatInput";
 import type { ImageAttachment, QueuedDraft, SendMode } from "../../src/components/chat-input-types";
 import { EmptyChat } from "../../src/components/EmptyChat";
 import { ActivityDots } from "../../src/components/ActivityDots";
+import { SubagentPanel, type SubagentRun } from "../../src/components/SubagentPanel";
 import { TodoPanel } from "../../src/components/TodoPanel";
 import { PermissionDialog, PlanExitDialog, UserInputDialog } from "../../src/components/Dialogs";
 import { useAppTheme, type AppTheme } from "../../src/theme/theme-context";
@@ -50,11 +52,27 @@ import {
     disconnect,
 } from "../../src/services/bridge";
 import { startDraftConversation } from "../../src/services/new-chat";
+import { getSubagentDisplayName, isSubagentToolName } from "../../src/utils/tool-introspection";
 
 function basename(path: string): string {
     const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
     const segments = normalized.split("/").filter(Boolean);
     return segments[segments.length - 1] ?? path;
+}
+
+function buildSubagentRuns(items: ReadonlyArray<ChatItem>): ReadonlyArray<SubagentRun> {
+    return items
+        .filter((item): item is Extract<ChatItem, { type: "tool" }> => item.type === "tool")
+        .filter((item) => isSubagentToolName(item.toolName))
+        .map((item) => ({
+            requestId: item.requestId,
+            title: getSubagentDisplayName(item),
+            status: item.status === "failed"
+                ? "failed"
+                : item.status === "running"
+                    ? "running"
+                    : "completed",
+        }));
 }
 
 // Özel başlık — GitHub Copilot mobil stili üst bar
@@ -144,6 +162,21 @@ const ChatHeader = React.memo(function ChatHeader() {
 
         void requestWorkspaceGitSummary(activeSessionId, 10);
     }, [activeSessionId, isConnected]);
+
+    React.useEffect(() => {
+        const subscription = AppState.addEventListener("change", (nextState) => {
+            if (nextState === "active") {
+                return;
+            }
+
+            setMenuOpen(false);
+            setWorkspaceOpen(false);
+        });
+
+        return () => {
+            subscription.remove();
+        };
+    }, []);
 
     return (
         <>
@@ -247,6 +280,9 @@ const ChatHeader = React.memo(function ChatHeader() {
 });
 
 const MAX_TOTAL_ATTACHMENT_BASE64_CHARS = 700_000;
+const STREAMING_PERSIST_DELAY_MS = 5_000;
+const TYPING_PERSIST_DELAY_MS = 2_200;
+const IDLE_PERSIST_DELAY_MS = 1_200;
 
 function toSessionMessageAttachments(
     images: ReadonlyArray<ImageAttachment>
@@ -281,6 +317,7 @@ export default function ChatScreen() {
     const sessions = useSessionStore((s) => s.sessions);
     const isSessionLoading = useSessionStore((s) => s.isSessionLoading);
     const isTyping = useSessionStore((s) => s.isAssistantTyping);
+    const isAbortPending = useSessionStore((s) => s.isAbortRequested);
     const chatCurrentIntent = useSessionStore((s) => s.currentIntent);
     const models = useSessionStore((s) => s.models);
     const selectedModel = useSessionStore((s) => s.selectedModel);
@@ -291,6 +328,7 @@ export default function ChatScreen() {
     const userInputPrompt = useSessionStore((s) => s.userInputPrompt);
     const planExitPrompt = useSessionStore((s) => s.planExitPrompt);
     const agentTodos = useSessionStore((s) => s.agentTodos);
+    const setAbortRequested = useSessionStore((s) => s.setAbortRequested);
     const activeConversationId = useChatHistoryStore((s) => s.activeConversationId);
     const workspaceSessionId = useWorkspaceStore((s) => s.sessionId);
     const workspaceRoot = useWorkspaceStore((s) => s.workspaceRoot);
@@ -302,6 +340,10 @@ export default function ChatScreen() {
         connectionState === "connecting" || connectionState === "connected";
     const inputDisabled = !isConnected || isSessionLoading;
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
+    const subagentRuns = useMemo(
+        () => buildSubagentRuns(chatItems),
+        [chatItems],
+    );
 
     useEffect(() => {
         if (permissionPrompt !== null || userInputPrompt !== null || planExitPrompt !== null) {
@@ -336,7 +378,11 @@ export default function ChatScreen() {
             (item.type === "assistant" || item.type === "thinking") && item.isStreaming
         )) || chatItems.some((item) => item.type === "tool" && item.status === "running");
 
-        const persistDelay = hasStreamingContent ? 2600 : isTyping ? 1600 : 900;
+        const persistDelay = hasStreamingContent
+            ? STREAMING_PERSIST_DELAY_MS
+            : isTyping
+                ? TYPING_PERSIST_DELAY_MS
+                : IDLE_PERSIST_DELAY_MS;
 
         persistChatItemsTimeoutRef.current = setTimeout(() => {
             persistInteractionRef.current = InteractionManager.runAfterInteractions(() => {
@@ -549,10 +595,13 @@ export default function ChatScreen() {
 
     // Abort message
     const handleAbort = useCallback(() => {
-        if (activeSessionId !== null) {
-            abortMessage(activeSessionId);
+        if (activeSessionId !== null && !isAbortPending) {
+            setAbortRequested(true);
+            void abortMessage(activeSessionId).catch(() => {
+                useSessionStore.getState().setAbortRequested(false);
+            });
         }
-    }, [activeSessionId]);
+    }, [activeSessionId, isAbortPending, setAbortRequested]);
 
     const handleEditQueuedDraft = useCallback((draftId: string) => {
         const draft = queuedDrafts.find((item) => item.id === draftId) ?? null;
@@ -638,12 +687,6 @@ export default function ChatScreen() {
                                     style={styles.messageList}
                                     contentContainerStyle={styles.messageListContent}
                                     onScroll={handleScroll}
-                                    onContentSizeChange={() => {
-                                        if (!isNearBottomRef.current) {
-                                            return;
-                                        }
-                                        flatListRef.current?.scrollToEnd({ animated: isTyping });
-                                    }}
                                     onScrollBeginDrag={handleBackgroundPress}
                                     scrollEventThrottle={32}
                                     canCancelContentTouches
@@ -690,6 +733,10 @@ export default function ChatScreen() {
                     </View>
                 )}
 
+                {subagentRuns.length > 0 && (
+                    <SubagentPanel runs={subagentRuns} />
+                )}
+
                 {agentTodos.length > 0 && (
                     <TodoPanel todos={agentTodos} />
                 )}
@@ -698,6 +745,7 @@ export default function ChatScreen() {
                     onSend={handleSend}
                     onAbort={handleAbort}
                     isTyping={isTyping}
+                    isAbortPending={isAbortPending}
                     disabled={inputDisabled}
                     queuedDrafts={visibleQueuedDrafts}
                     editingDraft={editingDraft}

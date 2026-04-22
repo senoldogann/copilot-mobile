@@ -1,99 +1,108 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
-import type { AgentTodo } from "../stores/session-store-types";
+import { SubagentIcon } from "./Icons";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 
-interface TodoPanelProps {
-    todos: ReadonlyArray<AgentTodo>;
-}
+export type SubagentRun = {
+    requestId: string;
+    title: string;
+    status: "running" | "completed" | "failed";
+};
 
-function TodoStatusIcon({ status }: { status: AgentTodo["status"] }) {
+type SubagentPanelProps = {
+    runs: ReadonlyArray<SubagentRun>;
+};
+
+function SubagentStatusIcon({ status }: { status: SubagentRun["status"] }) {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
+
     if (status === "completed") {
         return (
-            <View style={[styles.statusIcon, { backgroundColor: theme.colors.success, borderColor: theme.colors.success }]}>
+            <View style={[styles.statusIcon, styles.statusIconCompleted]}>
                 <Text style={styles.checkmark}>✓</Text>
             </View>
         );
     }
-    if (status === "in_progress") {
+
+    if (status === "failed") {
         return (
-            <View style={[styles.statusIcon, { backgroundColor: theme.colors.textLink, borderColor: theme.colors.textLink }]}>
-                <View style={styles.dotInner} />
+            <View style={[styles.statusIcon, styles.statusIconFailed]}>
+                <Text style={styles.failedMark}>×</Text>
             </View>
         );
     }
-    // pending
+
     return (
-        <View style={[styles.statusIcon, { backgroundColor: "transparent", borderColor: theme.colors.border }]} />
+        <View style={[styles.statusIcon, styles.statusIconRunning]}>
+            <View style={[styles.runningDot, { backgroundColor: theme.colors.textOnAccent }]} />
+        </View>
     );
 }
 
-export function TodoPanel({ todos }: TodoPanelProps) {
+export function SubagentPanel({ runs }: SubagentPanelProps) {
+    const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
     const [expanded, setExpanded] = useState(false);
 
-    if (todos.length === 0) return null;
+    if (runs.length === 0) {
+        return null;
+    }
 
-    const completedCount = todos.filter((t) => t.status === "completed").length;
-    const inProgressCount = todos.filter((t) => t.status === "in_progress").length;
+    const completedCount = runs.filter((run) => run.status === "completed").length;
+    const runningCount = runs.filter((run) => run.status === "running").length;
 
     return (
         <View style={styles.container}>
             <Pressable
                 style={styles.header}
-                onPress={() => setExpanded((v) => !v)}
-                accessibilityLabel={expanded ? "Todo listesini gizle" : "Todo listesini göster"}
+                onPress={() => setExpanded((value) => !value)}
+                accessibilityLabel={expanded ? "Hide subagents" : "Show subagents"}
             >
                 <View style={styles.headerLeft}>
-                    <View style={styles.taskIcon}>
-                        <Text style={styles.taskIconText}>≡</Text>
+                    <View style={styles.iconWrap}>
+                        <SubagentIcon size={14} color={theme.colors.textLink} />
                     </View>
-                    <Text style={styles.headerTitle}>Todo List</Text>
+                    <Text style={styles.headerTitle}>Subagents</Text>
                     <View style={styles.badge}>
-                        <Text style={styles.badgeText}>
-                            {completedCount}/{todos.length}
-                        </Text>
+                        <Text style={styles.badgeText}>{runs.length}</Text>
                     </View>
-                    {inProgressCount > 0 && (
-                        <View style={[styles.badge, styles.badgeWarning]}>
-                            <Text style={[styles.badgeText, styles.badgeWarningText]}>
-                                {inProgressCount} aktif
+                    <View style={styles.badge}>
+                        <Text style={styles.badgeText}>{completedCount} done</Text>
+                    </View>
+                    {runningCount > 0 && (
+                        <View style={[styles.badge, styles.runningBadge]}>
+                            <Text style={[styles.badgeText, styles.runningBadgeText]}>
+                                {runningCount} running
                             </Text>
                         </View>
                     )}
                 </View>
-                <Text style={styles.chevron}>
-                    {expanded ? "▾" : "▸"}
-                </Text>
+                <Text style={styles.chevron}>{expanded ? "▾" : "▸"}</Text>
             </Pressable>
 
             {expanded && (
                 <View style={styles.list}>
-                    {todos.map((todo, index) => (
+                    {runs.map((run, index) => (
                         <View
-                            key={todo.id}
+                            key={run.requestId}
                             style={[
                                 styles.item,
-                                index < todos.length - 1 && styles.itemBorder,
+                                index < runs.length - 1 && styles.itemBorder,
                             ]}
                         >
-                            <TodoStatusIcon status={todo.status} />
+                            <SubagentStatusIcon status={run.status} />
                             <View style={styles.itemContent}>
-                                <Text
-                                    style={[
-                                        styles.itemText,
-                                        todo.status === "completed" && styles.itemTextCompleted,
-                                        todo.status === "completed" && styles.strikethrough,
-                                    ]}
-                                    numberOfLines={2}
-                                >
-                                    {todo.content}
+                                <Text style={styles.itemTitle} numberOfLines={1}>
+                                    {run.title}
                                 </Text>
-                                {todo.priority === "high" && (
-                                    <Text style={styles.priorityTag}>yüksek öncelik</Text>
-                                )}
+                                <Text style={styles.itemMeta}>
+                                    {run.status === "running"
+                                        ? "Running"
+                                        : run.status === "failed"
+                                            ? "Failed"
+                                            : "Completed"}
+                                </Text>
                             </View>
                         </View>
                     ))}
@@ -126,7 +135,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         gap: 6,
         flex: 1,
     },
-    taskIcon: {
+    iconWrap: {
         width: 18,
         height: 18,
         borderWidth: 1.5,
@@ -134,11 +143,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         borderRadius: 4,
         alignItems: "center",
         justifyContent: "center",
-    },
-    taskIconText: {
-        fontSize: 11,
-        fontWeight: "600",
-        color: theme.colors.textLink,
+        backgroundColor: theme.colors.textLink + "10",
     },
     headerTitle: {
         fontSize: 13,
@@ -156,11 +161,10 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         fontWeight: "600",
         color: theme.colors.textLink,
     },
-    badgeWarning: {
-        marginLeft: 4,
-        backgroundColor: theme.colors.warning + "22",
+    runningBadge: {
+        backgroundColor: theme.colors.warning + "20",
     },
-    badgeWarningText: {
+    runningBadgeText: {
         color: theme.colors.warning,
     },
     chevron: {
@@ -192,14 +196,31 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         marginTop: 1,
         flexShrink: 0,
     },
-    dotInner: {
+    statusIconCompleted: {
+        backgroundColor: theme.colors.success,
+        borderColor: theme.colors.success,
+    },
+    statusIconFailed: {
+        backgroundColor: theme.colors.error,
+        borderColor: theme.colors.error,
+    },
+    statusIconRunning: {
+        backgroundColor: theme.colors.textLink,
+        borderColor: theme.colors.textLink,
+    },
+    runningDot: {
         width: 6,
         height: 6,
         borderRadius: 3,
-        backgroundColor: "#fff",
     },
     checkmark: {
-        color: "#fff",
+        color: theme.colors.textOnAccent,
+        fontSize: 11,
+        fontWeight: "700",
+        lineHeight: 14,
+    },
+    failedMark: {
+        color: theme.colors.textOnAccent,
         fontSize: 11,
         fontWeight: "700",
         lineHeight: 14,
@@ -207,21 +228,14 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     itemContent: {
         flex: 1,
     },
-    itemText: {
+    itemTitle: {
         fontSize: 13,
         lineHeight: 18,
         color: theme.colors.textPrimary,
     },
-    itemTextCompleted: {
+    itemMeta: {
+        marginTop: 1,
+        fontSize: 11,
         color: theme.colors.textSecondary,
-    },
-    strikethrough: {
-        textDecorationLine: "line-through",
-    },
-    priorityTag: {
-        fontSize: 10,
-        fontWeight: "600",
-        marginTop: 2,
-        color: theme.colors.error,
     },
 });

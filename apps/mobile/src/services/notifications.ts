@@ -2,8 +2,10 @@ import { Platform } from "react-native";
 import Constants from "expo-constants";
 import type { NotificationPlatform, NotificationProvider } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
+import { BACKGROUND_NOTIFICATION_TASK } from "./notification-background-shared";
 
 const SESSION_EVENTS_CHANNEL_ID = "session-events";
+const MAX_LOCAL_NOTIFICATION_KEYS = 200;
 
 let initialized = false;
 let notificationResponseSubscription: { remove: () => void } | null = null;
@@ -11,6 +13,8 @@ let lastHandledNotificationId: string | null = null;
 let notificationsModulePromise: Promise<typeof import("expo-notifications") | null> | null = null;
 let cachedRemotePushRegistration: RemotePushRegistration | null = null;
 let bridgeRegisteredPushToken: string | null = null;
+let backgroundNotificationTaskRegistered = false;
+const localNotificationKeys = new Set<string>();
 
 export type RemotePushRegistration = {
     provider: NotificationProvider;
@@ -68,6 +72,30 @@ function readNotificationSessionId(
     return typeof sessionId === "string" && sessionId.length > 0 ? sessionId : null;
 }
 
+async function registerBackgroundNotificationTask(): Promise<void> {
+    if (backgroundNotificationTaskRegistered) {
+        return;
+    }
+
+    const notifications = await getNotificationsModule();
+    if (notifications === null) {
+        return;
+    }
+
+    try {
+        const taskManager = await import("expo-task-manager");
+        const alreadyRegistered = await taskManager.isTaskRegisteredAsync(BACKGROUND_NOTIFICATION_TASK);
+        if (!alreadyRegistered) {
+            await notifications.registerTaskAsync(BACKGROUND_NOTIFICATION_TASK);
+        }
+        backgroundNotificationTaskRegistered = true;
+    } catch (error) {
+        useConnectionStore.getState().setError(
+            `Failed to register background notification task: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+}
+
 function getNotificationResponseId(
     response: Awaited<ReturnType<(typeof import("expo-notifications"))["getLastNotificationResponseAsync"]>>
 ): string {
@@ -119,6 +147,24 @@ function readNotificationPlatform(): NotificationPlatform {
     return Platform.OS === "android" ? "android" : "ios";
 }
 
+function rememberLocalNotificationKey(key: string): boolean {
+    if (localNotificationKeys.has(key)) {
+        return false;
+    }
+
+    localNotificationKeys.add(key);
+    if (localNotificationKeys.size <= MAX_LOCAL_NOTIFICATION_KEYS) {
+        return true;
+    }
+
+    const oldestKey = localNotificationKeys.values().next().value;
+    if (typeof oldestKey === "string") {
+        localNotificationKeys.delete(oldestKey);
+    }
+
+    return true;
+}
+
 export async function initializeNotifications(): Promise<void> {
     const notifications = await getNotificationsModule();
     if (notifications === null) return;
@@ -134,6 +180,8 @@ export async function initializeNotifications(): Promise<void> {
         });
         initialized = true;
     }
+
+    await registerBackgroundNotificationTask();
 
     if (Platform.OS === "android") {
         await notifications.setNotificationChannelAsync(SESSION_EVENTS_CHANNEL_ID, {
@@ -249,10 +297,6 @@ export function isBridgeRemotePushCurrent(pushToken: string): boolean {
     return bridgeRegisteredPushToken === pushToken;
 }
 
-export function shouldSuppressLocalCompletionNotifications(): boolean {
-    return bridgeRegisteredPushToken !== null;
-}
-
 export async function initializeNotificationRouting(
     onSessionSelected: (sessionId: string) => void
 ): Promise<void> {
@@ -294,6 +338,38 @@ export async function notifySessionCompleted(input: {
     title: string;
     body: string;
 }): Promise<void> {
+    await scheduleSessionNotification({
+        sessionId: input.sessionId,
+        title: input.title,
+        body: input.body,
+        kind: "session-complete",
+    });
+}
+
+export async function notifySessionActionRequired(input: {
+    sessionId: string;
+    requestId: string;
+    title: string;
+    body: string;
+}): Promise<void> {
+    if (!rememberLocalNotificationKey(input.requestId)) {
+        return;
+    }
+
+    await scheduleSessionNotification({
+        sessionId: input.sessionId,
+        title: input.title,
+        body: input.body,
+        kind: "session-event",
+    });
+}
+
+async function scheduleSessionNotification(input: {
+    sessionId: string;
+    title: string;
+    body: string;
+    kind: "session-complete" | "session-event";
+}): Promise<void> {
     const granted = await ensureNotificationPermission({ allowPrompt: false });
     if (!granted) {
         return;
@@ -311,13 +387,13 @@ export async function notifySessionCompleted(input: {
                 body: input.body,
                 sound: true,
                 ...(Platform.OS === "android" ? { channelId: SESSION_EVENTS_CHANNEL_ID } : {}),
-                data: { sessionId: input.sessionId, kind: "session-complete" },
+                data: { sessionId: input.sessionId, kind: input.kind },
             },
             trigger: null,
         });
     } catch (error) {
         useConnectionStore.getState().setError(
-            `Failed to schedule completion notification: ${error instanceof Error ? error.message : String(error)}`
+            `Failed to schedule session notification: ${error instanceof Error ? error.message : String(error)}`
         );
     }
 }

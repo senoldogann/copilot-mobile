@@ -57,7 +57,8 @@ export function createMessageHandler(
         preserveReplayBuffer: boolean,
         deviceId: string
     ) => void,
-    notificationHandlers?: NotificationHandlers
+    notificationHandlers?: NotificationHandlers,
+    getRelayMobileAccessToken?: () => string | null
 ) {
     const state: ClientState = {
         authenticated: false,
@@ -108,6 +109,34 @@ export function createMessageHandler(
             || state.transportMode === null
         ) {
             throw new Error("Authenticated client state is incomplete");
+        }
+
+        const relayAccessTokenCandidate = state.transportMode === "relay"
+            ? getRelayMobileAccessToken?.()
+            : null;
+
+        if (state.transportMode === "relay" && relayAccessTokenCandidate == null) {
+            throw new Error("Relay transport requires a mobile relay access token");
+        }
+
+        if (state.transportMode === "relay") {
+            const relayAccessToken: string = relayAccessTokenCandidate as string;
+            send({
+                ...makeBase(),
+                type: "auth.authenticated",
+                payload: {
+                    authMethod,
+                    deviceId: state.deviceId,
+                    deviceCredential: state.deviceCredential,
+                    sessionToken: state.sessionToken,
+                    sessionTokenExpiresAt: state.sessionTokenExpiresAt,
+                    transportMode: state.transportMode,
+                    certFingerprint,
+                    relayAccessToken,
+                    replayedCount,
+                },
+            });
+            return;
         }
 
         send({
@@ -336,8 +365,7 @@ export function createMessageHandler(
                     );
 
                 case "message.abort":
-                    sessionManager.abortMessage(message.payload.sessionId);
-                    return;
+                    return sessionManager.abortMessage(message.payload.sessionId);
 
                 case "permission.respond":
                     sessionManager.respondToPermission(
