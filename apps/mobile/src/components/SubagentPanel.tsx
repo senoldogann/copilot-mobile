@@ -67,9 +67,11 @@ export function SubagentPanel({ runs }: SubagentPanelProps) {
                     <View style={styles.badge}>
                         <Text style={styles.badgeText}>{runs.length}</Text>
                     </View>
-                    <View style={styles.badge}>
-                        <Text style={styles.badgeText}>{completedCount} done</Text>
-                    </View>
+                    {completedCount > 0 && (
+                        <View style={styles.badge}>
+                            <Text style={styles.badgeText}>{completedCount} done</Text>
+                        </View>
+                    )}
                     {runningCount > 0 && (
                         <View style={[styles.badge, styles.runningBadge]}>
                             <Text style={[styles.badgeText, styles.runningBadgeText]}>

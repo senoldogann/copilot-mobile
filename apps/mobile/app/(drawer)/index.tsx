@@ -60,19 +60,36 @@ function basename(path: string): string {
     return segments[segments.length - 1] ?? path;
 }
 
-function buildSubagentRuns(items: ReadonlyArray<ChatItem>): ReadonlyArray<SubagentRun> {
-    return items
-        .filter((item): item is Extract<ChatItem, { type: "tool" }> => item.type === "tool")
-        .filter((item) => isSubagentToolName(item.toolName))
-        .map((item) => ({
+function buildSubagentRuns(
+    items: ReadonlyArray<ChatItem>,
+    isAssistantTyping: boolean
+): ReadonlyArray<SubagentRun> {
+    if (!isAssistantTyping) {
+        return [];
+    }
+
+    const lastUserMessageIndex = [...items]
+        .map((item, index) => ({ item, index }))
+        .reverse()
+        .find(({ item }) => item.type === "user")
+        ?.index ?? -1;
+
+    const currentTurnItems = items.slice(lastUserMessageIndex + 1);
+    const runMap = new Map<string, SubagentRun>();
+
+    for (const item of currentTurnItems) {
+        if (item.type !== "tool" || !isSubagentToolName(item.toolName)) {
+            continue;
+        }
+
+        runMap.set(item.requestId, {
             requestId: item.requestId,
             title: getSubagentDisplayName(item),
-            status: item.status === "failed"
-                ? "failed"
-                : item.status === "running"
-                    ? "running"
-                    : "completed",
-        }));
+            status: item.status === "failed" ? "failed" : "running",
+        });
+    }
+
+    return [...runMap.values()];
 }
 
 // Özel başlık — GitHub Copilot mobil stili üst bar
@@ -341,8 +358,8 @@ export default function ChatScreen() {
     const inputDisabled = !isConnected || isSessionLoading;
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
     const subagentRuns = useMemo(
-        () => buildSubagentRuns(chatItems),
-        [chatItems],
+        () => buildSubagentRuns(chatItems, isTyping),
+        [chatItems, isTyping],
     );
 
     useEffect(() => {
