@@ -20,17 +20,30 @@ type ResolveResponsePayload = {
     error?: string;
 };
 
+type SearchResponsePayload = {
+    query: string;
+    matches: ReadonlyArray<{
+        path: string;
+        displayPath: string;
+        name: string;
+    }>;
+    error?: string;
+};
+
 type FileResponseListener = (payload: FileResponsePayload) => void;
 type DiffResponseListener = (payload: DiffResponsePayload) => void;
 type ResolveResponseListener = (payload: ResolveResponsePayload) => void;
+type SearchResponseListener = (payload: SearchResponsePayload) => void;
 
 const fileListeners = new Map<string, Array<FileResponseListener>>();
 const diffListeners = new Map<string, Array<DiffResponseListener>>();
 const resolveListeners = new Map<string, Array<ResolveResponseListener>>();
+const searchListeners = new Map<string, Array<SearchResponseListener>>();
 
 export type WorkspaceFilePayload = FileResponsePayload;
 export type WorkspaceDiffPayload = DiffResponsePayload;
 export type WorkspaceResolvePayload = ResolveResponsePayload;
+export type WorkspaceSearchPayload = SearchResponsePayload;
 
 function createWorkspaceEventKey(sessionId: string, workspaceRelativePath: string): string {
     return `${sessionId}\u0000${workspaceRelativePath}`;
@@ -122,6 +135,34 @@ export function dispatchWorkspaceResolveResponse(
     payload: ResolveResponsePayload
 ): void {
     const list = resolveListeners.get(createWorkspaceEventKey(sessionId, rawPath));
+    if (list !== undefined) {
+        for (const cb of list) {
+            cb(payload);
+        }
+    }
+}
+
+export function onWorkspaceSearchResponse(
+    requestKey: string,
+    cb: SearchResponseListener
+): () => void {
+    const list = searchListeners.get(requestKey) ?? [];
+    list.push(cb);
+    searchListeners.set(requestKey, list);
+    return () => {
+        const current = searchListeners.get(requestKey);
+        if (current !== undefined) {
+            const updated = current.filter((fn) => fn !== cb);
+            updated.length === 0 ? searchListeners.delete(requestKey) : searchListeners.set(requestKey, updated);
+        }
+    };
+}
+
+export function dispatchWorkspaceSearchResponse(
+    requestKey: string,
+    payload: SearchResponsePayload
+): void {
+    const list = searchListeners.get(requestKey);
     if (list !== undefined) {
         for (const cb of list) {
             cb(payload);

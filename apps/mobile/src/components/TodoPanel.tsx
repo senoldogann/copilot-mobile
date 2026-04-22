@@ -1,34 +1,37 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
-import { colors, spacing } from "../theme/colors";
-import type { AgentTodo } from "../stores/session-store";
+import type { AgentTodo } from "../stores/session-store-types";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 
 interface TodoPanelProps {
     todos: ReadonlyArray<AgentTodo>;
 }
 
 function TodoStatusIcon({ status }: { status: AgentTodo["status"] }) {
+    const theme = useAppTheme();
+    const styles = useThemedStyles(createStyles);
     if (status === "completed") {
         return (
-            <View style={[styles.statusIcon, { backgroundColor: colors.success, borderColor: colors.success }]}>
+            <View style={[styles.statusIcon, { backgroundColor: theme.colors.success, borderColor: theme.colors.success }]}>
                 <Text style={styles.checkmark}>✓</Text>
             </View>
         );
     }
     if (status === "in_progress") {
         return (
-            <View style={[styles.statusIcon, { backgroundColor: colors.textLink, borderColor: colors.textLink }]}>
+            <View style={[styles.statusIcon, { backgroundColor: theme.colors.textLink, borderColor: theme.colors.textLink }]}>
                 <View style={styles.dotInner} />
             </View>
         );
     }
     // pending
     return (
-        <View style={[styles.statusIcon, { backgroundColor: "transparent", borderColor: colors.border }]} />
+        <View style={[styles.statusIcon, { backgroundColor: "transparent", borderColor: theme.colors.border }]} />
     );
 }
 
 export function TodoPanel({ todos }: TodoPanelProps) {
+    const styles = useThemedStyles(createStyles);
     const [expanded, setExpanded] = useState(true);
 
     if (todos.length === 0) return null;
@@ -100,15 +103,15 @@ export function TodoPanel({ todos }: TodoPanelProps) {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => StyleSheet.create({
     container: {
-        marginHorizontal: spacing.md,
+        marginHorizontal: theme.spacing.md,
         marginBottom: 6,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: colors.border,
+        borderColor: theme.colors.border,
         borderRadius: 10,
         overflow: "hidden",
-        backgroundColor: colors.bgSecondary,
+        backgroundColor: theme.colors.bgSecondary,
     },
     header: {
         flexDirection: "row",
@@ -127,7 +130,7 @@ const styles = StyleSheet.create({
         width: 18,
         height: 18,
         borderWidth: 1.5,
-        borderColor: colors.textLink,
+        borderColor: theme.colors.textLink,
         borderRadius: 4,
         alignItems: "center",
         justifyContent: "center",
@@ -135,35 +138,35 @@ const styles = StyleSheet.create({
     taskIconText: {
         fontSize: 11,
         fontWeight: "600",
-        color: colors.textLink,
+        color: theme.colors.textLink,
     },
     headerTitle: {
         fontSize: 13,
         fontWeight: "600",
-        color: colors.textPrimary,
+        color: theme.colors.textPrimary,
     },
     badge: {
         paddingHorizontal: 6,
         paddingVertical: 2,
         borderRadius: 10,
-        backgroundColor: colors.textLink + "22",
+        backgroundColor: theme.colors.textLink + "22",
     },
     badgeText: {
         fontSize: 11,
         fontWeight: "600",
-        color: colors.textLink,
+        color: theme.colors.textLink,
     },
     badgeWarning: {
         marginLeft: 4,
-        backgroundColor: colors.warning + "22",
+        backgroundColor: theme.colors.warning + "22",
     },
     badgeWarningText: {
-        color: colors.warning,
+        color: theme.colors.warning,
     },
     chevron: {
         fontSize: 14,
         marginLeft: 8,
-        color: colors.textSecondary,
+        color: theme.colors.textSecondary,
     },
     list: {
         paddingHorizontal: 12,
@@ -177,7 +180,7 @@ const styles = StyleSheet.create({
     },
     itemBorder: {
         borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: colors.border,
+        borderBottomColor: theme.colors.border,
     },
     statusIcon: {
         width: 18,
@@ -207,10 +210,10 @@ const styles = StyleSheet.create({
     itemText: {
         fontSize: 13,
         lineHeight: 18,
-        color: colors.textPrimary,
+        color: theme.colors.textPrimary,
     },
     itemTextCompleted: {
-        color: colors.textSecondary,
+        color: theme.colors.textSecondary,
     },
     strikethrough: {
         textDecorationLine: "line-through",
@@ -219,6 +222,6 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: "600",
         marginTop: 2,
-        color: colors.error,
+        color: theme.colors.error,
     },
 });

@@ -1,19 +1,46 @@
-// Ayarlar ekranı — GitHub Copilot mobil stili model seçimi, akıl yürütme eforu, bağlantı bilgileri
-
 import React from "react";
-import { View, Text, ScrollView, StyleSheet } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import Constants from "expo-constants";
+
 import { useConnectionStore } from "../src/stores/connection-store";
-import { colors, spacing, fontSize as fs, borderRadius } from "../src/theme/colors";
+import { type ThemeMode, type ThemeVariant } from "../src/theme/colors";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../src/theme/theme-context";
+import { useThemeStore } from "../src/theme/theme-store";
+import { buildConnectionDiagnosticsMetadata } from "../src/view-models/provider-metadata";
+
+const THEME_MODES: ReadonlyArray<{ value: ThemeMode; label: string }> = [
+    { value: "light", label: "Light" },
+    { value: "dark", label: "Dark" },
+    { value: "system", label: "System" },
+];
+
+const THEME_VARIANTS: ReadonlyArray<{ value: ThemeVariant; label: string; swatch: string }> = [
+    { value: "zinc", label: "Zinc", swatch: "#8b8b92" },
+    { value: "midnight", label: "Midnight", swatch: "#4f8cff" },
+    { value: "claude", label: "Claude", swatch: "#f78166" },
+    { value: "ghostty", label: "Ghostty", swatch: "#8fb2ff" },
+];
 
 function ConnectionInfo() {
-    const serverUrl = useConnectionStore((s) => s.serverUrl);
-    const fingerprint = useConnectionStore((s) => s.certFingerprint);
-    const deviceId = useConnectionStore((s) => s.deviceId);
-    const connectionError = useConnectionStore((s) => s.error);
+    const styles = useThemedStyles(createStyles);
+    const theme = useAppTheme();
+    const serverUrl = useConnectionStore((state) => state.serverUrl);
+    const fingerprint = useConnectionStore((state) => state.certFingerprint);
+    const deviceId = useConnectionStore((state) => state.deviceId);
+    const connectionError = useConnectionStore((state) => state.error);
+    const connectionState = useConnectionStore((state) => state.state);
+    const metadata = buildConnectionDiagnosticsMetadata(serverUrl, connectionState, Date.now());
 
     return (
-        <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Connection Info</Text>
+        <View style={styles.card}>
+            <Text style={styles.cardTitle}>Connection</Text>
+            <View style={styles.metadataChipRow}>
+                {metadata.chips.map((chip) => (
+                    <View key={`${chip.label}:${chip.tone}`} style={styles.metadataChip}>
+                        <Text style={styles.metadataChipText}>{chip.label}</Text>
+                    </View>
+                ))}
+            </View>
             <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Server</Text>
                 <Text style={styles.infoValue}>{serverUrl ?? "—"}</Text>
@@ -25,201 +52,234 @@ function ConnectionInfo() {
             <View style={styles.infoRow}>
                 <Text style={styles.infoLabel}>Certificate</Text>
                 <Text style={styles.infoValue} numberOfLines={1}>
-                    {fingerprint !== null ? `${fingerprint.slice(0, 16)}...` : "Local network WS connection"}
+                    {fingerprint !== null ? `${fingerprint.slice(0, 16)}…` : "Relay / local ws"}
                 </Text>
             </View>
             {connectionError !== null && (
-                <Text style={styles.errorText}>{connectionError}</Text>
+                <Text style={[styles.errorText, { color: theme.colors.error }]}>
+                    {connectionError}
+                </Text>
             )}
         </View>
     );
 }
 
-function ApprovalSettings() {
-    return null;
+function ThemeSettings() {
+    const styles = useThemedStyles(createStyles);
+    const themeMode = useThemeStore((state) => state.mode);
+    const themeVariant = useThemeStore((state) => state.variant);
+
+    const applyThemeSelection = async (mode: ThemeMode, variant: ThemeVariant) => {
+        try {
+            await useThemeStore.getState().setThemePreferences(mode, variant);
+        } catch (error) {
+            Alert.alert(
+                "Theme update failed",
+                error instanceof Error ? error.message : String(error),
+            );
+        }
+    };
+
+    return (
+        <View style={styles.card}>
+            <Text style={styles.cardTitle}>Theme</Text>
+            <Text style={styles.cardDescription}>
+                Choose how the app should render and which palette to use.
+            </Text>
+
+            <View style={styles.segmentedControl}>
+                {THEME_MODES.map((item) => {
+                    const active = themeMode === item.value;
+
+                    return (
+                        <Pressable
+                            key={item.value}
+                            style={[styles.segment, active && styles.segmentActive]}
+                            onPress={() => {
+                                void applyThemeSelection(item.value, themeVariant);
+                            }}
+                        >
+                            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                                {item.label}
+                            </Text>
+                        </Pressable>
+                    );
+                })}
+            </View>
+
+            <View style={styles.variantList}>
+                {THEME_VARIANTS.map((item) => {
+                    const active = themeVariant === item.value;
+
+                    return (
+                        <Pressable
+                            key={item.value}
+                            style={[styles.variantRow, active && styles.variantRowActive]}
+                            onPress={() => {
+                                void applyThemeSelection(themeMode, item.value);
+                            }}
+                        >
+                            <View style={[styles.variantSwatch, { backgroundColor: item.swatch }]} />
+                            <Text style={styles.variantLabel}>{item.label}</Text>
+                            {active && <Text style={styles.variantCheck}>✓</Text>}
+                        </Pressable>
+                    );
+                })}
+            </View>
+        </View>
+    );
 }
 
 export default function SettingsScreen() {
+    const styles = useThemedStyles(createStyles);
+    const appVersion = Constants.expoConfig?.version ?? "0.1.0";
+
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
             <ConnectionInfo />
+            <ThemeSettings />
 
-            <View style={styles.footer}>
-                <Text style={styles.footerText}>Copilot Mobile v0.1.0</Text>
+            <View style={styles.card}>
+                <Text style={styles.cardTitle}>Version</Text>
+                <Text style={styles.versionText}>v{appVersion}</Text>
             </View>
         </ScrollView>
     );
 }
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.bg,
-    },
-    content: {
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 24,
-    },
-    section: {
-        marginBottom: 32,
-    },
-    sectionHeader: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        marginBottom: spacing.md,
-    },
-    sectionTitle: {
-        fontSize: fs.md,
-        fontWeight: "600",
-        color: colors.textTertiary,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-        marginBottom: spacing.md,
-    },
-    refreshText: {
-        fontSize: fs.md,
-        color: colors.accent,
-    },
-    segmentedControl: {
-        flexDirection: "row",
-        backgroundColor: colors.bgSecondary,
-        borderRadius: borderRadius.md,
-        padding: 2,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    segment: {
-        flex: 1,
-        paddingVertical: 10,
-        alignItems: "center",
-        borderRadius: borderRadius.sm,
-    },
-    segmentActive: {
-        backgroundColor: colors.accent,
-    },
-    segmentText: {
-        fontSize: fs.sm,
-        color: colors.textTertiary,
-        fontWeight: "500",
-    },
-    segmentTextActive: {
-        color: colors.textPrimary,
-        fontWeight: "600",
-    },
-    modelItem: {
-        paddingVertical: spacing.md,
-        paddingHorizontal: 14,
-        backgroundColor: colors.bgSecondary,
-        borderRadius: borderRadius.md,
-        marginBottom: spacing.xs,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    modelItemActive: {
-        borderColor: colors.accent,
-        backgroundColor: colors.accentMuted,
-    },
-    modelItemDisabled: {
-        opacity: 0.4,
-    },
-    modelHeader: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-    },
-    modelName: {
-        fontSize: fs.md,
-        color: colors.textPrimary,
-        fontWeight: "500",
-    },
-    modelNameActive: {
-        color: colors.textPrimary,
-    },
-    modelNameDisabled: {
-        color: colors.textTertiary,
-    },
-    modelProvider: {
-        fontSize: fs.xs,
-        color: colors.textTertiary,
-        marginTop: 2,
-    },
-    modelProviderDisabled: {
-        color: colors.textTertiary,
-    },
-    modelMeta: {
-        fontSize: fs.xs,
-        color: colors.accent,
-        marginTop: spacing.xs,
-    },
-    policyBadge: {
-        backgroundColor: colors.errorBackground,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 2,
-        borderRadius: borderRadius.xs,
-    },
-    policyBadgeText: {
-        fontSize: 10,
-        fontWeight: "600",
-        color: colors.error,
-    },
-    emptyText: {
-        fontSize: fs.md,
-        color: colors.textTertiary,
-    },
-    toggleCard: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: spacing.lg,
-        padding: 14,
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.bgSecondary,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    toggleTextGroup: {
-        flex: 1,
-        gap: spacing.xs,
-    },
-    toggleTitle: {
-        fontSize: fs.md,
-        fontWeight: "600",
-        color: colors.textPrimary,
-    },
-    toggleDescription: {
-        fontSize: fs.sm,
-        lineHeight: 17,
-        color: colors.textTertiary,
-    },
-    errorText: {
-        marginTop: spacing.md,
-        fontSize: fs.sm,
-        color: colors.error,
-        lineHeight: 17,
-    },
-    infoRow: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        paddingVertical: 10,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    infoLabel: {
-        fontSize: fs.md,
-        color: colors.textTertiary,
-    },
-    infoValue: {
-        fontSize: fs.md,
-        color: colors.textPrimary,
-        maxWidth: "60%",
-    },
-    footer: {
-        marginTop: 32,
-        alignItems: "center",
-    },
-    footerText: {
-        fontSize: fs.xs,
-        color: colors.textTertiary,
-    },
-});
+function createStyles(theme: AppTheme) {
+    return StyleSheet.create({
+        container: {
+            flex: 1,
+            backgroundColor: theme.colors.bg,
+        },
+        content: {
+            paddingHorizontal: theme.spacing.lg,
+            paddingVertical: 24,
+            gap: theme.spacing.lg,
+        },
+        card: {
+            backgroundColor: theme.colors.bgSecondary,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            borderRadius: theme.borderRadius.lg,
+            padding: theme.spacing.lg,
+            gap: theme.spacing.md,
+        },
+        cardTitle: {
+            fontSize: theme.fontSize.xl,
+            fontWeight: "700",
+            color: theme.colors.textPrimary,
+        },
+        cardDescription: {
+            fontSize: theme.fontSize.md,
+            lineHeight: 18,
+            color: theme.colors.textSecondary,
+        },
+        infoRow: {
+            flexDirection: "row",
+            justifyContent: "space-between",
+            gap: theme.spacing.md,
+            paddingVertical: 8,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.colors.borderMuted,
+        },
+        infoLabel: {
+            fontSize: theme.fontSize.md,
+            color: theme.colors.textTertiary,
+        },
+        infoValue: {
+            flex: 1,
+            fontSize: theme.fontSize.md,
+            color: theme.colors.textPrimary,
+            textAlign: "right",
+        },
+        errorText: {
+            fontSize: theme.fontSize.sm,
+        },
+        metadataChipRow: {
+            flexDirection: "row",
+            flexWrap: "wrap",
+            gap: theme.spacing.xs,
+        },
+        metadataChip: {
+            borderRadius: theme.borderRadius.full,
+            borderWidth: 1,
+            borderColor: theme.colors.borderMuted,
+            backgroundColor: theme.colors.bgTertiary,
+            paddingHorizontal: theme.spacing.sm,
+            paddingVertical: 4,
+        },
+        metadataChipText: {
+            color: theme.colors.textSecondary,
+            fontSize: theme.fontSize.xs,
+            fontWeight: "600",
+        },
+        segmentedControl: {
+            flexDirection: "row",
+            gap: theme.spacing.sm,
+        },
+        segment: {
+            flex: 1,
+            minHeight: 40,
+            borderRadius: theme.borderRadius.md,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: theme.colors.bgTertiary,
+        },
+        segmentActive: {
+            backgroundColor: theme.colors.accentMuted,
+            borderColor: theme.colors.accent,
+        },
+        segmentText: {
+            color: theme.colors.textSecondary,
+            fontSize: theme.fontSize.md,
+            fontWeight: "600",
+        },
+        segmentTextActive: {
+            color: theme.colors.textPrimary,
+        },
+        variantList: {
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            borderRadius: theme.borderRadius.md,
+            overflow: "hidden",
+        },
+        variantRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.md,
+            paddingHorizontal: theme.spacing.md,
+            paddingVertical: theme.spacing.md,
+            backgroundColor: theme.colors.bgTertiary,
+            borderTopWidth: 1,
+            borderTopColor: theme.colors.borderMuted,
+        },
+        variantRowActive: {
+            backgroundColor: theme.colors.bgElevated,
+        },
+        variantSwatch: {
+            width: 18,
+            height: 18,
+            borderRadius: theme.borderRadius.full,
+        },
+        variantLabel: {
+            flex: 1,
+            color: theme.colors.textPrimary,
+            fontSize: theme.fontSize.lg,
+            fontWeight: "600",
+        },
+        variantCheck: {
+            color: theme.colors.textPrimary,
+            fontSize: theme.fontSize.lg,
+            fontWeight: "700",
+        },
+        versionText: {
+            color: theme.colors.textPrimary,
+            fontSize: theme.fontSize.lg,
+            fontWeight: "600",
+        },
+    });
+}

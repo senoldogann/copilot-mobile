@@ -4,6 +4,15 @@ type BridgeStatusPayload = {
         port: number;
         publicUrl: string;
         companionId: string | null;
+        daemonState: "starting" | "running" | "error" | "stopping";
+        mode: "direct" | "hosted" | "self_hosted";
+        copilotAuthenticated: boolean;
+        lastError: string | null;
+        lastPairingAt: number | null;
+        logsDirectory: string | null;
+        hostedApiBaseUrl: string | null;
+        hostedRelayBaseUrl: string | null;
+        sessionExpiresAt: number | null;
         relay: {
             connectedToRelay: boolean;
             connectedToLocalBridge: boolean;
@@ -304,7 +313,7 @@ export function renderCompanionDashboard(): string {
                 <div class="card-body">
                     <div class="metrics">
                         <div class="metric">
-                            <div class="metric-label">Public Socket</div>
+                            <div class="metric-label">Mobile Socket</div>
                             <div class="metric-value" id="public-url">-</div>
                         </div>
                         <div class="metric">
@@ -316,18 +325,24 @@ export function renderCompanionDashboard(): string {
                             <div class="metric-value" id="bridge-pid">-</div>
                         </div>
                         <div class="metric">
-                            <div class="metric-label">Listening Port</div>
-                            <div class="metric-value" id="bridge-port">-</div>
+                            <div class="metric-label">Companion Mode</div>
+                            <div class="metric-value" id="companion-mode">-</div>
                         </div>
                     </div>
 
                     <div style="margin-top: 18px;">
+                        <div class="status-line"><span>Copilot authentication</span><strong id="copilot-auth">-</strong></div>
+                        <div class="status-line"><span>Relay control-plane</span><strong id="relay-api">-</strong></div>
+                        <div class="status-line"><span>Relay WebSocket base</span><strong id="relay-base">-</strong></div>
                         <div class="status-line"><span>Mobile client attached</span><strong id="has-client">-</strong></div>
                         <div class="status-line"><span>Pairing token active</span><strong id="pairing-active">-</strong></div>
+                        <div class="status-line"><span>Last pairing</span><strong id="last-pairing">-</strong></div>
                         <div class="status-line"><span>QR expires</span><strong id="qr-expires">-</strong></div>
+                        <div class="status-line"><span>Relay session expires</span><strong id="session-expires">-</strong></div>
                         <div class="status-line"><span>Relay URL</span><strong id="relay-url">-</strong></div>
                         <div class="status-line"><span>Relay connected</span><strong id="relay-connected">-</strong></div>
                         <div class="status-line"><span>Local bridge linked</span><strong id="relay-local">-</strong></div>
+                        <div class="status-line"><span>Last error</span><strong id="last-error">-</strong></div>
                     </div>
                 </div>
             </article>
@@ -337,6 +352,8 @@ export function renderCompanionDashboard(): string {
                     <h2>Pairing QR</h2>
                     <div class="actions">
                         <button id="generate-qr" type="button">Generate QR</button>
+                        <button class="secondary" id="open-logs" type="button">Open Logs</button>
+                        <button class="secondary" id="stop-service" type="button">Stop Service</button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -359,6 +376,8 @@ export function renderCompanionDashboard(): string {
     <script>
         const statusPath = "/__copilot_mobile/status";
         const qrPath = "/__copilot_mobile/qr";
+        const openLogsPath = "/__copilot_mobile/open-logs";
+        const stopServicePath = "/__copilot_mobile/stop";
 
         const heroDot = document.getElementById("hero-dot");
         const heroLabel = document.getElementById("hero-label");
@@ -367,13 +386,19 @@ export function renderCompanionDashboard(): string {
             publicUrl: document.getElementById("public-url"),
             companionId: document.getElementById("companion-id"),
             bridgePid: document.getElementById("bridge-pid"),
-            bridgePort: document.getElementById("bridge-port"),
+            companionMode: document.getElementById("companion-mode"),
+            copilotAuth: document.getElementById("copilot-auth"),
+            relayApi: document.getElementById("relay-api"),
+            relayBase: document.getElementById("relay-base"),
             hasClient: document.getElementById("has-client"),
             pairingActive: document.getElementById("pairing-active"),
+            lastPairing: document.getElementById("last-pairing"),
             qrExpires: document.getElementById("qr-expires"),
+            sessionExpires: document.getElementById("session-expires"),
             relayUrl: document.getElementById("relay-url"),
             relayConnected: document.getElementById("relay-connected"),
             relayLocal: document.getElementById("relay-local"),
+            lastError: document.getElementById("last-error"),
             qrMode: document.getElementById("qr-mode"),
             qrVersion: document.getElementById("qr-version"),
             qrAscii: document.getElementById("qr-ascii"),
@@ -402,16 +427,22 @@ export function renderCompanionDashboard(): string {
             setText(fields.publicUrl, status.publicUrl);
             setText(fields.companionId, status.companionId ?? "-");
             setText(fields.bridgePid, String(status.pid));
-            setText(fields.bridgePort, String(status.port));
+            setText(fields.companionMode, status.mode);
+            setText(fields.copilotAuth, status.copilotAuthenticated ? "Ready" : "Missing");
+            setText(fields.relayApi, status.hostedApiBaseUrl ?? "-");
+            setText(fields.relayBase, status.hostedRelayBaseUrl ?? "-");
             setBoolText(fields.hasClient, status.hasClient);
             setBoolText(fields.pairingActive, status.pairingActive);
+            setText(fields.lastPairing, formatTime(status.lastPairingAt));
             setText(fields.qrExpires, formatTime(status.qrExpiresAt));
+            setText(fields.sessionExpires, formatTime(status.sessionExpiresAt));
             setText(fields.relayUrl, status.relay?.relayUrl ?? "-");
             setBoolText(fields.relayConnected, status.relay?.connectedToRelay ?? false);
             setBoolText(fields.relayLocal, status.relay?.connectedToLocalBridge ?? false);
+            setText(fields.lastError, status.lastError ?? "-");
 
-            if (status.relay?.connectedToRelay === true) {
-                setHeroState("online", "Relay linked");
+            if (status.lastError !== null) {
+                setHeroState("offline", "Action needed");
                 return;
             }
 
@@ -420,7 +451,17 @@ export function renderCompanionDashboard(): string {
                 return;
             }
 
-            setHeroState("offline", "Waiting for phone");
+            if (status.relay?.connectedToRelay === true && status.copilotAuthenticated === true) {
+                setHeroState("online", "Relay linked");
+                return;
+            }
+
+            if (status.copilotAuthenticated === true) {
+                setHeroState("offline", "Ready to pair");
+                return;
+            }
+
+            setHeroState("offline", "Copilot login required");
         }
 
         async function loadStatus() {
@@ -451,11 +492,26 @@ export function renderCompanionDashboard(): string {
             }
         }
 
+        async function openLogs() {
+            await fetch(openLogsPath, { method: "POST" });
+        }
+
+        async function stopService() {
+            await fetch(stopServicePath, { method: "POST" });
+            setHeroState("offline", "Stopping companion");
+        }
+
         document.getElementById("refresh-status").addEventListener("click", () => {
             loadStatus().catch(() => setHeroState("offline", "Bridge unavailable"));
         });
         document.getElementById("generate-qr").addEventListener("click", () => {
             generateQr().catch(() => setHeroState("offline", "QR generation failed"));
+        });
+        document.getElementById("open-logs").addEventListener("click", () => {
+            openLogs().catch(() => setHeroState("offline", "Could not open logs"));
+        });
+        document.getElementById("stop-service").addEventListener("click", () => {
+            stopService().catch(() => setHeroState("offline", "Stop request failed"));
         });
 
         loadStatus().catch(() => setHeroState("offline", "Bridge unavailable"));

@@ -1,9 +1,39 @@
-import { AppState } from "react-native";
 import { useSessionStore } from "../stores/session-store";
+import { isAppActive } from "./app-visibility";
 import { notifySessionCompleted } from "./notifications";
+import { shouldSuppressLocalCompletionNotifications } from "./notifications";
 
+const MAX_TRACKED_BACKGROUND_SESSIONS = 100;
 const pendingCompletionSessions = new Set<string>();
 const latestAssistantContentBySession = new Map<string, string>();
+const notifiedCompletionSessions = new Set<string>();
+
+function trimOldestTrackedSession(): void {
+    const oldestPending = pendingCompletionSessions.values().next().value;
+    if (typeof oldestPending === "string") {
+        pendingCompletionSessions.delete(oldestPending);
+        latestAssistantContentBySession.delete(oldestPending);
+        notifiedCompletionSessions.delete(oldestPending);
+        return;
+    }
+
+    const oldestPreview = latestAssistantContentBySession.keys().next().value;
+    if (typeof oldestPreview === "string") {
+        latestAssistantContentBySession.delete(oldestPreview);
+        pendingCompletionSessions.delete(oldestPreview);
+        notifiedCompletionSessions.delete(oldestPreview);
+    }
+}
+
+function enforceTrackedSessionLimit(): void {
+    while (
+        pendingCompletionSessions.size > MAX_TRACKED_BACKGROUND_SESSIONS
+        || latestAssistantContentBySession.size > MAX_TRACKED_BACKGROUND_SESSIONS
+        || notifiedCompletionSessions.size > MAX_TRACKED_BACKGROUND_SESSIONS
+    ) {
+        trimOldestTrackedSession();
+    }
+}
 
 function sanitizeNotificationText(input: string): string {
     const singleLine = input.replace(/\s+/g, " ").trim();
@@ -13,13 +43,10 @@ function sanitizeNotificationText(input: string): string {
     return `${singleLine.slice(0, 157)}...`;
 }
 
-function isAppInForeground(): boolean {
-    return AppState.currentState === "active";
-}
-
 export function armBackgroundCompletion(sessionId: string): void {
-    if (!isAppInForeground()) {
+    if (!isAppActive() && !notifiedCompletionSessions.has(sessionId)) {
         pendingCompletionSessions.add(sessionId);
+        enforceTrackedSessionLimit();
     }
 }
 
@@ -27,11 +54,13 @@ export function clearBackgroundCompletion(sessionId?: string): void {
     if (sessionId === undefined) {
         pendingCompletionSessions.clear();
         latestAssistantContentBySession.clear();
+        notifiedCompletionSessions.clear();
         return;
     }
 
     pendingCompletionSessions.delete(sessionId);
     latestAssistantContentBySession.delete(sessionId);
+    notifiedCompletionSessions.delete(sessionId);
 }
 
 export function replaceBackgroundCompletionPreview(sessionId: string, content: string): void {
@@ -41,6 +70,7 @@ export function replaceBackgroundCompletionPreview(sessionId: string, content: s
     }
 
     latestAssistantContentBySession.set(sessionId, trimmed);
+    enforceTrackedSessionLimit();
 }
 
 export function appendBackgroundCompletionPreview(sessionId: string, delta: string): void {
@@ -54,14 +84,22 @@ export function appendBackgroundCompletionPreview(sessionId: string, delta: stri
     }
 
     latestAssistantContentBySession.set(sessionId, nextContent);
+    enforceTrackedSessionLimit();
 }
 
 export function notifyIfBackgroundCompletion(sessionId: string): void {
-    if (isAppInForeground() || !pendingCompletionSessions.has(sessionId)) {
+    if (isAppActive() || !pendingCompletionSessions.has(sessionId)) {
         return;
     }
 
     pendingCompletionSessions.delete(sessionId);
+    notifiedCompletionSessions.add(sessionId);
+    enforceTrackedSessionLimit();
+
+    if (shouldSuppressLocalCompletionNotifications()) {
+        latestAssistantContentBySession.delete(sessionId);
+        return;
+    }
 
     const sessionStore = useSessionStore.getState();
     const session = sessionStore.sessions.find((item) => item.id === sessionId);

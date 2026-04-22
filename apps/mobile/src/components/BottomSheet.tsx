@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import type { FeatherName } from "./Icons";
-import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
+import { useThemedStyles, type AppTheme } from "../theme/theme-context";
 
 type Props = {
     visible: boolean;
@@ -43,6 +43,7 @@ export function BottomSheet({
     contentStyle,
     stickyHeader,
 }: Props) {
+    const styles = useThemedStyles(createStyles);
     return (
         <Modal
             visible={visible}
@@ -70,7 +71,7 @@ export function BottomSheet({
                                 </View>
                             ) : iconName !== undefined ? (
                                 <View style={styles.iconBadge}>
-                                    <Feather name={iconName} size={14} color={colors.textSecondary} />
+                                    <Feather name={iconName} size={14} color={styles.iconTint.color} />
                                 </View>
                             ) : icon !== undefined && icon.length > 0 ? (
                                 <Text style={styles.headerIcon}>{icon}</Text>
@@ -90,8 +91,10 @@ export function BottomSheet({
                             style={styles.closeButton}
                             onPress={onClose}
                             hitSlop={8}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Close ${title}`}
                         >
-                            <Feather name="x" size={14} color={colors.textSecondary} />
+                            <Feather name="x" size={14} color={styles.iconTint.color} />
                         </Pressable>
                     </View>
 
@@ -117,96 +120,99 @@ export function BottomSheet({
     );
 }
 
-const styles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: colors.overlay,
-        justifyContent: "flex-end",
-    },
-    sheet: {
-        height: "75%",
-        maxHeight: "85%",
-        minHeight: 300,
-        backgroundColor: colors.bg,
-        borderTopLeftRadius: borderRadius.xl,
-        borderTopRightRadius: borderRadius.xl,
-        borderWidth: 1,
-        borderBottomWidth: 0,
-        borderColor: colors.border,
-        // Note: overflow "hidden" removed — it prevents ScrollView gestures on Android
-        // Border-radius clipping is handled by the borderTopRadius on iOS/Android natively
-    },
-    grabHandleContainer: {
-        alignItems: "center",
-        paddingTop: spacing.sm,
-        paddingBottom: spacing.xs,
-    },
-    grabHandle: {
-        width: 36,
-        height: 4,
-        borderRadius: 2,
-        backgroundColor: colors.bgOverlay,
-    },
-    header: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: spacing.md,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.borderMuted,
-    },
-    headerLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: spacing.sm,
-        flex: 1,
-    },
-    iconBadge: {
-        width: 28,
-        height: 28,
-        borderRadius: borderRadius.sm,
-        backgroundColor: colors.bgTertiary,
-        borderWidth: 1,
-        borderColor: colors.border,
-        justifyContent: "center",
-        alignItems: "center",
-        flexShrink: 0,
-    },
-    headerIcon: {
-        fontSize: fontSize.lg,
-    },
-    headerTextContainer: {
-        flex: 1,
-    },
-    headerTitle: {
-        fontSize: fontSize.base,
-        fontWeight: "600",
-        color: colors.textPrimary,
-    },
-    headerSubtitle: {
-        fontSize: fontSize.xs,
-        color: colors.textTertiary,
-        marginTop: 2,
-        textTransform: "capitalize",
-    },
-    closeButton: {
-        width: 28,
-        height: 28,
-        borderRadius: borderRadius.sm,
-        backgroundColor: colors.bgTertiary,
-        justifyContent: "center",
-        alignItems: "center",
-        marginLeft: spacing.sm,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    content: {
-        flex: 1,
-        paddingHorizontal: spacing.lg,
-    },
-    contentContainer: {
-        paddingVertical: spacing.md,
-        paddingBottom: 34,
-    },
-});
+function createStyles(theme: AppTheme) {
+    return StyleSheet.create({
+        overlay: {
+            flex: 1,
+            backgroundColor: theme.colors.overlay,
+            justifyContent: "flex-end",
+        },
+        sheet: {
+            height: "75%",
+            maxHeight: "85%",
+            minHeight: 300,
+            backgroundColor: theme.colors.bg,
+            borderTopLeftRadius: theme.borderRadius.xl,
+            borderTopRightRadius: theme.borderRadius.xl,
+            borderWidth: 1,
+            borderBottomWidth: 0,
+            borderColor: theme.colors.border,
+        },
+        grabHandleContainer: {
+            alignItems: "center",
+            paddingTop: theme.spacing.sm,
+            paddingBottom: theme.spacing.xs,
+        },
+        grabHandle: {
+            width: 36,
+            height: 4,
+            borderRadius: 2,
+            backgroundColor: theme.colors.bgOverlay,
+        },
+        header: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: theme.spacing.lg,
+            paddingVertical: theme.spacing.md,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.colors.borderMuted,
+        },
+        headerLeft: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.sm,
+            flex: 1,
+        },
+        iconBadge: {
+            width: 28,
+            height: 28,
+            borderRadius: theme.borderRadius.sm,
+            backgroundColor: theme.colors.bgTertiary,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            justifyContent: "center",
+            alignItems: "center",
+            flexShrink: 0,
+        },
+        headerIcon: {
+            fontSize: theme.fontSize.lg,
+        },
+        headerTextContainer: {
+            flex: 1,
+        },
+        headerTitle: {
+            fontSize: theme.fontSize.base,
+            fontWeight: "600",
+            color: theme.colors.textPrimary,
+        },
+        headerSubtitle: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textTertiary,
+            marginTop: 2,
+            textTransform: "capitalize",
+        },
+        closeButton: {
+            width: 28,
+            height: 28,
+            borderRadius: theme.borderRadius.sm,
+            backgroundColor: theme.colors.bgTertiary,
+            justifyContent: "center",
+            alignItems: "center",
+            marginLeft: theme.spacing.sm,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        content: {
+            flex: 1,
+            paddingHorizontal: theme.spacing.lg,
+        },
+        contentContainer: {
+            paddingVertical: theme.spacing.md,
+            paddingBottom: 34,
+        },
+        iconTint: {
+            color: theme.colors.textSecondary,
+        },
+    });
+}

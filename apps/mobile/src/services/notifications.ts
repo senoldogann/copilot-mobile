@@ -1,5 +1,6 @@
 import { Platform } from "react-native";
 import Constants from "expo-constants";
+import type { NotificationPlatform, NotificationProvider } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
 
 const SESSION_EVENTS_CHANNEL_ID = "session-events";
@@ -8,6 +9,24 @@ let initialized = false;
 let notificationResponseSubscription: { remove: () => void } | null = null;
 let lastHandledNotificationId: string | null = null;
 let notificationsModulePromise: Promise<typeof import("expo-notifications") | null> | null = null;
+let cachedRemotePushRegistration: RemotePushRegistration | null = null;
+let bridgeRegisteredPushToken: string | null = null;
+
+export type RemotePushRegistration = {
+    provider: NotificationProvider;
+    pushToken: string;
+    platform: NotificationPlatform;
+    appVersion?: string;
+};
+
+export type RemotePushAvailability =
+    | {
+        kind: "ready";
+        registration: RemotePushRegistration;
+    }
+    | { kind: "permission_denied" }
+    | { kind: "unsupported" }
+    | { kind: "unavailable" };
 
 // expo-notifications remote-push functionality was removed from Expo Go in SDK 53.
 // Only initialize when running as a real dev-build or production build.
@@ -67,6 +86,39 @@ function shouldHandleNotificationResponse(
     return true;
 }
 
+function readExpoProjectIdFromExtra(): string | null {
+    const extra = Constants.expoConfig?.extra;
+    if (typeof extra !== "object" || extra === null || Array.isArray(extra)) {
+        return null;
+    }
+
+    const eas = (extra as Record<string, unknown>)["eas"];
+    if (typeof eas !== "object" || eas === null || Array.isArray(eas)) {
+        return null;
+    }
+
+    const projectId = (eas as Record<string, unknown>)["projectId"];
+    return typeof projectId === "string" && projectId.trim().length > 0 ? projectId.trim() : null;
+}
+
+function readExpoProjectId(): string | null {
+    const easProjectId = Constants.easConfig?.projectId;
+    if (typeof easProjectId === "string" && easProjectId.trim().length > 0) {
+        return easProjectId.trim();
+    }
+
+    return readExpoProjectIdFromExtra();
+}
+
+function readAppVersion(): string | undefined {
+    const version = Constants.expoConfig?.version;
+    return typeof version === "string" && version.trim().length > 0 ? version.trim() : undefined;
+}
+
+function readNotificationPlatform(): NotificationPlatform {
+    return Platform.OS === "android" ? "android" : "ios";
+}
+
 export async function initializeNotifications(): Promise<void> {
     const notifications = await getNotificationsModule();
     if (notifications === null) return;
@@ -121,6 +173,84 @@ async function ensureNotificationPermission(options: { allowPrompt: boolean }): 
 
 export async function prepareNotificationPermissions(): Promise<boolean> {
     return ensureNotificationPermission({ allowPrompt: true });
+}
+
+export async function resolveRemotePushAvailability(
+    options: { allowPrompt: boolean }
+): Promise<RemotePushAvailability> {
+    const notifications = await getNotificationsModule();
+    if (notifications === null) {
+        return { kind: "unsupported" };
+    }
+
+    const granted = await ensureNotificationPermission({ allowPrompt: options.allowPrompt });
+    if (!granted) {
+        cachedRemotePushRegistration = null;
+        return { kind: "permission_denied" };
+    }
+
+    if (cachedRemotePushRegistration !== null) {
+        return {
+            kind: "ready",
+            registration: cachedRemotePushRegistration,
+        };
+    }
+
+    const projectId = readExpoProjectId();
+    if (projectId === null) {
+        useConnectionStore.getState().setError(
+            "Remote push registration requires an Expo EAS projectId in the app config."
+        );
+        return { kind: "unavailable" };
+    }
+
+    try {
+        const tokenResponse = await notifications.getExpoPushTokenAsync({ projectId });
+        const pushToken = tokenResponse.data.trim();
+        if (pushToken.length === 0) {
+            useConnectionStore.getState().setError("Expo push token registration returned an empty token.");
+            return { kind: "unavailable" };
+        }
+
+        const appVersion = readAppVersion();
+        const nextRegistration: RemotePushRegistration = {
+            provider: "expo",
+            pushToken,
+            platform: readNotificationPlatform(),
+            ...(appVersion !== undefined ? { appVersion } : {}),
+        };
+        cachedRemotePushRegistration = nextRegistration;
+
+        return {
+            kind: "ready",
+            registration: nextRegistration,
+        };
+    } catch (error) {
+        useConnectionStore.getState().setError(
+            `Failed to register remote notifications: ${error instanceof Error ? error.message : String(error)}`
+        );
+        return { kind: "unavailable" };
+    }
+}
+
+export function markBridgeRemotePushRegistered(pushToken: string): void {
+    bridgeRegisteredPushToken = pushToken;
+}
+
+export function clearBridgeRemotePushRegistration(): void {
+    bridgeRegisteredPushToken = null;
+}
+
+export function hasBridgeRemotePushRegistration(): boolean {
+    return bridgeRegisteredPushToken !== null;
+}
+
+export function isBridgeRemotePushCurrent(pushToken: string): boolean {
+    return bridgeRegisteredPushToken === pushToken;
+}
+
+export function shouldSuppressLocalCompletionNotifications(): boolean {
+    return bridgeRegisteredPushToken !== null;
 }
 
 export async function initializeNotificationRouting(

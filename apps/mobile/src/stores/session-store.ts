@@ -2,353 +2,48 @@
 // Unified ChatItem timeline with thinking, tool and messages in a single stream
 
 import { create } from "zustand";
-import {
-    saveActiveSessionId,
-    saveSessionPreferences,
-    type StoredSessionPreferences,
-} from "../services/credentials";
+import type { ReasoningEffortLevel } from "@copilot-mobile/shared";
+import { saveActiveSessionId } from "../services/credentials";
 import type {
-    AgentMode,
-    PermissionLevel,
-    RuntimeMode,
-    SessionInfo,
-    ModelInfo,
-    SkillInfo,
-    ReasoningEffortLevel,
-    HostSessionCapabilities,
-    BridgeSettings,
-    SessionMessageAttachment,
-    SessionUsagePayload,
-} from "@copilot-mobile/shared";
+    AssistantMessageItem,
+    PermissionPrompt,
+    SessionStore,
+    SessionUsage,
+    ThinkingItem,
+    ToolItem,
+    UserInputPrompt,
+    UserMessageItem,
+} from "./session-store-types";
+import {
+    appendDeferredPrompt,
+    createItemId,
+    dedupeSessionsById,
+    deriveAvailableReasoningEfforts,
+    findLastStreamingThinkingIndex,
+    insertChatItemBeforeTrailingAssistant,
+    persistSessionPreferences,
+    pruneDeferredPromptEntries,
+    reasoningEffortValues,
+    reconcileReasoningEffort,
+    removeDeferredPromptByRequestId,
+    sortSessionsByActivity,
+} from "./session-store-helpers";
 
-// Chat stream item types
-type ChatItemBase = {
-    id: string;
-    timestamp: number;
-};
-
-export type UserMessageItem = ChatItemBase & {
-    type: "user";
-    content: string;
-    attachments?: ReadonlyArray<SessionMessageAttachment>;
-    deliveryState: "pending" | "sent" | "failed";
-};
-
-export type AssistantMessageItem = ChatItemBase & {
-    type: "assistant";
-    content: string;
-    isStreaming: boolean;
-};
-
-export type ThinkingItem = ChatItemBase & {
-    type: "thinking";
-    content: string;
-    isStreaming: boolean;
-};
-
-export type ToolItem = ChatItemBase & {
-    type: "tool";
-    toolName: string;
-    requestId: string;
-    status: "running" | "completed" | "failed" | "no_results";
-    argumentsText?: string;
-    progressMessage?: string;
-    progressMessages?: ReadonlyArray<string>;
-    partialOutput?: string;
-    errorMessage?: string;
-};
-
-export type TodoItemStatus = "pending" | "in_progress" | "completed";
-
-export type AgentTodo = {
-    id: string;
-    content: string;
-    status: TodoItemStatus;
-    priority?: "high" | "medium" | "low";
-};
-
-export type ChatItem = UserMessageItem | AssistantMessageItem | ThinkingItem | ToolItem;
-
-export type PermissionPrompt = {
-    sessionId: string;
-    requestId: string;
-    kind: string;
-    toolName: string | null;
-    fileName: string | null;
-    commandText: string | null;
-    details: ReadonlyArray<string>;
-};
-
-export type UserInputPrompt = {
-    sessionId: string;
-    requestId: string;
-    prompt: string;
-    choices?: ReadonlyArray<string>;
-    allowFreeform?: boolean;
-};
-
-export type PlanExitPrompt = {
-    sessionId: string;
-    requestId: string;
-    summary: string;
-    planContent: string;
-    actions: ReadonlyArray<string>;
-    recommendedAction: string;
-};
-
-export type SessionUsage = {
-    tokenLimit: number;
-    currentTokens: number;
-    systemTokens?: number;
-    conversationTokens?: number;
-    toolDefinitionsTokens?: number;
-    messagesLength?: number;
-};
-
-export type SessionStore = {
-    // Session
-    activeSessionId: string | null;
-    isSessionLoading: boolean;
-    sessions: ReadonlyArray<SessionInfo>;
-    models: ReadonlyArray<ModelInfo>;
-    skills: ReadonlyArray<SkillInfo>;
-    selectedModel: string;
-    // null if model does not support reasoning effort.
-    reasoningEffort: ReasoningEffortLevel | null;
-    autoApproveReads: boolean;
-    agentMode: AgentMode;
-    permissionLevel: PermissionLevel;
-    runtimeMode: RuntimeMode;
-
-    // Bridge + host combined capability state
-    hostCapabilities: HostSessionCapabilities;
-    bridgeSettings: BridgeSettings;
-
-    // Unified chat stream (messages, thinking, tool all in one timeline)
-    chatItems: ReadonlyArray<ChatItem>;
-    isAssistantTyping: boolean;
-    currentIntent: string | null;
-
-    // Agent-managed todo list (from TodoWrite tool calls)
-    agentTodos: ReadonlyArray<AgentTodo>;
-
-    // Permission and input prompts (modal overlay)
-    permissionPrompt: PermissionPrompt | null;
-    permissionPromptQueue: ReadonlyArray<PermissionPrompt>;
-    userInputPrompt: UserInputPrompt | null;
-    planExitPrompt: PlanExitPrompt | null;
-
-    // Context usage per session (keyed by sessionId).
-    sessionUsage: Readonly<Record<string, SessionUsage>>;
-
-    // Actions
-    setActiveSession: (sessionId: string | null) => void;
-    setSessionLoading: (loading: boolean) => void;
-    setSessions: (sessions: ReadonlyArray<SessionInfo>) => void;
-    upsertSession: (session: SessionInfo) => void;
-    removeSession: (sessionId: string) => void;
-    setModels: (models: ReadonlyArray<ModelInfo>) => void;
-    setSkills: (skills: ReadonlyArray<SkillInfo>) => void;
-    setSelectedModel: (model: string) => void;
-    setReasoningEffort: (effort: ReasoningEffortLevel | null) => void;
-    setAutoApproveReads: (enabled: boolean) => void;
-    setAgentMode: (mode: AgentMode) => void;
-    setPermissionLevel: (level: PermissionLevel) => void;
-    setRuntimeMode: (mode: RuntimeMode) => void;
-    syncRemoteSessionState: (state: {
-        agentMode: AgentMode;
-        permissionLevel: PermissionLevel;
-        runtimeMode: RuntimeMode;
-    }) => void;
-    setHostCapabilities: (caps: HostSessionCapabilities) => void;
-    setBridgeSettings: (settings: BridgeSettings) => void;
-
-    addUserMessage: (
-        content: string,
-        attachments?: ReadonlyArray<SessionMessageAttachment>
-    ) => string;
-    updateUserMessageDeliveryState: (
-        itemId: string,
-        deliveryState: UserMessageItem["deliveryState"]
-    ) => void;
-    appendAssistantDelta: (delta: string, index: number) => void;
-    finalizeAssistantMessage: (content: string) => void;
-    setAssistantTyping: (typing: boolean) => void;
-
-    appendThinkingDelta: (delta: string, index: number) => void;
-    finalizeThinking: (content?: string) => void;
-
-    addToolStart: (
-        requestId: string,
-        toolName: string,
-        argumentsText?: string
-    ) => void;
-    updateToolProgress: (requestId: string, progressMessage: string) => void;
-    appendToolPartialOutput: (requestId: string, partialOutput: string) => void;
-    updateToolStatus: (
-        requestId: string,
-        status: "completed" | "failed" | "no_results",
-        errorMessage?: string
-    ) => void;
-
-    setCurrentIntent: (intent: string | null) => void;
-    setAgentTodos: (todos: ReadonlyArray<AgentTodo>) => void;
-    enqueuePermissionPrompt: (prompt: PermissionPrompt) => void;
-    resolvePermissionPrompt: (requestId: string) => void;
-    clearPermissionPrompts: () => void;
-    setUserInputPrompt: (prompt: UserInputPrompt | null) => void;
-    setPlanExitPrompt: (prompt: PlanExitPrompt | null) => void;
-
-    setSessionUsage: (payload: SessionUsagePayload) => void;
-    clearSessionUsage: (sessionId: string) => void;
-
-    hydratePreferences: (preferences: StoredSessionPreferences) => void;
-
-    replaceChatItems: (items: ReadonlyArray<ChatItem>) => void;
-    clearChatItems: () => void;
-    reset: () => void;
-};
-
-let itemCounter = 0;
-
-const reasoningEffortValues: ReadonlyArray<ReasoningEffortLevel> = ["low", "medium", "high", "xhigh"];
-
-function persistSessionPreferences(state: {
-    selectedModel: string;
-    reasoningEffort: ReasoningEffortLevel | null;
-    agentMode: AgentMode;
-    permissionLevel: PermissionLevel;
-    autoApproveReads: boolean;
-}): void {
-    void saveSessionPreferences({
-        selectedModel: state.selectedModel,
-        reasoningEffort: state.reasoningEffort,
-        agentMode: state.agentMode,
-        permissionLevel: state.permissionLevel,
-        autoApproveReads: state.autoApproveReads,
-    }).catch((error: unknown) => {
-        console.warn("Failed to persist session preferences", error);
-    });
-}
-
-function createItemId(): string {
-    itemCounter += 1;
-    return `item-${Date.now()}-${itemCounter}`;
-}
-
-function findTrailingAssistantInsertIndex(items: ReadonlyArray<ChatItem>): number {
-    let index = items.length;
-
-    while (index > 0) {
-        const item = items[index - 1];
-        if (item === undefined || item.type !== "assistant" || item.isStreaming) {
-            break;
-        }
-        index -= 1;
-    }
-
-    return index < items.length ? index : -1;
-}
-
-function insertChatItemBeforeTrailingAssistant(
-    items: ReadonlyArray<ChatItem>,
-    nextItem: ChatItem
-): Array<ChatItem> {
-    const insertIndex = findTrailingAssistantInsertIndex(items);
-    if (insertIndex === -1) {
-        return [...items, nextItem];
-    }
-
-    return [
-        ...items.slice(0, insertIndex),
-        nextItem,
-        ...items.slice(insertIndex),
-    ];
-}
-
-function sortSessionsByActivity(sessions: ReadonlyArray<SessionInfo>): Array<SessionInfo> {
-    return [...sessions].sort((left, right) => right.lastActiveAt - left.lastActiveAt);
-}
-
-function dedupeSessionsById(sessions: ReadonlyArray<SessionInfo>): Array<SessionInfo> {
-    const byId = new Map<string, SessionInfo>();
-
-    for (const session of sessions) {
-        const existing = byId.get(session.id);
-        if (existing === undefined || session.lastActiveAt > existing.lastActiveAt) {
-            byId.set(session.id, session);
-        }
-    }
-
-    return [...byId.values()];
-}
-
-// Derives available effort options for the selected model.
-// Returns:
-//   - options: levels the user can select (empty = hide picker)
-//   - supported: does the model support effort parameter?
-//   - listKnown: did the host explicitly report the level list?
-export function deriveAvailableReasoningEfforts(
-    model: ModelInfo | undefined
-): {
-    options: ReadonlyArray<ReasoningEffortLevel>;
-    supported: boolean;
-    listKnown: boolean;
-} {
-    if (model === undefined) {
-        return { options: [], supported: false, listKnown: false };
-    }
-
-    if (model.supportsReasoningEffort !== true) {
-        return { options: [], supported: false, listKnown: false };
-    }
-
-    const explicit = model.supportedReasoningEfforts;
-    if (explicit !== undefined && explicit.length > 0) {
-        return {
-            options: explicit,
-            supported: true,
-            listKnown: true,
-        };
-    }
-
-    return { options: [], supported: true, listKnown: false };
-}
-
-// When model changes, reconcile effort selection to a supported level.
-// If supportedReasoningEfforts not given: use default if available, otherwise null.
-function reconcileReasoningEffort(
-    currentEffort: ReasoningEffortLevel | null,
-    nextModel: ModelInfo | undefined
-): ReasoningEffortLevel | null {
-    const derived = deriveAvailableReasoningEfforts(nextModel);
-
-    if (!derived.supported) {
-        return null;
-    }
-
-    if (derived.listKnown) {
-        if (
-            currentEffort !== null &&
-            derived.options.includes(currentEffort)
-        ) {
-            return currentEffort;
-        }
-        if (
-            nextModel?.defaultReasoningEffort !== undefined &&
-            derived.options.includes(nextModel.defaultReasoningEffort)
-        ) {
-            return nextModel.defaultReasoningEffort;
-        }
-        return derived.options[0] ?? null;
-    }
-
-    // Supported but level list unknown: use default if available, otherwise clear selection.
-    if (nextModel?.defaultReasoningEffort !== undefined) {
-        return nextModel.defaultReasoningEffort;
-    }
-    return null;
-}
+export { deriveAvailableReasoningEfforts } from "./session-store-helpers";
+export type {
+    AgentTodo,
+    AssistantMessageItem,
+    ChatItem,
+    PermissionPrompt,
+    PlanExitPrompt,
+    SessionStore,
+    SessionUsage,
+    ThinkingItem,
+    TodoItemStatus,
+    ToolItem,
+    UserInputPrompt,
+    UserMessageItem,
+} from "./session-store-types";
 
 export const useSessionStore = create<SessionStore>((set) => ({
     activeSessionId: null,
@@ -372,14 +67,56 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     permissionPrompt: null,
     permissionPromptQueue: [],
+    deferredPermissionPrompts: {},
     userInputPrompt: null,
+    deferredUserInputPrompts: {},
     planExitPrompt: null,
+    deferredPlanExitPrompts: {},
 
     sessionUsage: {},
 
     setActiveSession: (sessionId) => {
         void saveActiveSessionId(sessionId);
-        set({ activeSessionId: sessionId });
+        set((state) => {
+            if (state.activeSessionId === sessionId) {
+                return { activeSessionId: sessionId };
+            }
+
+            const nextPermissionPrompts =
+                sessionId !== null
+                    ? [...(state.deferredPermissionPrompts[sessionId] ?? [])]
+                    : [];
+            const [nextPermissionPrompt, ...nextPermissionPromptQueue] = nextPermissionPrompts;
+            const nextUserInputPrompt =
+                sessionId !== null
+                    ? state.deferredUserInputPrompts[sessionId]?.[0] ?? null
+                    : null;
+            const nextPlanExitPrompt =
+                sessionId !== null
+                    ? state.deferredPlanExitPrompts[sessionId] ?? null
+                    : null;
+
+            const nextDeferredPermissionPrompts = { ...state.deferredPermissionPrompts };
+            const nextDeferredUserInputPrompts = { ...state.deferredUserInputPrompts };
+            const nextDeferredPlanExitPrompts = { ...state.deferredPlanExitPrompts };
+
+            if (sessionId !== null) {
+                delete nextDeferredPermissionPrompts[sessionId];
+                delete nextDeferredUserInputPrompts[sessionId];
+                delete nextDeferredPlanExitPrompts[sessionId];
+            }
+
+            return {
+                activeSessionId: sessionId,
+                permissionPrompt: nextPermissionPrompt ?? null,
+                permissionPromptQueue: nextPermissionPromptQueue,
+                deferredPermissionPrompts: nextDeferredPermissionPrompts,
+                userInputPrompt: nextUserInputPrompt,
+                deferredUserInputPrompts: nextDeferredUserInputPrompts,
+                planExitPrompt: nextPlanExitPrompt,
+                deferredPlanExitPrompts: nextDeferredPlanExitPrompts,
+            };
+        });
     },
 
     setSessionLoading: (loading) => set({ isSessionLoading: loading }),
@@ -411,10 +148,30 @@ export const useSessionStore = create<SessionStore>((set) => ({
             const nextUsage: Record<string, SessionUsage> = { ...state.sessionUsage };
             delete nextUsage[sessionId];
 
+            const nextDeferredPermissionPrompts = { ...state.deferredPermissionPrompts };
+            delete nextDeferredPermissionPrompts[sessionId];
+
+            const nextDeferredUserInputPrompts = { ...state.deferredUserInputPrompts };
+            delete nextDeferredUserInputPrompts[sessionId];
+
+            const nextDeferredPlanExitPrompts = { ...state.deferredPlanExitPrompts };
+            delete nextDeferredPlanExitPrompts[sessionId];
+
             return {
                 sessions: state.sessions.filter((session) => session.id !== sessionId),
                 activeSessionId: nextActiveSessionId,
                 sessionUsage: nextUsage,
+                deferredPermissionPrompts: nextDeferredPermissionPrompts,
+                deferredUserInputPrompts: nextDeferredUserInputPrompts,
+                deferredPlanExitPrompts: nextDeferredPlanExitPrompts,
+                ...(state.activeSessionId === sessionId
+                    ? {
+                        permissionPrompt: null,
+                        permissionPromptQueue: [],
+                        userInputPrompt: null,
+                        planExitPrompt: null,
+                    }
+                    : {}),
             };
         }),
 
@@ -623,20 +380,20 @@ export const useSessionStore = create<SessionStore>((set) => ({
     appendThinkingDelta: (delta, _index) => {
         set((s) => {
             const items = [...s.chatItems];
-            const last = items[items.length - 1];
-            if (
-                last !== undefined
-                && last.type === "thinking"
-                && last.isStreaming
-            ) {
-                items[items.length - 1] = {
-                    ...last,
-                    content: last.content + delta,
-                    isStreaming: true,
-                };
-                return { chatItems: items };
+            const thinkingIndex = findLastStreamingThinkingIndex(items);
+
+            if (thinkingIndex !== -1) {
+                const existingItem = items[thinkingIndex];
+                if (existingItem !== undefined && existingItem.type === "thinking") {
+                    items[thinkingIndex] = {
+                        ...existingItem,
+                        content: existingItem.content + delta,
+                        isStreaming: true,
+                    };
+                    return { chatItems: items };
+                }
             }
-            // Start new thinking block
+
             const item: ThinkingItem = {
                 id: createItemId(),
                 type: "thinking",
@@ -651,20 +408,20 @@ export const useSessionStore = create<SessionStore>((set) => ({
     finalizeThinking: (content) => {
         set((s) => {
             const items = [...s.chatItems];
-            let updatedExisting = false;
-            for (let i = items.length - 1; i >= 0; i--) {
-                const item = items[i];
-                if (item !== undefined && item.type === "thinking" && item.isStreaming) {
+            const thinkingIndex = findLastStreamingThinkingIndex(items);
+
+            if (thinkingIndex !== -1) {
+                const item = items[thinkingIndex];
+                if (item !== undefined && item.type === "thinking") {
                     const nextContent = content !== undefined && content.trim().length > 0
                         ? content
                         : item.content;
-                    items[i] = { ...item, content: nextContent, isStreaming: false };
-                    updatedExisting = true;
-                    break;
+                    items[thinkingIndex] = { ...item, content: nextContent, isStreaming: false };
+                    return { chatItems: items };
                 }
             }
 
-            if (!updatedExisting && content !== undefined && content.trim().length > 0) {
+            if (content !== undefined && content.trim().length > 0) {
                 return {
                     chatItems: insertChatItemBeforeTrailingAssistant(items, {
                         id: createItemId(),
@@ -751,6 +508,37 @@ export const useSessionStore = create<SessionStore>((set) => ({
         }));
     },
 
+    receivePermissionPrompt: (prompt) =>
+        set((state) => {
+            if (prompt.sessionId !== state.activeSessionId) {
+                return {
+                    deferredPermissionPrompts: {
+                        ...state.deferredPermissionPrompts,
+                        [prompt.sessionId]: appendDeferredPrompt(
+                            state.deferredPermissionPrompts[prompt.sessionId],
+                            prompt
+                        ),
+                    },
+                };
+            }
+
+            if (state.permissionPrompt?.requestId === prompt.requestId) {
+                return state;
+            }
+
+            if (state.permissionPromptQueue.some((item) => item.requestId === prompt.requestId)) {
+                return state;
+            }
+
+            if (state.permissionPrompt === null) {
+                return { permissionPrompt: prompt };
+            }
+
+            return {
+                permissionPromptQueue: [...state.permissionPromptQueue, prompt],
+            };
+        }),
+
     enqueuePermissionPrompt: (prompt) =>
         set((state) => {
             if (state.permissionPrompt?.requestId === prompt.requestId) {
@@ -772,23 +560,198 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     resolvePermissionPrompt: (requestId) =>
         set((state) => {
+            const nextDeferredPermissionPrompts = pruneDeferredPromptEntries<PermissionPrompt>(
+                Object.entries(state.deferredPermissionPrompts).map(([sessionId, prompts]) => [
+                    sessionId,
+                    removeDeferredPromptByRequestId(prompts, requestId),
+                ])
+            );
+
             if (state.permissionPrompt?.requestId === requestId) {
                 const [nextPrompt, ...restQueue] = state.permissionPromptQueue;
                 return {
                     permissionPrompt: nextPrompt ?? null,
                     permissionPromptQueue: restQueue,
+                    deferredPermissionPrompts: nextDeferredPermissionPrompts,
                 };
             }
 
             return {
                 permissionPromptQueue: state.permissionPromptQueue.filter((item) => item.requestId !== requestId),
+                deferredPermissionPrompts: nextDeferredPermissionPrompts,
             };
         }),
 
     clearPermissionPrompts: () => set({
         permissionPrompt: null,
         permissionPromptQueue: [],
+        deferredPermissionPrompts: {},
     }),
+
+    receiveUserInputPrompt: (prompt) =>
+        set((state) => {
+            if (prompt.sessionId !== state.activeSessionId) {
+                return {
+                    deferredUserInputPrompts: {
+                        ...state.deferredUserInputPrompts,
+                        [prompt.sessionId]: appendDeferredPrompt(
+                            state.deferredUserInputPrompts[prompt.sessionId],
+                            prompt
+                        ),
+                    },
+                };
+            }
+
+            if (state.userInputPrompt !== null) {
+                return {
+                    deferredUserInputPrompts: {
+                        ...state.deferredUserInputPrompts,
+                        [prompt.sessionId]: appendDeferredPrompt(
+                            state.deferredUserInputPrompts[prompt.sessionId],
+                            prompt
+                        ),
+                    },
+                };
+            }
+
+            return { userInputPrompt: prompt };
+        }),
+
+    resolveUserInputPrompt: (requestId) =>
+        set((state) => {
+            const nextDeferredUserInputPrompts = pruneDeferredPromptEntries<UserInputPrompt>(
+                Object.entries(state.deferredUserInputPrompts).map(([sessionId, prompts]) => [
+                    sessionId,
+                    removeDeferredPromptByRequestId(prompts, requestId),
+                ])
+            );
+
+            if (state.userInputPrompt?.requestId === requestId) {
+                const nextActiveSessionId = state.activeSessionId;
+                const nextQueuedUserInput =
+                    nextActiveSessionId !== null
+                        ? nextDeferredUserInputPrompts[nextActiveSessionId]?.[0] ?? null
+                        : null;
+                const nextDeferredAfterPromote =
+                    nextActiveSessionId !== null && nextQueuedUserInput !== null
+                        ? {
+                            ...nextDeferredUserInputPrompts,
+                            [nextActiveSessionId]: removeDeferredPromptByRequestId(
+                                nextDeferredUserInputPrompts[nextActiveSessionId],
+                                nextQueuedUserInput.requestId
+                            ),
+                        }
+                        : nextDeferredUserInputPrompts;
+
+                return {
+                    userInputPrompt: nextQueuedUserInput,
+                    deferredUserInputPrompts: pruneDeferredPromptEntries<UserInputPrompt>(
+                        Object.entries(nextDeferredAfterPromote).map(([sessionId, prompts]) => [
+                            sessionId,
+                            prompts,
+                        ])
+                    ),
+                };
+            }
+
+            return { deferredUserInputPrompts: nextDeferredUserInputPrompts };
+        }),
+
+    receivePlanExitPrompt: (prompt) =>
+        set((state) => {
+            if (prompt.sessionId !== state.activeSessionId) {
+                return {
+                    deferredPlanExitPrompts: {
+                        ...state.deferredPlanExitPrompts,
+                        [prompt.sessionId]: prompt,
+                    },
+                };
+            }
+
+            return { planExitPrompt: prompt };
+        }),
+
+    deferActivePrompts: () =>
+        set((state) => {
+            const activeSessionId = state.activeSessionId;
+            if (activeSessionId === null) {
+                return {
+                    permissionPrompt: null,
+                    permissionPromptQueue: [],
+                    userInputPrompt: null,
+                    planExitPrompt: null,
+                };
+            }
+
+            const nextDeferredPermissionPrompts =
+                state.permissionPrompt === null && state.permissionPromptQueue.length === 0
+                    ? state.deferredPermissionPrompts
+                    : {
+                        ...state.deferredPermissionPrompts,
+                        [activeSessionId]: [
+                            ...(state.permissionPrompt !== null ? [state.permissionPrompt] : []),
+                            ...state.permissionPromptQueue,
+                            ...(state.deferredPermissionPrompts[activeSessionId] ?? []),
+                        ],
+                    };
+            const nextDeferredUserInputPrompts =
+                state.userInputPrompt === null
+                    ? state.deferredUserInputPrompts
+                    : {
+                        ...state.deferredUserInputPrompts,
+                        [activeSessionId]: appendDeferredPrompt(
+                            state.deferredUserInputPrompts[activeSessionId],
+                            state.userInputPrompt
+                        ),
+                    };
+            const nextDeferredPlanExitPrompts =
+                state.planExitPrompt === null
+                    ? state.deferredPlanExitPrompts
+                    : {
+                        ...state.deferredPlanExitPrompts,
+                        [activeSessionId]: state.planExitPrompt,
+                    };
+
+            return {
+                permissionPrompt: null,
+                permissionPromptQueue: [],
+                deferredPermissionPrompts: nextDeferredPermissionPrompts,
+                userInputPrompt: null,
+                deferredUserInputPrompts: nextDeferredUserInputPrompts,
+                planExitPrompt: null,
+                deferredPlanExitPrompts: nextDeferredPlanExitPrompts,
+            };
+        }),
+
+    clearSessionPrompts: (sessionId) =>
+        set((state) => {
+            const nextDeferredPermissionPrompts = { ...state.deferredPermissionPrompts };
+            delete nextDeferredPermissionPrompts[sessionId];
+
+            const nextDeferredUserInputPrompts = { ...state.deferredUserInputPrompts };
+            delete nextDeferredUserInputPrompts[sessionId];
+
+            const nextDeferredPlanExitPrompts = { ...state.deferredPlanExitPrompts };
+            delete nextDeferredPlanExitPrompts[sessionId];
+
+            if (state.activeSessionId !== sessionId) {
+                return {
+                    deferredPermissionPrompts: nextDeferredPermissionPrompts,
+                    deferredUserInputPrompts: nextDeferredUserInputPrompts,
+                    deferredPlanExitPrompts: nextDeferredPlanExitPrompts,
+                };
+            }
+
+            return {
+                permissionPrompt: null,
+                permissionPromptQueue: [],
+                deferredPermissionPrompts: nextDeferredPermissionPrompts,
+                userInputPrompt: null,
+                deferredUserInputPrompts: nextDeferredUserInputPrompts,
+                planExitPrompt: null,
+                deferredPlanExitPrompts: nextDeferredPlanExitPrompts,
+            };
+        }),
 
     setUserInputPrompt: (prompt) => set({ userInputPrompt: prompt }),
 
@@ -853,7 +816,6 @@ export const useSessionStore = create<SessionStore>((set) => ({
         }),
 
     clearChatItems: () => {
-        itemCounter = 0;
         set({
             chatItems: [],
             isAssistantTyping: false,
@@ -861,13 +823,15 @@ export const useSessionStore = create<SessionStore>((set) => ({
             agentTodos: [],
             permissionPrompt: null,
             permissionPromptQueue: [],
+            deferredPermissionPrompts: {},
             userInputPrompt: null,
+            deferredUserInputPrompts: {},
             planExitPrompt: null,
+            deferredPlanExitPrompts: {},
         });
     },
 
     reset: () => {
-        itemCounter = 0;
         void saveActiveSessionId(null);
         set({
             activeSessionId: null,
@@ -889,8 +853,11 @@ export const useSessionStore = create<SessionStore>((set) => ({
             agentTodos: [],
             permissionPrompt: null,
             permissionPromptQueue: [],
+            deferredPermissionPrompts: {},
             userInputPrompt: null,
+            deferredUserInputPrompts: {},
             planExitPrompt: null,
+            deferredPlanExitPrompts: {},
             sessionUsage: {},
         });
     },

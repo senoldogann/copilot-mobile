@@ -57,6 +57,9 @@ jobs:
       - name: Build bridge server
         run: pnpm build:bridge
 
+      - name: Type check Cloudflare relay
+        run: pnpm --filter @copilot-mobile/cloudflare-relay typecheck
+
       - name: Type check
         run: pnpm typecheck
 

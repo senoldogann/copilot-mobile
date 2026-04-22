@@ -5,6 +5,9 @@ export type {
     PermissionLevel,
     RuntimeMode,
     TransportMode,
+    NotificationProvider,
+    NotificationPlatform,
+    NotificationPresenceState,
     SessionStatePayload,
     UserInputRequestPayload,
     PlanExitRequestPayload,
@@ -18,6 +21,7 @@ export type {
     GitCommitSummary,
     GitBranchSummary,
     WorkspaceOperation,
+    WorkspaceSearchMatch,
     SessionInfo,
     WorkspaceTreeRequestMessage,
     WorkspaceTreeMessage,
@@ -90,9 +94,14 @@ export type {
     PermissionLevelUpdateMessage,
     ModelsRequestMessage,
     CapabilitiesRequestMessage,
+    NotificationDeviceRegisterMessage,
+    NotificationDeviceUnregisterMessage,
+    NotificationPresenceUpdateMessage,
     SkillInfo,
     SkillsListRequestMessage,
     SkillsListResponseMessage,
+    WorkspaceSearchRequestMessage,
+    WorkspaceSearchResponseMessage,
 } from "./protocol.js";
 
 export type {

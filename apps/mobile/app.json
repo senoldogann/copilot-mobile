@@ -1,63 +1,67 @@
 {
-    "expo": {
-        "name": "Copilot Mobile",
-        "slug": "copilot-mobile",
-        "version": "0.1.0",
-        "orientation": "portrait",
-        "icon": "./assets/icon.png",
-        "userInterfaceStyle": "automatic",
-        "scheme": "copilot-mobile",
-        "splash": {
-            "backgroundColor": "#1e1e1e"
-        },
-        "ios": {
-            "supportsTablet": true,
-            "bundleIdentifier": "dev.senoldogan.copilot-mobile",
-            "infoPlist": {
-                "NSCameraUsageDescription": "Camera is required to connect to the bridge server via QR code",
-                "NSLocalNetworkUsageDescription": "Local network access is required to connect to your Copilot Bridge running on your computer",
-                "NSBonjourServices": [
-                    "_expo._tcp",
-                    "_react-native._tcp"
-                ],
-                "NSAppTransportSecurity": {
-                    "NSAllowsLocalNetworking": true
-                }
-            }
-        },
+  "expo": {
+    "name": "Copilot Mobile",
+    "slug": "copilot-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "scheme": "copilot-mobile",
+    "splash": {
+      "backgroundColor": "#1e1e1e"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "dev.senoldogan.copilot-mobile",
+      "infoPlist": {
+        "NSCameraUsageDescription": "Camera is required to connect to the bridge server via QR code",
+        "NSLocalNetworkUsageDescription": "Local network access is required to connect to your Copilot Bridge running on your computer",
+        "NSBonjourServices": [
+          "_expo._tcp",
+          "_react-native._tcp"
+        ],
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        }
+      }
+    },
         "android": {
             "adaptiveIcon": {
                 "backgroundColor": "#1e1e1e"
             },
             "package": "dev.senoldogan.copilotmobile",
-            "usesCleartextTraffic": true,
-            "permissions": [
+      "permissions": [
                 "android.permission.CAMERA"
             ]
+        },
+        "extra": {
+            "eas": {
+                "projectId": "1cc7a8e4-d1aa-48e8-90bc-c2ae41893f35"
+            }
         },
         "plugins": [
             "expo-router",
             [
-                "expo-camera",
-                {
-                    "cameraPermission": "Camera permission is required for QR code scanning"
-                }
-            ],
-            [
-                "expo-image-picker",
-                {
-                    "photosPermission": "Photo library access is required to attach images to Copilot chats",
-                    "cameraPermission": "Camera access is required to capture images for Copilot chats",
-                    "microphonePermission": false
-                }
-            ],
-            "expo-secure-store",
-            [
-                "expo-notifications",
-                {
-                    "color": "#161918"
-                }
-            ]
-        ]
-    }
+        "expo-camera",
+        {
+          "cameraPermission": "Camera permission is required for QR code scanning"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Photo library access is required to attach images to Copilot chats",
+          "cameraPermission": "Camera access is required to capture images for Copilot chats",
+          "microphonePermission": false
+        }
+      ],
+      "expo-secure-store",
+      [
+        "expo-notifications",
+        {
+          "color": "#161918"
+        }
+      ]
+    ]
+  }
 }

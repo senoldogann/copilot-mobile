@@ -11,9 +11,9 @@ Masaüstü bilgisayarınızdaki GitHub Copilot oturumunu telefonunuzdan kullanma
 └──────────────┘                  └────────────────┘                └─────────────┘
 ```
 
-1. **Bridge Server** masaüstünde çalışır, `@github/copilot-sdk` üzerinden Copilot CLI ile konuşur
-2. Terminal'de QR kod gösterilir
-3. **Mobil uygulama** QR kodu tarar → public relay veya reverse-proxy URL üzerinden bridge'e bağlanır
+1. **Desktop companion daemon** masaüstünde `LaunchAgent` olarak çalışır ve `@github/copilot-sdk` üzerinden Copilot CLI ile konuşur
+2. `copilot-mobile up` terminalde pairing QR üretir
+3. **Mobil uygulama** QR kodu tarar → hosted relay/control-plane veya self-hosted relay üzerinden companion'a bağlanır
 4. Telefondan mesaj yazarsınız, Copilot yanıt verir
 
 ## Masaüstünde Devam Etme
@@ -40,93 +40,73 @@ pnpm install
 
 ## Kullanım
 
-### 1. Public Relay veya Reverse Proxy URL'ini Hazırla
+### 1. Desktop companion login
+
+Global npm kurulumunda hedef akış:
 
 ```bash
-export COPILOT_MOBILE_PUBLIC_WS_URL="wss://your-tunnel.example.com"
+npm install -g copilot-mobile
+copilot-mobile login
+copilot-mobile up
 ```
 
-Bu URL yerelde çalışan bridge server'a veya relay katmanına gitmelidir. Farklı port kullanıyorsanız aynı değeri `BRIDGE_PORT` ile bridge'e de verin.
+`copilot-mobile login` resmi Copilot CLI `copilot login` akışını çalıştırır. `up` komutu macOS altında `~/Library/LaunchAgents/com.copilotmobile.bridge.plist` yazar, daemon'ı arka planda başlatır ve pairing QR'ı doğrudan terminale basar.
 
-Kendi relay sunucunuzu çalıştırmak isterseniz:
+Repo içinden test ederken aynı komutları `node ./bin/copilot-mobile.mjs <komut>` veya `pnpm copilot-mobile <komut>` ile de çalıştırabilirsiniz.
+
+### 2. Hosted relay veya local control-plane hazırla
+
+V1 companion varsayılan olarak hosted mode ile açılır. Repo içinde local smoke test için aynı makinede relay/control-plane açabilirsiniz:
 
 ```bash
 export COPILOT_MOBILE_RELAY_SECRET="replace-with-a-long-random-secret"
 pnpm dev:relay
-export COPILOT_MOBILE_RELAY_URL="ws://127.0.0.1:8787"
+copilot-mobile up
 ```
 
-Bridge bu modda companion olarak relay'e outbound bağlanır ve QR içinde mobil için `.../connect/mobile/<companionId>` URL'i üretir.
+Bu durumda `copilot-mobile up` varsayılan local hosted endpoint'i `http://127.0.0.1:8787` üzerinden companion registration + session alır ve QR içinde relay route üretir.
 
-Hosted relay deploy notları için [docs/relay-deployment.md](/Users/dogan/Desktop/copilot-mobile/docs/relay-deployment.md) dosyasına bakın.
+Gerçek remote kullanım için önerilen yol Cloudflare Workers relay'dir. Ayrıntılı kurulum:
 
-Örnek:
+- [docs/cloudflare-relay.md](/Users/dogan/Desktop/copilot-mobile/docs/cloudflare-relay.md)
+
+Özet komutlar:
 
 ```bash
-export BRIDGE_PORT=8443
-export COPILOT_MOBILE_PUBLIC_WS_URL="wss://your-tunnel.example.com"
+pnpm --filter @copilot-mobile/cloudflare-relay exec wrangler login
+pnpm --filter @copilot-mobile/cloudflare-relay exec wrangler secret put RELAY_SECRET
+pnpm --filter @copilot-mobile/cloudflare-relay exec wrangler secret put CONTROL_PLANE_SECRET
+pnpm --filter @copilot-mobile/cloudflare-relay exec wrangler deploy
 ```
 
-`copilot-mobile up` komutu `COPILOT_MOBILE_RELAY_URL` yoksa `COPILOT_MOBILE_PUBLIC_WS_URL` bekler.
-
-### 1a. Local Companion Stack
-
-Aynı ağ içinde relay tabanlı companion akışını tek komutta ayağa kaldırmak için:
+Deploy sonrası masaüstünde:
 
 ```bash
-pnpm dev:companion:local
+copilot-mobile up
 ```
 
-Bu komut local relay server, bridge server ve browser companion dashboard'unu birlikte başlatır; ardından taze pairing QR kodunu üretir.
-
-Native bir macOS companion shell açmak isterseniz:
+Bu repo artık varsayılan olarak şu hosted Worker URL'ini kullanır:
 
 ```bash
-pnpm dev:companion:macos
+https://copilot-mobile-relay.senoldogan0233.workers.dev
 ```
 
-Bu shell mevcut localhost dashboard'u embed eder, bridge durumunu sürekli poll eder ve `pnpm dev:companion:local` ile `pnpm dev:bridge:direct` süreçlerini kendi içinden yönetebilir.
+Bu yüzden normal kullanıcı akışında ek `export` gerekmez.
 
-### 2. `copilot-mobile up` Çalıştır
+Self-hosted legacy relay modu hala desteklenir, fakat artık varsayılan tüketici akışı değildir.
 
-```bash
-pnpm copilot-mobile up
-```
-
-Bu CLI şu anda repo içi bir yönetim komutu olarak tasarlandı. En doğru kullanım şekli `pnpm copilot-mobile <komut>` veya eşdeğer root script'leridir.
-
-Bridge arka planda başlar, `@copilot-mobile/shared` ve `@copilot-mobile/bridge-server` paketlerini build eder, sonra terminale yeni pairing QR kodunu basar.
-
-Diğer CLI komutları:
-
-```bash
-pnpm copilot-mobile status
-pnpm copilot-mobile qr
-pnpm copilot-mobile dashboard
-pnpm copilot-mobile down
-```
-
-İsterseniz aynı komutları root package script'leriyle de çalıştırabilirsiniz:
-
-```bash
-pnpm bridge:up
-pnpm bridge:status
-pnpm bridge:qr
-pnpm bridge:down
-```
-
-### 3. Mobil Uygulamayı Başlat
+### 3. Mobil uygulamayı başlat
 
 ```bash
 pnpm dev:mobile
 ```
 
-Expo Dev Client açılır. iOS Simulator, Android Emulator veya fiziksel cihazda çalıştırın.
+Bu komut artık Expo Dev Client için Metro'yu `tunnel` modunda açar. Böylece fiziksel telefon farklı ağda veya 5G'deyken de development bundle'ı çekebilir.
 
-### 4. QR ile Eşleştir
+### 4. QR ile eşleştir
 
 1. Mobil uygulamada **"QR ile Bağlan"** butonuna basın
-2. Kamerayı terminal'deki QR koda tutun
+2. Kamerayı `copilot-mobile up` terminal çıktısındaki QR koda tutun
 3. Bağlantı kurulunca **"Sohbet"** ekranına geçin
 4. Kod yazın!
 
@@ -138,6 +118,7 @@ copilot-mobile/
 │   └── shared/              # Protokol tipleri, Zod şemaları, adapter arayüzleri
 ├── apps/
 │   ├── bridge-server/       # WS bridge server (Node.js + copilot-sdk)
+│   ├── cloudflare-relay/    # Hosted relay/control-plane (Cloudflare Workers)
 │   │   ├── src/
 │   │   │   ├── server.ts        # Giriş noktası
 │   │   │   ├── ws/              # WebSocket server + mesaj yönlendirici
@@ -153,15 +134,19 @@ copilot-mobile/
 
 | Komut | Açıklama |
 | ----- | -------- |
-| `pnpm copilot-mobile up` | Bridge'i arka planda başlat, build al ve pairing QR üret |
-| `pnpm copilot-mobile status` | Çalışan bridge sürecini ve public URL bilgisini göster |
-| `pnpm copilot-mobile qr` | Yeni pairing QR kodu üret |
-| `pnpm copilot-mobile dashboard` | Localhost companion dashboard'unu aç |
-| `pnpm copilot-mobile down` | Arka plan bridge sürecini durdur |
+| `copilot-mobile login` | Resmi Copilot CLI login akışını çalıştır |
+| `copilot-mobile up` | LaunchAgent'i kur/yenile, daemon'ı başlat ve terminalde pairing QR üret |
+| `copilot-mobile status` | Daemon, Copilot auth, relay ve last error durumunu göster |
+| `copilot-mobile qr` | Çalışan daemon'dan yeni pairing QR iste |
+| `copilot-mobile logs` | Daemon stderr logunu tail et |
+| `copilot-mobile down` | LaunchAgent'i unload et ve daemon'ı durdur |
 | `pnpm dev:companion:macos` | Native macOS companion shell aç |
+| `pnpm dev:relay:cloudflare` | Cloudflare Worker relay'i local dev modda aç |
+| `pnpm deploy:relay:cloudflare` | Cloudflare Worker relay'i deploy et |
 | `pnpm dev:mobile` | Mobil uygulamayı başlat |
 | `pnpm build:shared` | Shared paketi derle |
 | `pnpm build:bridge` | Bridge server'ı derle |
+| `pnpm build:desktop` | Publishable desktop daemon bundle'ını üret |
 | `pnpm build:companion:macos` | Native macOS companion shell'i derle |
 | `pnpm typecheck` | Tüm paketlerde tip kontrolü |
 | `pnpm test` | Gerçek Copilot CLI ile E2E testlerini çalıştır |
@@ -177,12 +162,14 @@ copilot-mobile/
 
 ## Runtime Notları
 
-- Relay kullanıyorsanız `COPILOT_MOBILE_RELAY_URL`, reverse-proxy kullanıyorsanız `COPILOT_MOBILE_PUBLIC_WS_URL` ayarlayın.
-- Hosted relay kullanıyorsanız bridge ve relay server aynı `COPILOT_MOBILE_RELAY_SECRET` değerini paylaşmalıdır.
-- `status` ve `qr` komutları bridge içindeki localhost management endpoint'lerine bağlanır; bu endpoint'ler dış ağdan erişilemez.
-- `dashboard` komutu aynı localhost management endpoint'lerini kullanan browser tabanlı companion yüzeyini açar.
+- macOS companion config dosyası `~/.copilot-mobile/config.json` altında tutulur.
+- Varsayılan background servis `launchctl bootstrap gui/<uid>` ile yüklenen user `LaunchAgent` modelidir.
+- Hosted relay kullanıyorsanız public API ve public relay base URL değerlerini `COPILOT_MOBILE_HOSTED_API_BASE_URL` ve `COPILOT_MOBILE_HOSTED_RELAY_BASE_URL` ile verebilirsiniz.
+- Local smoke test için `pnpm dev:relay` açıp aynı makinede hosted-flow'u deneyebilirsiniz; bu durumda relay tarafı `COPILOT_MOBILE_RELAY_SECRET` bekler.
+- `status` ve `qr` komutları daemon içindeki localhost management endpoint'lerine bağlanır; bu endpoint'ler dış ağdan erişilemez.
+- Dashboard browser yüzeyi aynı management endpoint'lerini kullanır ve QR yenileme, logs açma, servis durdurma aksiyonlarını buradan verir.
 - `dev:companion:macos` komutu aynı management endpoint'lerini native bir macOS shell içinden kullanır; bridge lifecycle, QR ve dashboard görüntüsünü tek pencerede toplar.
-- Public `wss://` URL'ler `transportMode: "relay"` olarak advertise edilir; direct mod yalnızca private-network `ws://` URL'ler için kullanılır.
+- Public relay tabanlı companion QR'ları `transportMode: "relay"` ile advertise edilir; legacy direct mod yalnızca private-network debug akışı için tutulur.
 - Session completion için local notifications dev build veya production build içinde, kullanıcı izin verdiyse çalışır. Expo Go remote push akışını desteklemez.
 - Voice dictation `expo-speech-recognition` ile development build gerektirir; Expo Go içinde native modül yüklenmez. `app.json` içinde plugin iOS (`NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`) ve Android (`RECORD_AUDIO`, Google quick search box paket görünürlüğü) izinlerini otomatik ekler. Dev build almak için: `pnpm --filter @copilot-mobile/mobile expo prebuild --clean` ardından `pnpm --filter @copilot-mobile/mobile expo run:ios` veya `run:android`. Dil varsayılan olarak `en-US`; başka locale'ler için `ChatInput` içindeki `startVoiceDictation({ lang })` argümanı güncellenir.
 

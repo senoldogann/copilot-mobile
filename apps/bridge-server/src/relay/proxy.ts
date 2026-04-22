@@ -27,6 +27,9 @@ export type RelayProxy = {
 
 const BASE_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
+const LOCAL_BRIDGE_RECONNECT_DELAY_MS = 1_000;
+const RELAY_PROXY_HEADER = "x-copilot-mobile-relay-proxy";
+const RELAY_COMPANION_ID_HEADER = "x-copilot-mobile-companion-id";
 
 function isRelayControlMessage(value: unknown): value is RelayControlMessage {
     if (typeof value !== "object" || value === null) {
@@ -45,14 +48,23 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
     let relaySocket: WebSocket | null = null;
     let localBridgeSocket: WebSocket | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+    let localBridgeReconnectTimer: ReturnType<typeof setTimeout> | null = null;
     let reconnectAttempt = 0;
     let stopped = false;
+    let relayReady = false;
     const bufferedMobileMessages: Array<string> = [];
 
     function clearReconnectTimer(): void {
         if (reconnectTimer !== null) {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
+        }
+    }
+
+    function clearLocalBridgeReconnectTimer(): void {
+        if (localBridgeReconnectTimer !== null) {
+            clearTimeout(localBridgeReconnectTimer);
+            localBridgeReconnectTimer = null;
         }
     }
 
@@ -63,6 +75,8 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
     }
 
     function teardownLocalBridgeSocket(): void {
+        clearLocalBridgeReconnectTimer();
+
         if (localBridgeSocket === null) {
             return;
         }
@@ -74,6 +88,17 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
         localBridgeSocket.close();
         localBridgeSocket = null;
         bufferedMobileMessages.length = 0;
+    }
+
+    function scheduleLocalBridgeReconnect(): void {
+        if (stopped || !relayReady || localBridgeReconnectTimer !== null) {
+            return;
+        }
+
+        localBridgeReconnectTimer = setTimeout(() => {
+            localBridgeReconnectTimer = null;
+            connectLocalBridge();
+        }, LOCAL_BRIDGE_RECONNECT_DELAY_MS);
     }
 
     function scheduleReconnect(): void {
@@ -107,9 +132,23 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
     }
 
     function connectLocalBridge(): void {
+        clearLocalBridgeReconnectTimer();
+
+        if (localBridgeSocket !== null) {
+            const readyState = localBridgeSocket.readyState;
+            if (readyState === WebSocket.OPEN || readyState === WebSocket.CONNECTING) {
+                return;
+            }
+        }
+
         teardownLocalBridgeSocket();
 
-        const ws = new WebSocket(config.localBridgeUrl);
+        const ws = new WebSocket(config.localBridgeUrl, {
+            headers: {
+                [RELAY_PROXY_HEADER]: "1",
+                [RELAY_COMPANION_ID_HEADER]: config.companionId,
+            },
+        });
         localBridgeSocket = ws;
 
         ws.onopen = () => {
@@ -132,6 +171,7 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
                 companionId: config.companionId,
                 reason: "Local bridge connection closed",
             });
+            scheduleLocalBridgeReconnect();
         };
 
         ws.onerror = () => {
@@ -142,7 +182,9 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
     function handleRelayControlMessage(message: RelayControlMessage): void {
         switch (message.type) {
             case "companion.ready":
+                relayReady = true;
                 reconnectAttempt = 0;
+                connectLocalBridge();
                 return;
 
             case "mobile.open":
@@ -162,7 +204,7 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
                 return;
 
             case "mobile.close":
-                teardownLocalBridgeSocket();
+                bufferedMobileMessages.length = 0;
                 return;
 
             case "relay.error":
@@ -178,6 +220,7 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
         }
 
         clearReconnectTimer();
+        relayReady = false;
 
         const ws = new WebSocket(config.relayUrl);
         relaySocket = ws;
@@ -213,6 +256,7 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
         };
 
         ws.onclose = () => {
+            relayReady = false;
             relaySocket = null;
             teardownLocalBridgeSocket();
             scheduleReconnect();
@@ -231,7 +275,9 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
 
         shutdown(): void {
             stopped = true;
+            relayReady = false;
             clearReconnectTimer();
+            clearLocalBridgeReconnectTimer();
             teardownLocalBridgeSocket();
             if (relaySocket !== null) {
                 relaySocket.onopen = null;
@@ -245,7 +291,7 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
 
         getStatus() {
             return {
-                connectedToRelay: relaySocket?.readyState === WebSocket.OPEN,
+                connectedToRelay: relayReady,
                 connectedToLocalBridge: localBridgeSocket?.readyState === WebSocket.OPEN,
                 companionId: config.companionId,
                 relayUrl: config.relayUrl,

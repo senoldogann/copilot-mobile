@@ -23,8 +23,8 @@ import type {
     WorkspaceFilePayload,
     WorkspaceResolvePayload,
 } from "../services/workspace-events";
-import { borderRadius, colors, fontSize, spacing } from "../theme/colors";
 import { BottomSheet } from "./BottomSheet";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 
 type ViewerMode = "file" | "diff";
 
@@ -75,6 +75,8 @@ function formatResolveError(payload: WorkspaceResolvePayload): string {
 
 export function FileContentViewer(props: Props): React.JSX.Element {
     const { path, mode = "file", onClose } = props;
+    const theme = useAppTheme();
+    const viewerStyles = useThemedStyles(createStyles);
     const { clean, info } = parseLineInfo(path);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
 
@@ -219,7 +221,7 @@ export function FileContentViewer(props: Props): React.JSX.Element {
         >
             {state.status === "loading" && (
                 <View style={viewerStyles.centered}>
-                    <ActivityIndicator color={colors.textSecondary} size="small" />
+                    <ActivityIndicator color={theme.colors.textSecondary} size="small" />
                     <Text style={viewerStyles.loadingText}>Loading…</Text>
                 </View>
             )}
@@ -241,28 +243,30 @@ export function FileContentViewer(props: Props): React.JSX.Element {
     );
 }
 
-function classifyDiffLine(line: string): { readonly color: string; readonly bg: string | null } {
+function classifyDiffLine(line: string, theme: AppTheme): { readonly color: string; readonly bg: string | null } {
     if (line.startsWith("+++") || line.startsWith("---")) {
-        return { color: colors.textTertiary, bg: null };
+        return { color: theme.colors.textTertiary, bg: null };
     }
     if (line.startsWith("@@")) {
-        return { color: colors.textSecondary, bg: null };
+        return { color: theme.colors.textSecondary, bg: null };
     }
     if (line.startsWith("+")) {
-        return { color: "#3fb950", bg: "rgba(63,185,80,0.10)" };
+        return { color: theme.colors.success, bg: theme.colors.successMuted };
     }
     if (line.startsWith("-")) {
-        return { color: "#f85149", bg: "rgba(248,81,73,0.10)" };
+        return { color: theme.colors.error, bg: theme.colors.errorMuted };
     }
-    return { color: colors.textPrimary, bg: null };
+    return { color: theme.colors.textPrimary, bg: null };
 }
 
 function DiffBody({ diff }: { readonly diff: string }): React.JSX.Element {
+    const theme = useAppTheme();
+    const viewerStyles = useThemedStyles(createStyles);
     const lines = diff.split("\n");
     return (
         <View>
             {lines.map((line, idx) => {
-                const { color, bg } = classifyDiffLine(line);
+                const { color, bg } = classifyDiffLine(line, theme);
                 return (
                     <Text
                         key={idx}
@@ -282,6 +286,7 @@ function DiffBody({ diff }: { readonly diff: string }): React.JSX.Element {
 }
 
 function FileBody({ content }: { readonly content: string }): React.JSX.Element {
+    const viewerStyles = useThemedStyles(createStyles);
     const lines = content.split("\n");
     return (
         <View style={viewerStyles.codeBlock}>
@@ -299,82 +304,84 @@ function FileBody({ content }: { readonly content: string }): React.JSX.Element 
     );
 }
 
-const viewerStyles = StyleSheet.create({
-    metaBanner: {
-        flexDirection: "row",
-        gap: 12,
-        paddingHorizontal: spacing.md,
-        paddingVertical: 6,
-        backgroundColor: colors.bgElevated,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    lineInfoText: {
-        fontSize: fontSize.xs,
-        color: colors.textSecondary,
-    },
-    truncatedText: {
-        fontSize: fontSize.xs,
-        color: colors.textTertiary,
-    },
-    centered: {
-        alignItems: "center",
-        justifyContent: "center",
-        paddingVertical: 40,
-        gap: 12,
-    },
-    loadingText: {
-        fontSize: fontSize.sm,
-        color: colors.textTertiary,
-    },
-    errorText: {
-        fontSize: fontSize.sm,
-        color: colors.error,
-        textAlign: "center",
-        paddingHorizontal: spacing.md,
-    },
-    retryBtn: {
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 8,
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.bgElevated,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    retryText: {
-        fontSize: fontSize.sm,
-        color: colors.textPrimary,
-    },
-    codeBlock: {
-        backgroundColor: colors.bg,
-        paddingHorizontal: 8,
-        paddingVertical: spacing.sm,
-    },
-    codeLine: {
-        flexDirection: "row",
-        backgroundColor: colors.bg,
-    },
-    lineNum: {
-        width: 36,
-        fontSize: 11,
-        lineHeight: 18,
-        color: colors.textTertiary,
-        fontFamily: "monospace",
-        textAlign: "right",
-        marginRight: 10,
-        flexShrink: 0,
-    },
-    codeText: {
-        flex: 1,
-        fontSize: 12,
-        lineHeight: 18,
-        color: colors.textPrimary,
-        fontFamily: "monospace",
-    },
-    diffLine: {
-        fontSize: 12,
-        lineHeight: 18,
-        fontFamily: "monospace",
-        paddingHorizontal: 4,
-    },
-});
+function createStyles(theme: AppTheme) {
+    return StyleSheet.create({
+        metaBanner: {
+            flexDirection: "row",
+            gap: 12,
+            paddingHorizontal: theme.spacing.md,
+            paddingVertical: 6,
+            backgroundColor: theme.colors.bgElevated,
+            borderBottomWidth: 1,
+            borderBottomColor: theme.colors.border,
+        },
+        lineInfoText: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textSecondary,
+        },
+        truncatedText: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textTertiary,
+        },
+        centered: {
+            alignItems: "center",
+            justifyContent: "center",
+            paddingVertical: 40,
+            gap: 12,
+        },
+        loadingText: {
+            fontSize: theme.fontSize.sm,
+            color: theme.colors.textTertiary,
+        },
+        errorText: {
+            fontSize: theme.fontSize.sm,
+            color: theme.colors.error,
+            textAlign: "center",
+            paddingHorizontal: theme.spacing.md,
+        },
+        retryBtn: {
+            paddingHorizontal: theme.spacing.lg,
+            paddingVertical: 8,
+            borderRadius: theme.borderRadius.md,
+            backgroundColor: theme.colors.bgElevated,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        retryText: {
+            fontSize: theme.fontSize.sm,
+            color: theme.colors.textPrimary,
+        },
+        codeBlock: {
+            backgroundColor: theme.colors.bg,
+            paddingHorizontal: 8,
+            paddingVertical: theme.spacing.sm,
+        },
+        codeLine: {
+            flexDirection: "row",
+            backgroundColor: theme.colors.bg,
+        },
+        lineNum: {
+            width: 36,
+            fontSize: 11,
+            lineHeight: 18,
+            color: theme.colors.textTertiary,
+            fontFamily: "monospace",
+            textAlign: "right",
+            marginRight: 10,
+            flexShrink: 0,
+        },
+        codeText: {
+            flex: 1,
+            fontSize: 12,
+            lineHeight: 18,
+            color: theme.colors.textPrimary,
+            fontFamily: "monospace",
+        },
+        diffLine: {
+            fontSize: 12,
+            lineHeight: 18,
+            fontFamily: "monospace",
+            paddingHorizontal: 4,
+        },
+    });
+}

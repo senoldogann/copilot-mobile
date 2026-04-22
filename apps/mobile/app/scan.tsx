@@ -8,9 +8,10 @@ import { qrPayloadSchema } from "@copilot-mobile/shared";
 import type { QRPayload } from "@copilot-mobile/shared";
 import { connectWithQR } from "../src/services/bridge";
 import { useConnectionStore } from "../src/stores/connection-store";
-import { colors, borderRadius } from "../src/theme/colors";
+import { useThemedStyles, type AppTheme } from "../src/theme/theme-context";
 
 export default function ScanScreen() {
+    const styles = useThemedStyles(createStyles);
     const router = useRouter();
     const [permission, requestPermission] = useCameraPermissions();
     const [scanned, setScanned] = useState(false);
@@ -44,7 +45,20 @@ export default function ScanScreen() {
         ]);
     }, [connectionError]);
 
-function handleBarCodeScanned(result: { data: string }): void {
+    useEffect(() => {
+        if (!isPairing) {
+            return;
+        }
+
+        if (connectionState !== "disconnected" || connectionError !== null) {
+            return;
+        }
+
+        setIsPairing(false);
+        setScanned(false);
+    }, [connectionError, connectionState, isPairing]);
+
+    function handleBarCodeScanned(result: { data: string }): void {
         if (scanned) return;
         setScanned(true);
 
@@ -128,8 +142,8 @@ function handleBarCodeScanned(result: { data: string }): void {
                 <View style={styles.scanFrame} />
                 <Text style={styles.instructions}>
                     {isPairing
-                        ? "Connecting to bridge server..."
-                        : "Scan the QR code on your bridge server"}
+                        ? "Connecting to your Mac companion..."
+                        : "Scan the QR code from your Mac companion dashboard"}
                 </Text>
             </View>
 
@@ -147,62 +161,64 @@ function handleBarCodeScanned(result: { data: string }): void {
     );
 }
 
-const styles = StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: colors.bg,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    camera: {
-        ...StyleSheet.absoluteFillObject,
-    },
-    overlay: {
-        ...StyleSheet.absoluteFillObject,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    scanFrame: {
-        width: 250,
-        height: 250,
-        borderWidth: 2,
-        borderColor: colors.accent,
-        borderRadius: borderRadius.xl,
-        backgroundColor: "transparent",
-    },
-    instructions: {
-        marginTop: 24,
-        fontSize: 16,
-        color: colors.textOnAccent,
-        textAlign: "center",
-        paddingHorizontal: 32,
-    },
-    text: {
-        fontSize: 18,
-        color: colors.textOnAccent,
-        marginBottom: 8,
-        textAlign: "center",
-    },
-    subtext: {
-        fontSize: 14,
-        color: colors.textPlaceholder,
-        marginBottom: 24,
-        textAlign: "center",
-        paddingHorizontal: 32,
-    },
-    button: {
-        backgroundColor: colors.accent,
-        paddingVertical: 14,
-        paddingHorizontal: 32,
-        borderRadius: borderRadius.lg,
-    },
-    buttonText: {
-        color: colors.textOnAccent,
-        fontSize: 16,
-        fontWeight: "600",
-    },
-    rescanContainer: {
-        position: "absolute",
-        bottom: 60,
-    },
-});
+function createStyles(theme: AppTheme) {
+    return StyleSheet.create({
+        container: {
+            flex: 1,
+            backgroundColor: theme.colors.bg,
+            justifyContent: "center",
+            alignItems: "center",
+        },
+        camera: {
+            ...StyleSheet.absoluteFillObject,
+        },
+        overlay: {
+            ...StyleSheet.absoluteFillObject,
+            justifyContent: "center",
+            alignItems: "center",
+        },
+        scanFrame: {
+            width: 250,
+            height: 250,
+            borderWidth: 2,
+            borderColor: theme.colors.accent,
+            borderRadius: theme.borderRadius.xl,
+            backgroundColor: "transparent",
+        },
+        instructions: {
+            marginTop: 24,
+            fontSize: 16,
+            color: theme.colors.textOnAccent,
+            textAlign: "center",
+            paddingHorizontal: 32,
+        },
+        text: {
+            fontSize: 18,
+            color: theme.colors.textOnAccent,
+            marginBottom: 8,
+            textAlign: "center",
+        },
+        subtext: {
+            fontSize: 14,
+            color: theme.colors.textPlaceholder,
+            marginBottom: 24,
+            textAlign: "center",
+            paddingHorizontal: 32,
+        },
+        button: {
+            backgroundColor: theme.colors.accent,
+            paddingVertical: 14,
+            paddingHorizontal: 32,
+            borderRadius: theme.borderRadius.lg,
+        },
+        buttonText: {
+            color: theme.colors.textOnAccent,
+            fontSize: 16,
+            fontWeight: "600",
+        },
+        rescanContainer: {
+            position: "absolute",
+            bottom: 60,
+        },
+    });
+}

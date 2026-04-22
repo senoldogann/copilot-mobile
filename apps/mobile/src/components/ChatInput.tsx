@@ -1,4 +1,4 @@
-// Mesaj giriş çubuğu — GitHub Copilot mobil stili model/effort seçiciler, resim ekleme, gönderim modları
+// Message input bar — GitHub Copilot mobile style with model/effort selectors, image attachments, and send modes
 
 import React, { useState, useCallback, useEffect, useMemo } from "react";
 import {
@@ -6,26 +6,42 @@ import {
     TextInput,
     Pressable,
     Text,
-    StyleSheet,
     InteractionManager,
-    Platform,
     Modal,
     Image,
     ScrollView,
     Alert,
 } from "react-native";
+import Svg, { Circle } from "react-native-svg";
 import * as ImagePicker from "expo-image-picker";
-import { useSessionStore, deriveAvailableReasoningEfforts } from "../stores/session-store";
+import { useSessionStore } from "../stores/session-store";
+import { deriveAvailableReasoningEfforts } from "../stores/session-store-helpers";
 import { useWorkspaceStore } from "../stores/workspace-store";
 import { useConnectionStore } from "../stores/connection-store";
 import type { WorkspaceTreeNode } from "@copilot-mobile/shared";
-import { colors, spacing, fontSize as fs, borderRadius } from "../theme/colors";
 import type { AgentMode, ModelInfo, PermissionLevel, ReasoningEffortLevel } from "@copilot-mobile/shared";
+import { MODEL_UNKNOWN } from "@copilot-mobile/shared";
 import { requestWorkspaceTree, updatePermissionLevel, updateSessionMode } from "../services/bridge";
+import { useAppTheme, useThemedStyles } from "../theme/theme-context";
+import type {
+    AutocompleteToken,
+    ChatInputProps,
+    ImageAttachment,
+    SendMode,
+    SlashCommand,
+} from "./chat-input-types";
+import {
+    createAttachmentStyles,
+    createAutocompleteStyles,
+    createContextStyles,
+    createDropdownStyles,
+    createQueuedDraftStyles,
+    createStyles,
+    createToolbarStyles,
+} from "./chat-input-styles";
 import {
     ProviderIcon,
     detectProvider,
-    PaperclipIcon,
     ArrowUpIcon,
     ChevronDownIcon,
     CheckIcon,
@@ -37,40 +53,8 @@ import {
     ShieldIcon,
     ShieldCheckIcon,
     ZapIcon,
-    RefreshIcon,
 } from "./ProviderIcon";
-
-// --- Types ---
-
-export type ImageAttachment = {
-    uri: string;
-    width: number;
-    height: number;
-    fileName: string;
-    mimeType: string;
-    base64Data: string;
-};
-
-export type SendMode = "send" | "queue" | "steer";
-export type QueuedDraft = {
-    id: string;
-    sessionId: string | null;
-    content: string;
-    images: ReadonlyArray<ImageAttachment>;
-};
-
-type Props = {
-    onSend: (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => void;
-    onAbort: () => void;
-    isTyping: boolean;
-    disabled: boolean;
-    queuedDrafts: ReadonlyArray<QueuedDraft>;
-    editingDraft: QueuedDraft | null;
-    onEditingDraftConsumed: () => void;
-    onEditQueuedDraft: (draftId: string) => void;
-    onRemoveQueuedDraft: (draftId: string) => void;
-    onSteerQueuedDraft: (draftId: string) => void;
-};
+import { ReasoningEffortIcon } from "./Icons";
 
 // --- Effort labels ---
 
@@ -94,6 +78,9 @@ function DropdownModal({
     title: string;
     children: React.ReactNode;
 }) {
+    const theme = useAppTheme();
+    const dropdownStyles = useThemedStyles(createDropdownStyles);
+
     return (
         <Modal
             visible={visible}
@@ -109,7 +96,7 @@ function DropdownModal({
                     <View style={dropdownStyles.header}>
                         <Text style={dropdownStyles.title}>{title}</Text>
                         <Pressable onPress={onClose} hitSlop={8}>
-                            <CloseIcon size={18} color={colors.textTertiary} />
+                            <CloseIcon size={18} color={theme.colors.textTertiary} />
                         </Pressable>
                     </View>
                     <ScrollView
@@ -136,6 +123,8 @@ function ModelSelectorContent({
     selectedModel: string;
     onSelect: (modelId: string) => void;
 }) {
+    const theme = useAppTheme();
+    const dropdownStyles = useThemedStyles(createDropdownStyles);
     const [search, setSearch] = useState("");
 
     const filtered = search.trim().length > 0
@@ -154,7 +143,7 @@ function ModelSelectorContent({
                     value={search}
                     onChangeText={setSearch}
                     placeholder="Search models"
-                    placeholderTextColor={colors.textPlaceholder}
+                    placeholderTextColor={theme.colors.textPlaceholder}
                     autoCapitalize="none"
                     autoCorrect={false}
                 />
@@ -222,6 +211,8 @@ function ModelSelectorContent({
 function EffortSelectorContent({
     agentMode,
     onSelectAgentMode,
+    permissionLevel,
+    onSelectPermissionLevel,
     options,
     current,
     defaultEffort,
@@ -229,11 +220,16 @@ function EffortSelectorContent({
 }: {
     agentMode: AgentMode;
     onSelectAgentMode: (mode: AgentMode) => void;
+    permissionLevel: PermissionLevel;
+    onSelectPermissionLevel: (level: PermissionLevel) => void;
     options: ReadonlyArray<ReasoningEffortLevel>;
     current: ReasoningEffortLevel | null;
     defaultEffort: ReasoningEffortLevel | undefined;
     onSelect: (level: ReasoningEffortLevel) => void;
 }) {
+    const theme = useAppTheme();
+    const dropdownStyles = useThemedStyles(createDropdownStyles);
+
     return (
         <View style={dropdownStyles.effortList}>
             <Text style={dropdownStyles.sectionLabel}>Agent Mode</Text>
@@ -252,7 +248,7 @@ function EffortSelectorContent({
                     >
                         <View style={dropdownStyles.effortItemLeft}>
                             <View style={dropdownStyles.checkmarkSlot}>
-                                {isSelected && <CheckIcon size={13} color={colors.textPrimary} />}
+                                {isSelected && <CheckIcon size={13} color={theme.colors.textPrimary} />}
                             </View>
                             <View>
                                 <Text style={[
@@ -266,7 +262,10 @@ function EffortSelectorContent({
                                 </Text>
                             </View>
                         </View>
-                        <cfg.Icon size={18} color={isSelected ? cfg.color : colors.textTertiary} />
+                        <cfg.Icon
+                            size={18}
+                            color={isSelected ? theme.colors.textPrimary : theme.colors.textTertiary}
+                        />
                     </Pressable>
                 );
             })}
@@ -288,7 +287,9 @@ function EffortSelectorContent({
                         onPress={() => onSelect(level)}
                     >
                         <View style={dropdownStyles.effortItemLeft}>
-                            {isSelected && <Text style={dropdownStyles.checkmark}>✓</Text>}
+                            <View style={dropdownStyles.checkmarkSlot}>
+                                {isSelected && <CheckIcon size={13} color={theme.colors.textPrimary} />}
+                            </View>
                             <View>
                                 <Text style={[
                                     dropdownStyles.effortLabel,
@@ -301,6 +302,50 @@ function EffortSelectorContent({
                                 </Text>
                             </View>
                         </View>
+                        <View style={dropdownStyles.trailingSlot}>
+                            <ReasoningEffortIcon
+                                level={level}
+                                size={18}
+                                color={isSelected ? theme.colors.textPrimary : theme.colors.textTertiary}
+                            />
+                        </View>
+                    </Pressable>
+                );
+            })}
+
+            <View style={dropdownStyles.sectionDivider} />
+            <Text style={dropdownStyles.sectionLabel}>Permission Level</Text>
+            {(["default", "bypass", "autopilot"] as const).map((level) => {
+                const cfg = permissionLevelConfig[level];
+                const isSelected = permissionLevel === level;
+
+                return (
+                    <Pressable
+                        key={level}
+                        style={[
+                            dropdownStyles.effortItem,
+                            isSelected && dropdownStyles.effortItemSelected,
+                        ]}
+                        onPress={() => onSelectPermissionLevel(level)}
+                    >
+                        <View style={dropdownStyles.effortItemLeft}>
+                            <View style={dropdownStyles.checkmarkSlot}>
+                                {isSelected && <CheckIcon size={13} color={theme.colors.textPrimary} />}
+                            </View>
+                            <View style={{ flex: 1 }}>
+                                <Text style={[
+                                    dropdownStyles.effortLabel,
+                                    isSelected && dropdownStyles.effortLabelSelected,
+                                ]}>
+                                    {cfg.label}
+                                </Text>
+                                <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
+                            </View>
+                        </View>
+                        <cfg.Icon
+                            size={18}
+                            color={isSelected ? theme.colors.textPrimary : theme.colors.textTertiary}
+                        />
                     </Pressable>
                 );
             })}
@@ -312,55 +357,47 @@ function EffortSelectorContent({
 
 function SendModeMenu({
     visible,
-    onClose,
     onSelect,
 }: {
     visible: boolean;
-    onClose: () => void;
     onSelect: (mode: SendMode) => void;
 }) {
+    const toolbarStyles = useThemedStyles(createToolbarStyles);
+
+    if (!visible) {
+        return null;
+    }
+
     return (
-        <Modal
-            visible={visible}
-            transparent
-            animationType="fade"
-            onRequestClose={onClose}
-        >
-            <Pressable style={dropdownStyles.overlay} onPress={onClose}>
-                <Pressable
-                    style={[dropdownStyles.container, dropdownStyles.sendModeContainer]}
-                    onPress={(e) => e.stopPropagation()}
-                >
-                    <Pressable
-                        style={dropdownStyles.sendModeItem}
-                        onPress={() => onSelect("send")}
-                    >
-                        <Text style={dropdownStyles.sendModeIcon}>→</Text>
-                        <Text style={dropdownStyles.sendModeText}>Stop and Send</Text>
-                    </Pressable>
-                    <Pressable
-                        style={dropdownStyles.sendModeItem}
-                        onPress={() => onSelect("queue")}
-                    >
-                        <Text style={dropdownStyles.sendModeIcon}>＋</Text>
-                        <View style={dropdownStyles.sendModeRight}>
-                            <Text style={dropdownStyles.sendModeText}>Add to Queue</Text>
-                            <Text style={dropdownStyles.sendModeShortcut}>Enter</Text>
-                        </View>
-                    </Pressable>
-                    <Pressable
-                        style={dropdownStyles.sendModeItem}
-                        onPress={() => onSelect("steer")}
-                    >
-                        <Text style={dropdownStyles.sendModeIcon}>↑</Text>
-                        <View style={dropdownStyles.sendModeRight}>
-                            <Text style={dropdownStyles.sendModeText}>Steer with Message</Text>
-                            <Text style={dropdownStyles.sendModeShortcut}>⌥Enter</Text>
-                        </View>
-                    </Pressable>
-                </Pressable>
+        <View style={toolbarStyles.sendMenuPopover}>
+            <Pressable
+                style={toolbarStyles.sendModeItem}
+                onPress={() => onSelect("send")}
+            >
+                <Text style={toolbarStyles.sendModeIcon}>→</Text>
+                <Text style={toolbarStyles.sendModeText}>Stop and Send</Text>
             </Pressable>
-        </Modal>
+            <Pressable
+                style={toolbarStyles.sendModeItem}
+                onPress={() => onSelect("queue")}
+            >
+                <Text style={toolbarStyles.sendModeIcon}>＋</Text>
+                <View style={toolbarStyles.sendModeRight}>
+                    <Text style={toolbarStyles.sendModeText}>Add to Queue</Text>
+                    <Text style={toolbarStyles.sendModeShortcut}>Enter</Text>
+                </View>
+            </Pressable>
+            <Pressable
+                style={toolbarStyles.sendModeItem}
+                onPress={() => onSelect("steer")}
+            >
+                <Text style={toolbarStyles.sendModeIcon}>↑</Text>
+                <View style={toolbarStyles.sendModeRight}>
+                    <Text style={toolbarStyles.sendModeText}>Steer with Message</Text>
+                    <Text style={toolbarStyles.sendModeShortcut}>⌥Enter</Text>
+                </View>
+            </Pressable>
+        </View>
     );
 }
 
@@ -373,6 +410,8 @@ function AttachmentChip({
     image: ImageAttachment;
     onRemove: () => void;
 }) {
+    const attachStyles = useThemedStyles(createAttachmentStyles);
+
     return (
         <View style={attachStyles.chip}>
             <Pressable style={attachStyles.chipClose} onPress={onRemove} hitSlop={4}>
@@ -391,28 +430,24 @@ const agentModeConfig: Record<AgentMode, {
     pillLabel: string;
     desc: string;
     Icon: React.FC<{ size?: number; color?: string }>;
-    color: string;
 }> = {
     agent: {
         label: "Agent",
         pillLabel: "Agent",
         desc: "Use tools and make changes in the workspace.",
         Icon: CirclePlusIcon,
-        color: colors.copilotPurple,
     },
     plan: {
         label: "Plan",
         pillLabel: "Plan",
         desc: "Draft a plan first, then continue when it looks right.",
         Icon: MenuListIcon,
-        color: colors.warning,
     },
     ask: {
         label: "Ask",
         pillLabel: "Ask",
         desc: "Read-only analysis for questions and explanations.",
         Icon: HelpCircleIcon,
-        color: colors.textLink,
     },
 };
 
@@ -421,50 +456,43 @@ const permissionLevelConfig: Record<PermissionLevel, {
     pillLabel: string;
     desc: string;
     Icon: React.FC<{ size?: number; color?: string }>;
-    color: string;
 }> = {
     default: {
         label: "Default Approvals",
         pillLabel: "Default Approvals",
         desc: "Prompt when approval is needed. Safe reads can auto-approve.",
         Icon: ShieldIcon,
-        color: colors.textSecondary,
     },
     bypass: {
         label: "Bypass Approvals",
         pillLabel: "Bypass Approvals",
         desc: "Skip approval prompts but still allow follow-up questions.",
         Icon: ShieldCheckIcon,
-        color: colors.success,
     },
     autopilot: {
         label: "Autopilot (Preview)",
         pillLabel: "Autopilot",
         desc: "Auto-approve actions and continue until the task is done.",
         Icon: ZapIcon,
-        color: colors.accent,
     },
 };
 
 // --- Main ChatInput component ---
 
-// Model bağlam penceresi boyutunu insan okunabilir formata çevir.
+// Convert model context window size to a human-readable format.
 function formatCtxWindow(tokens: number): string {
     if (tokens >= 1_000_000) return `${(tokens / 1_000_000).toFixed(1)}M`;
     if (tokens >= 1_000) return `${Math.round(tokens / 1_000)}K`;
     return String(tokens);
 }
 
-// Statik slash komutları — VS Code Copilot chat palet komutlarıyla uyumlu.
-type SlashCommand = { command: string; description: string; category: string };
-
 const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
-    // Sohbet yönetimi
+    // Chat management
     { command: "/clear", description: "Start new chat, archive current", category: "chat" },
     { command: "/compact", description: "Compact conversation to save context", category: "chat" },
     { command: "/fork", description: "Fork conversation into a new session", category: "chat" },
     { command: "/rename", description: "Rename this chat", category: "chat" },
-    // Kod eylemleri
+    // Code actions
     { command: "/explain", description: "Explain selected code", category: "code" },
     { command: "/fix", description: "Suggest a fix for the current issue", category: "code" },
     { command: "/doc", description: "Add documentation to code", category: "code" },
@@ -472,7 +500,7 @@ const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     { command: "/tests", description: "Generate tests", category: "code" },
     { command: "/newNotebook", description: "Create a new notebook", category: "code" },
     { command: "/setupTests", description: "Set up the test framework", category: "code" },
-    // Copilot yapılandırma
+    // Copilot configuration
     { command: "/agents", description: "Configure custom agents", category: "config" },
     { command: "/debug", description: "Show chat debug view", category: "config" },
     { command: "/hooks", description: "Configure hooks", category: "config" },
@@ -482,23 +510,18 @@ const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     { command: "/prompts", description: "Configure prompt files", category: "config" },
     { command: "/skills", description: "Configure skills", category: "config" },
     { command: "/tools", description: "Configure tools", category: "config" },
-    // Oturum izinleri
+    // Session permissions
     { command: "/autoApprove", description: "Set permissions to bypass approvals", category: "session" },
     { command: "/autopilot", description: "Set permissions to autopilot mode", category: "session" },
     { command: "/yolo", description: "Set permissions to bypass approvals", category: "session" },
     { command: "/disableAutoApprove", description: "Set permissions back to default", category: "session" },
     { command: "/disableYolo", description: "Set permissions back to default", category: "session" },
     { command: "/exitAutopilot", description: "Set permissions back to default", category: "session" },
-    // Yardım
+    // Help
     { command: "/help", description: "Show help and available commands", category: "help" },
 ];
 
-type AutocompleteToken =
-    | { kind: "file"; query: string; start: number; end: number }
-    | { kind: "slash"; query: string; start: number; end: number }
-    | null;
-
-// İmleç konumundan geriye doğru @file veya /command tokeni tespit et.
+// Detect @file or /command token by scanning backward from cursor position.
 function detectAutocompleteToken(text: string, cursor: number): AutocompleteToken {
     if (cursor <= 0) return null;
     let i = cursor - 1;
@@ -507,7 +530,7 @@ function detectAutocompleteToken(text: string, cursor: number): AutocompleteToke
         if (ch === undefined) break;
         if (ch === " " || ch === "\n" || ch === "\t") return null;
         if (ch === "@") {
-            // @ başlangıcı yalnızca satır/ kelime başında kabul et.
+            // Accept @ start only at line/word boundaries.
             const prev = i > 0 ? text[i - 1] : undefined;
             if (prev !== undefined && prev !== " " && prev !== "\n" && prev !== "\t") return null;
             return { kind: "file", query: text.slice(i + 1, cursor), start: i, end: cursor };
@@ -522,7 +545,7 @@ function detectAutocompleteToken(text: string, cursor: number): AutocompleteToke
     return null;
 }
 
-// Workspace ağacından tüm dosya yollarını çıkar.
+// Collect all file paths from the workspace tree.
 function collectFilePaths(node: WorkspaceTreeNode | null, out: Array<string>): void {
     if (node === null) return;
     if (node.type === "file") {
@@ -558,16 +581,23 @@ export function ChatInput({
     onEditQueuedDraft,
     onRemoveQueuedDraft,
     onSteerQueuedDraft,
-}: Props) {
+}: ChatInputProps) {
+    const theme = useAppTheme();
+    const styles = useThemedStyles(createStyles);
+    const toolbarStyles = useThemedStyles(createToolbarStyles);
+    const attachStyles = useThemedStyles(createAttachmentStyles);
+    const autocompleteStyles = useThemedStyles(createAutocompleteStyles);
+    const queuedDraftStyles = useThemedStyles(createQueuedDraftStyles);
+    const contextStyles = useThemedStyles(createContextStyles);
     const [input, setInput] = useState("");
     const [isFocused, setIsFocused] = useState(false);
     const [images, setImages] = useState<Array<ImageAttachment>>([]);
     const [showModelPicker, setShowModelPicker] = useState(false);
-    const [showPermissionPicker, setShowPermissionPicker] = useState(false);
     const [showEffortPicker, setShowEffortPicker] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
     const [showContextWindowSheet, setShowContextWindowSheet] = useState(false);
     const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+    const lastSendSignatureRef = React.useRef<{ signature: string; sentAt: number } | null>(null);
     const workspaceTree = useWorkspaceStore((s) => s.tree);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const connectionState = useConnectionStore((s) => s.state);
@@ -577,6 +607,7 @@ export function ChatInput({
     const setPermissionLevel = useSessionStore((s) => s.setPermissionLevel);
 
     const models = useSessionStore((s) => s.models);
+    const sessions = useSessionStore((s) => s.sessions);
     const selectedModel = useSessionStore((s) => s.selectedModel);
     const setSelectedModel = useSessionStore((s) => s.setSelectedModel);
     const reasoningEffort = useSessionStore((s) => s.reasoningEffort);
@@ -592,6 +623,25 @@ export function ChatInput({
         (mode: SendMode) => {
             const trimmed = input.trim();
             if (trimmed.length === 0 || disabled) return;
+
+            const attachmentSignature = images.map((image) => (
+                `${image.fileName}:${image.base64Data.length}:${image.width}x${image.height}`
+            )).join("|");
+            const sendSignature = `${mode}::${trimmed}::${attachmentSignature}`;
+            const now = Date.now();
+            const previousSend = lastSendSignatureRef.current;
+            if (
+                previousSend !== null
+                && previousSend.signature === sendSignature
+                && now - previousSend.sentAt < 1200
+            ) {
+                return;
+            }
+
+            lastSendSignatureRef.current = {
+                signature: sendSignature,
+                sentAt: now,
+            };
             const currentImages = [...images];
             setInput("");
             setImages([]);
@@ -626,7 +676,7 @@ export function ChatInput({
         [input, selection.start]
     );
 
-    // @files için workspace tree'den dosya yolu listesi.
+    // File path list from workspace tree for @files autocomplete.
     const filePaths = useMemo<ReadonlyArray<string>>(() => {
         const out: Array<string> = [];
         collectFilePaths(workspaceTree, out);
@@ -646,7 +696,7 @@ export function ChatInput({
         void requestWorkspaceTree(activeSessionId, undefined, 5);
     }, [activeToken?.kind, activeSessionId, connectionState, workspaceTree, filePaths.length]);
 
-    // Token tipine göre filtrelenmiş öneriler (slash + skill komutları dahil).
+    // Suggestions filtered by token type (including slash + skill commands).
     const suggestions = useMemo<ReadonlyArray<{ label: string; value: string; hint?: string }>>(() => {
         if (activeToken === null) return [];
         const query = activeToken.query.toLowerCase();
@@ -656,7 +706,7 @@ export function ChatInput({
                 .slice(0, 8)
                 .map((p) => ({ label: p, value: `@${p} ` }));
         }
-        // Slash: önce statik komutlar, sonra skill türetilmiş komutlar.
+        // Slash mode: static commands first, then skill-derived commands.
         const staticMatches = SLASH_COMMANDS
             .filter((c) => c.command.slice(1).toLowerCase().startsWith(query))
             .map((c) => ({ label: c.command, value: `${c.command} `, hint: c.description }));
@@ -672,7 +722,7 @@ export function ChatInput({
         return [...staticMatches, ...skillMatches].slice(0, 10);
     }, [activeToken, filePaths, skills]);
 
-    // Seçilen öneriyi input'a uygula: tokeni değiştirip imleci sona taşı.
+    // Apply selected suggestion: replace token and move cursor to end.
     const applySuggestion = useCallback((value: string) => {
         if (activeToken === null) return;
         const before = input.slice(0, activeToken.start);
@@ -711,7 +761,7 @@ export function ChatInput({
 
             const newImages: Array<ImageAttachment> = result.assets.flatMap((asset) => {
                 if (asset.base64 === undefined || asset.base64 === null) {
-                    console.warn("[ChatInput] Seçilen görsel base64 verisi içermediği için atlandı");
+                    console.warn("[ChatInput] Skipped selected image because base64 data was missing");
                     return [];
                 }
 
@@ -786,6 +836,12 @@ export function ChatInput({
         [handleSend]
     );
 
+    useEffect(() => {
+        if (!isTyping) {
+            setShowSendMenu(false);
+        }
+    }, [isTyping]);
+
     const canSend = input.trim().length > 0 && !disabled;
 
     // Model display label — truncate to keep pill compact
@@ -796,6 +852,25 @@ export function ChatInput({
     const effortSuffix = reasoningEffort !== null && effortInfo.supported
         ? ` · ${effortLabels[reasoningEffort]?.label ?? reasoningEffort}`
         : "";
+    const resolvedAutoModelLabel = useMemo(() => {
+        const normalizedSelectedModel = selectedModel.trim().toLowerCase();
+        const isAutoSelected = normalizedSelectedModel === "auto"
+            || currentModel?.id.trim().toLowerCase() === "auto"
+            || currentModel?.name.trim().toLowerCase() === "auto";
+
+        if (!isAutoSelected || isTyping || activeSessionId === null) {
+            return null;
+        }
+
+        const activeSession = sessions.find((session) => session.id === activeSessionId);
+        if (activeSession === undefined || activeSession.model === MODEL_UNKNOWN) {
+            return null;
+        }
+
+        const resolvedModel = models.find((model) => model.id === activeSession.model);
+        const resolvedModelName = resolvedModel?.name ?? activeSession.model;
+        return `Used ${resolvedModelName}`;
+    }, [activeSessionId, currentModel?.id, currentModel?.name, isTyping, models, selectedModel, sessions]);
 
     const supportsVision = currentModel?.supportsVision === true;
     // Live context usage takes priority over static model limit.
@@ -837,6 +912,11 @@ export function ChatInput({
         return `${((value / contextLimit) * 100).toFixed(1)}%`;
     };
 
+    const contextMeterPercent = contextPercent ?? 0;
+    const contextMeterRadius = 6.5;
+    const contextMeterCircumference = 2 * Math.PI * contextMeterRadius;
+    const contextMeterStroke = (contextMeterPercent / 100) * contextMeterCircumference;
+
     return (
         <View style={styles.container}>
             {queuedDrafts.length > 0 && (
@@ -846,7 +926,7 @@ export function ChatInput({
                             <Pressable
                                 style={queuedDraftStyles.body}
                                 onPress={() => onEditQueuedDraft(draft.id)}
-                                accessibilityLabel="Kuyruktaki mesajı düzenle"
+                                accessibilityLabel="Edit queued message"
                             >
                                 <View style={queuedDraftStyles.badge}>
                                     <Text style={queuedDraftStyles.badgeText}>Queued</Text>
@@ -866,16 +946,16 @@ export function ChatInput({
                             <Pressable
                                 style={queuedDraftStyles.actionButton}
                                 onPress={() => onSteerQueuedDraft(draft.id)}
-                                accessibilityLabel="Kuyruktaki mesajı steer olarak gönder"
+                                accessibilityLabel="Send queued message as steer"
                             >
-                                <ArrowUpIcon size={14} color={colors.textPrimary} />
+                                <ArrowUpIcon size={14} color={theme.colors.textPrimary} />
                             </Pressable>
                             <Pressable
                                 style={queuedDraftStyles.actionButton}
                                 onPress={() => onRemoveQueuedDraft(draft.id)}
-                                accessibilityLabel="Kuyruktaki mesajı kaldır"
+                                accessibilityLabel="Remove queued message"
                             >
-                                <CloseIcon size={14} color={colors.textTertiary} />
+                                <CloseIcon size={14} color={theme.colors.textTertiary} />
                             </Pressable>
                         </View>
                     ))}
@@ -903,13 +983,13 @@ export function ChatInput({
             {/* Input card — text area + toolbar in one unified rounded container */}
             {suggestions.length > 0 && (
                 <View style={autocompleteStyles.popover}>
-                    {/* Slash modunda model ve bağlam penceresi bilgisi */}
+                    {/* Model and context window info in slash mode */}
                     {activeToken?.kind === "slash" && currentModel !== undefined && (
                         <View style={autocompleteStyles.ctxHeader}>
                             <ProviderIcon
                                 provider={detectProvider(currentModel.id)}
                                 size={11}
-                                color={colors.textTertiary}
+                                color={theme.colors.textTertiary}
                             />
                             <Text style={autocompleteStyles.ctxModelName} numberOfLines={1}>
                                 {currentModel.name}
@@ -949,6 +1029,13 @@ export function ChatInput({
                 styles.inputCard,
                 isFocused && styles.inputCardFocused,
             ]}>
+                {showSendMenu && canSend && (
+                    <Pressable
+                        style={toolbarStyles.sendMenuBackdrop}
+                        onPress={() => setShowSendMenu(false)}
+                        accessibilityLabel="Close send options"
+                    />
+                )}
                 <TextInput
                     style={styles.textInput}
                     value={input}
@@ -956,7 +1043,7 @@ export function ChatInput({
                     selection={selection}
                     onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
                     placeholder="Message, @files, /commands"
-                    placeholderTextColor={colors.textTertiary}
+                    placeholderTextColor={theme.colors.textTertiary}
                     multiline
                     maxLength={10000}
                     returnKeyType="send"
@@ -965,22 +1052,22 @@ export function ChatInput({
                     onBlur={() => setIsFocused(false)}
                     blurOnSubmit={false}
                     editable={!disabled}
-                    accessibilityLabel="Mesaj yaz"
+                    accessibilityLabel="Write message"
                 />
 
                 {/* Thin separator */}
                 <View style={styles.inputSeparator} />
 
-                {/* Single toolbar row: attach | model | sliders | spacer | permission-icon | mic | send */}
+                {/* Single toolbar row: attach | model | session-controls | spacer | context-meter | send */}
                 <View style={toolbarStyles.row}>
                     <Pressable
                         style={toolbarStyles.toolBtn}
                         onPress={handleAttachImage}
                         disabled={disabled}
                         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
-                        accessibilityLabel="Görsel ekle"
+                        accessibilityLabel="Attach image"
                     >
-                        <PaperclipIcon size={15} color={colors.textSecondary} />
+                        <CirclePlusIcon size={16} color={theme.colors.textSecondary} />
                     </Pressable>
 
                     {/* Model selector pill */}
@@ -989,13 +1076,17 @@ export function ChatInput({
                         onPress={() => setShowModelPicker(true)}
                         disabled={disabled}
                         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                        accessibilityLabel="Model seç"
+                        accessibilityLabel="Select model"
                     >
-                        <ProviderIcon provider={detectProvider(currentModel?.id ?? selectedModel)} size={13} color={colors.textSecondary} />
+                        <ProviderIcon
+                            provider={detectProvider(currentModel?.id ?? selectedModel)}
+                            size={13}
+                            color={theme.colors.textSecondary}
+                        />
                         <Text style={toolbarStyles.modelText} numberOfLines={1}>
                             {modelDisplayName}{effortSuffix}
                         </Text>
-                        <ChevronDownIcon size={10} color={colors.textTertiary} />
+                        <ChevronDownIcon size={10} color={theme.colors.textTertiary} />
                     </Pressable>
 
                     <Pressable
@@ -1005,85 +1096,99 @@ export function ChatInput({
                         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                         accessibilityLabel="Session controls"
                     >
-                        <SlidersIcon size={15} color={colors.textSecondary} />
+                        <SlidersIcon size={15} color={theme.colors.textSecondary} />
                     </Pressable>
 
                     <View style={toolbarStyles.spacer} />
 
-                    {/* Permission icon only */}
-                    <Pressable
-                        style={toolbarStyles.toolBtn}
-                        onPress={() => setShowPermissionPicker(true)}
-                        disabled={disabled}
-                        hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}
-                        accessibilityLabel="İzin seviyesi"
-                    >
-                        {(() => {
-                            const cfg = permissionLevelConfig[permissionLevel];
-                            return <cfg.Icon size={16} color={colors.textSecondary} />;
-                        })()}
-                    </Pressable>
+                    {(contextUsageLabel !== null || contextWindowLabel !== null) && (
+                        <Pressable
+                            style={toolbarStyles.contextMeterBtn}
+                            onPress={() => setShowContextWindowSheet(true)}
+                            accessibilityLabel="Show context window details"
+                        >
+                            <Svg width={18} height={18} viewBox="0 0 18 18">
+                                <Circle
+                                    cx={9}
+                                    cy={9}
+                                    r={contextMeterRadius}
+                                    stroke={theme.colors.border}
+                                    strokeWidth={1.8}
+                                    fill="none"
+                                />
+                                <Circle
+                                    cx={9}
+                                    cy={9}
+                                    r={contextMeterRadius}
+                                    stroke={theme.colors.textPrimary}
+                                    strokeWidth={1.8}
+                                    fill="none"
+                                    strokeDasharray={`${contextMeterStroke} ${contextMeterCircumference}`}
+                                    transform="rotate(-90 9 9)"
+                                    strokeLinecap="round"
+                                />
+                            </Svg>
+                        </Pressable>
+                    )}
 
                     {/* Send / Abort / Queue */}
-                    {isTyping && canSend ? (
-                        <View style={toolbarStyles.sendGroup}>
+                    {isTyping ? (
+                        <View style={toolbarStyles.sendControlWrap}>
                             <Pressable
-                                style={styles.sendButton}
-                                onPress={handleDefaultSend}
+                                style={styles.abortButton}
+                                onPress={onAbort}
                                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                accessibilityLabel="Mesaj gönder"
+                                accessibilityLabel="Stop request"
                             >
-                                <ArrowUpIcon size={16} color={colors.textOnAccent} />
+                                <View style={styles.abortIcon} />
                             </Pressable>
-                            <Pressable
-                                style={toolbarStyles.sendMenuButton}
-                                onPress={() => setShowSendMenu(true)}
-                                hitSlop={4}
-                            >
-                                <ChevronDownIcon size={12} color={colors.textPrimary} />
-                            </Pressable>
+
+                            {canSend ? (
+                                <View style={toolbarStyles.sendGroup}>
+                                    <Pressable
+                                        style={styles.sendButton}
+                                        onPress={handleDefaultSend}
+                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                                        accessibilityLabel="Send message"
+                                    >
+                                        <ArrowUpIcon size={16} color={theme.colors.textOnAccent} />
+                                    </Pressable>
+                                    <Pressable
+                                        style={toolbarStyles.sendMenuButton}
+                                        onPress={() => setShowSendMenu((prev) => !prev)}
+                                        hitSlop={4}
+                                        accessibilityLabel="Send options"
+                                    >
+                                        <ChevronDownIcon size={12} color={theme.colors.textPrimary} />
+                                    </Pressable>
+                                </View>
+                            ) : (
+                                <View style={[styles.sendButton, styles.sendButtonDisabled]}>
+                                    <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
+                                </View>
+                            )}
+
+                            <SendModeMenu
+                                visible={showSendMenu && canSend}
+                                onSelect={handleSendModeSelect}
+                            />
                         </View>
-                    ) : isTyping ? (
-                        <Pressable
-                            style={styles.abortButton}
-                            onPress={onAbort}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            accessibilityLabel="İsteği durdur"
-                        >
-                            <View style={styles.abortIcon} />
-                        </Pressable>
                     ) : canSend ? (
                         <Pressable
                             style={styles.sendButton}
                             onPress={() => handleSend("send")}
                             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            accessibilityLabel="Mesaj gönder"
+                            accessibilityLabel="Send message"
                         >
-                            <ArrowUpIcon size={16} color={colors.textOnAccent} />
+                            <ArrowUpIcon size={16} color={theme.colors.textOnAccent} />
                         </Pressable>
                     ) : (
                         <View style={[styles.sendButton, styles.sendButtonDisabled]}>
-                            <ArrowUpIcon size={16} color={colors.textTertiary} />
+                            <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
                         </View>
                     )}
                 </View>
             </View>
-
-            {(contextUsageLabel !== null || contextWindowLabel !== null) && (
-                <View style={styles.contextFooterRow}>
-                    <Pressable
-                        style={styles.contextPill}
-                        onPress={() => setShowContextWindowSheet(true)}
-                        accessibilityLabel="Context window ayrıntılarını göster"
-                    >
-                        <Text style={styles.contextPillText}>
-                            {contextUsageLabel !== null
-                                ? `${contextUsageLabel.primary} · ${contextUsageLabel.percent}%`
-                                : `${contextWindowLabel} ctx`}
-                        </Text>
-                    </Pressable>
-                </View>
-            )}
 
             {/* Model picker modal */}
             <DropdownModal
@@ -1098,43 +1203,6 @@ export function ChatInput({
                 />
             </DropdownModal>
 
-            {/* Permission level picker */}
-            <DropdownModal
-                visible={showPermissionPicker}
-                onClose={() => setShowPermissionPicker(false)}
-                title="Permission Level"
-            >
-                <View style={dropdownStyles.effortList}>
-                    {(["default", "bypass", "autopilot"] as const).map((level) => {
-                        const cfg = permissionLevelConfig[level];
-                        const isSelected = permissionLevel === level;
-                        return (
-                            <Pressable
-                                key={level}
-                                style={[dropdownStyles.effortItem, isSelected && dropdownStyles.effortItemSelected]}
-                                onPress={() => { void handlePermissionLevelSelect(level); }}
-                            >
-                                <View style={dropdownStyles.effortItemLeft}>
-                                    <View style={dropdownStyles.checkmarkSlot}>
-                                        {isSelected && <CheckIcon size={13} color={cfg.color} />}
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text style={[
-                                            dropdownStyles.effortLabel,
-                                            isSelected && { color: cfg.color, fontWeight: "700" },
-                                        ]}>
-                                            {cfg.label}
-                                        </Text>
-                                        <Text style={dropdownStyles.effortDesc}>{cfg.desc}</Text>
-                                    </View>
-                                </View>
-                                <cfg.Icon size={18} color={isSelected ? cfg.color : colors.textTertiary} />
-                            </Pressable>
-                        );
-                    })}
-                </View>
-            </DropdownModal>
-
             {/* Session controls picker */}
             <DropdownModal
                 visible={showEffortPicker}
@@ -1145,24 +1213,19 @@ export function ChatInput({
                     agentMode={agentMode}
                     onSelectAgentMode={(mode) => {
                         void handleAgentModeSelect(mode);
-                        setShowEffortPicker(false);
+                    }}
+                    permissionLevel={permissionLevel}
+                    onSelectPermissionLevel={(level) => {
+                        void handlePermissionLevelSelect(level);
                     }}
                     options={effortInfo.options as ReasoningEffortLevel[]}
                     current={reasoningEffort}
                     defaultEffort={currentModel?.defaultReasoningEffort}
                     onSelect={(level) => {
                         setReasoningEffort(level);
-                        setShowEffortPicker(false);
                     }}
                 />
             </DropdownModal>
-
-            {/* Send mode menu */}
-            <SendModeMenu
-                visible={showSendMenu}
-                onClose={() => setShowSendMenu(false)}
-                onSelect={handleSendModeSelect}
-            />
 
             <DropdownModal
                 visible={showContextWindowSheet}
@@ -1226,8 +1289,8 @@ export function ChatInput({
                         style={contextStyles.compactButton}
                         onPress={() => {
                             setShowContextWindowSheet(false);
-                            // /compact'i doğrudan gönder: kullanıcı input'a bir şey yazmak zorunda kalmasın.
-                            // SDK slash command'i işleyince "Compacting conversation…" çıktısı akışa düşer.
+                            // Send /compact directly so the user does not need to type it manually.
+                            // Once processed by the SDK slash command handler, the stream shows "Compacting conversation…".
                             if (!disabled) {
                                 onSend("/compact", [], "send");
                             }
@@ -1238,587 +1301,9 @@ export function ChatInput({
                     </Pressable>
                 </View>
             </DropdownModal>
+            {resolvedAutoModelLabel !== null && (
+                <Text style={styles.resolvedModelLabel}>{resolvedAutoModelLabel}</Text>
+            )}
         </View>
     );
 }
-
-// --- Açılır menü stilleri ---
-
-const dropdownStyles = StyleSheet.create({
-    overlay: {
-        flex: 1,
-        backgroundColor: colors.overlay,
-        justifyContent: "flex-end",
-    },
-    container: {
-        backgroundColor: colors.bg,
-        borderRadius: borderRadius.xl,
-        borderWidth: 1,
-        borderColor: colors.border,
-        maxHeight: "82%",
-        marginHorizontal: spacing.md,
-        marginBottom: Platform.OS === "ios" ? 28 : 16,
-        paddingBottom: 12,
-        overflow: "hidden",
-    },
-    scroll: {
-        maxHeight: 600,
-    },
-    scrollContent: {
-        paddingBottom: spacing.sm,
-    },
-    header: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 14,
-        borderBottomWidth: 1,
-        borderBottomColor: colors.border,
-    },
-    title: {
-        color: colors.textPrimary,
-        fontSize: fs.base,
-        fontWeight: "600",
-    },
-    closeIcon: {
-        color: colors.textTertiary,
-        fontSize: fs.lg,
-    },
-    searchContainer: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-    },
-    searchInput: {
-        backgroundColor: colors.bgSecondary,
-        borderRadius: borderRadius.md,
-        borderWidth: 1,
-        borderColor: colors.border,
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
-        fontSize: fs.md,
-        color: colors.textPrimary,
-    },
-    list: {
-        maxHeight: 300,
-    },
-    item: {
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: spacing.md,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: colors.border,
-    },
-    itemSelected: {
-        backgroundColor: colors.accentMuted,
-    },
-    itemDisabled: {
-        opacity: 0.4,
-    },
-    itemLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        flex: 1,
-    },
-    checkmark: {
-        color: colors.accent,
-        fontSize: fs.base,
-        fontWeight: "700",
-        marginRight: spacing.sm,
-        width: 18,
-    },
-    itemText: {
-        color: colors.textPrimary,
-        fontSize: fs.base,
-    },
-    itemTextSelected: {
-        color: colors.textOnAccent,
-        fontWeight: "600",
-    },
-    itemTextDisabled: {
-        color: colors.textTertiary,
-    },
-    badgeText: {
-        color: colors.textTertiary,
-        fontSize: fs.sm,
-        marginLeft: spacing.sm,
-    },
-    sectionLabel: {
-        color: colors.textTertiary,
-        fontSize: fs.sm,
-        fontWeight: "600",
-        paddingHorizontal: spacing.lg,
-        paddingTop: spacing.md,
-        paddingBottom: 6,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-    },
-    sectionDivider: {
-        height: StyleSheet.hairlineWidth,
-        backgroundColor: colors.border,
-        marginTop: spacing.sm,
-        marginHorizontal: spacing.lg,
-    },
-    effortList: {
-        paddingBottom: spacing.sm,
-    },
-    effortItem: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: spacing.md,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: colors.border,
-    },
-    effortItemSelected: {
-        backgroundColor: colors.accentMuted,
-    },
-    effortItemLeft: {
-        flexDirection: "row",
-        alignItems: "flex-start",
-        flex: 1,
-    },
-    checkmarkSlot: {
-        width: 22,
-        alignItems: "center",
-        marginTop: 2,
-    },
-    effortLabel: {
-        color: colors.textPrimary,
-        fontSize: fs.base,
-        fontWeight: "500",
-    },
-    effortLabelSelected: {
-        color: colors.textOnAccent,
-        fontWeight: "600",
-    },
-    effortDesc: {
-        color: colors.textTertiary,
-        fontSize: fs.sm,
-        marginTop: 2,
-    },
-    sendModeContainer: {
-        maxHeight: undefined,
-        borderTopLeftRadius: borderRadius.lg,
-        borderTopRightRadius: borderRadius.lg,
-    },
-    sendModeItem: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: spacing.lg,
-        paddingVertical: 14,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: colors.border,
-    },
-    sendModeIcon: {
-        color: colors.textPrimary,
-        fontSize: fs.lg,
-        width: 28,
-    },
-    sendModeRight: {
-        flex: 1,
-        flexDirection: "row",
-        justifyContent: "space-between",
-        alignItems: "center",
-    },
-    sendModeText: {
-        color: colors.textPrimary,
-        fontSize: fs.base,
-    },
-    sendModeShortcut: {
-        color: colors.textTertiary,
-        fontSize: fs.sm,
-    },
-});
-
-// --- Ek dosya stilleri ---
-
-const attachStyles = StyleSheet.create({
-    row: {
-        maxHeight: 72,
-        marginBottom: 6,
-    },
-    rowContent: {
-        paddingHorizontal: 4,
-        gap: spacing.sm,
-    },
-    chip: {
-        backgroundColor: colors.bgSecondary,
-        borderRadius: borderRadius.md,
-        borderWidth: 1,
-        borderColor: colors.border,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 6,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-        maxWidth: 200,
-    },
-    chipClose: {
-        width: 16,
-        height: 16,
-        borderRadius: 8,
-        backgroundColor: colors.bgElevated,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    chipCloseText: {
-        color: colors.textPrimary,
-        fontSize: 9,
-        fontWeight: "700",
-    },
-    chipImage: {
-        width: 32,
-        height: 32,
-        borderRadius: 4,
-    },
-    chipName: {
-        color: colors.textPrimary,
-        fontSize: fs.xs,
-        maxWidth: 120,
-    },
-});
-
-// --- Araç çubuğu stilleri ---
-
-const toolbarStyles = StyleSheet.create({
-    row: {
-        flexDirection: "row",
-        alignItems: "center",
-        minHeight: 36,
-        gap: 4,
-        overflow: "hidden",
-    },
-    toolBtn: {
-        width: 32,
-        height: 32,
-        borderRadius: borderRadius.md,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    toolBtnDimmed: {
-        opacity: 0.3,
-    },
-    toolBtnActive: {
-        backgroundColor: colors.accentMuted,
-    },
-    modelPill: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 4,
-        borderRadius: borderRadius.full,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: "transparent",
-        gap: 4,
-        flexShrink: 1,
-        minWidth: 0,
-    },
-    modelText: {
-        color: colors.textSecondary,
-        fontSize: fs.sm,
-        fontWeight: "500",
-        flexShrink: 1,
-    },
-    spacer: {
-        flex: 1,
-    },
-    sendGroup: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 2,
-    },
-    sendMenuButton: {
-        width: 22,
-        height: 32,
-        justifyContent: "center",
-        alignItems: "center",
-        borderRadius: borderRadius.sm,
-    },
-});
-
-// --- Ana giriş stilleri ---
-
-const styles = StyleSheet.create({
-    container: {
-        paddingHorizontal: spacing.md,
-        paddingTop: spacing.sm,
-        paddingBottom: Platform.OS === "ios" ? 12 : 12,
-        backgroundColor: colors.bg,
-    },
-    inputCard: {
-        backgroundColor: colors.bgSecondary,
-        borderRadius: borderRadius.lg,
-        borderWidth: 1,
-        borderColor: colors.border,
-        paddingHorizontal: spacing.md,
-        paddingTop: spacing.sm,
-        paddingBottom: spacing.xs,
-    },
-    inputCardFocused: {
-        borderColor: colors.accent,
-    },
-    contextFooterRow: {
-        flexDirection: "row",
-        justifyContent: "flex-end",
-        marginTop: 8,
-    },
-    contextPill: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: 6,
-        borderRadius: borderRadius.full,
-        borderWidth: 1,
-        borderColor: colors.border,
-        backgroundColor: colors.bgElevated,
-    },
-    contextPillText: {
-        color: colors.textSecondary,
-        fontSize: fs.xs,
-        fontWeight: "600",
-    },
-    inputSeparator: {
-        height: StyleSheet.hairlineWidth,
-        backgroundColor: colors.border,
-        marginHorizontal: -spacing.md,
-        marginTop: spacing.xs,
-        marginBottom: 0,
-    },
-    textInput: {
-        fontSize: fs.base,
-        color: colors.textPrimary,
-        maxHeight: 120,
-        minHeight: 36,
-        paddingVertical: Platform.OS === "ios" ? 6 : 4,
-        textAlignVertical: "top",
-    },
-    sendButton: {
-        width: 30,
-        height: 30,
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.accent,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    sendButtonDisabled: {
-        backgroundColor: colors.bgElevated,
-    },
-    abortButton: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-        backgroundColor: colors.error,
-        justifyContent: "center",
-        alignItems: "center",
-    },
-    abortIcon: {
-        width: 10,
-        height: 10,
-        borderRadius: 2,
-        backgroundColor: colors.textOnAccent,
-    },
-});
-
-const contextStyles = StyleSheet.create({
-    container: {
-        gap: 10,
-        paddingHorizontal: spacing.md,
-        paddingTop: spacing.sm,
-    },
-    heroCard: {
-        gap: 6,
-        paddingVertical: spacing.sm,
-        paddingHorizontal: spacing.sm,
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.bgSecondary,
-    },
-    eyebrow: {
-        color: colors.textTertiary,
-        fontSize: fs.xs,
-        fontWeight: "600",
-        textTransform: "uppercase",
-        letterSpacing: 0.4,
-    },
-    summaryRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-    },
-    summaryText: {
-        color: colors.textPrimary,
-        fontSize: fs.base,
-        fontWeight: "600",
-    },
-    summaryPercent: {
-        color: colors.textSecondary,
-        fontSize: fs.sm,
-        fontWeight: "600",
-    },
-    progressTrack: {
-        height: 5,
-        borderRadius: borderRadius.full,
-        backgroundColor: colors.bgTertiary,
-        overflow: "hidden",
-    },
-    progressFill: {
-        height: "100%",
-        borderRadius: borderRadius.full,
-        backgroundColor: colors.textSecondary,
-    },
-    reservePill: {
-        alignSelf: "flex-start",
-        borderRadius: borderRadius.full,
-        backgroundColor: colors.bgTertiary,
-        paddingHorizontal: spacing.sm,
-        paddingVertical: 3,
-    },
-    reservePillText: {
-        color: colors.textSecondary,
-        fontSize: fs.xs,
-    },
-    sectionCard: {
-        gap: 6,
-        paddingVertical: spacing.sm,
-        paddingHorizontal: spacing.sm,
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.bgSecondary,
-    },
-    sectionTitle: {
-        color: colors.textPrimary,
-        fontSize: fs.sm,
-        fontWeight: "600",
-    },
-    metricRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-    },
-    metricLabel: {
-        color: colors.textSecondary,
-        fontSize: fs.sm,
-    },
-    metricValue: {
-        color: colors.textTertiary,
-        fontSize: fs.sm,
-        fontWeight: "600",
-    },
-    compactButton: {
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.bgSecondary,
-        paddingVertical: 9,
-        alignItems: "center",
-    },
-    compactButtonText: {
-        color: colors.textPrimary,
-        fontSize: fs.sm,
-        fontWeight: "600",
-    },
-});
-
-const autocompleteStyles = StyleSheet.create({
-    popover: {
-        backgroundColor: colors.bgElevated,
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: borderRadius.md,
-        marginBottom: 6,
-        overflow: "hidden",
-        maxHeight: 220,
-    },
-    list: {
-        flexShrink: 1,
-    },
-    ctxHeader: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 5,
-        paddingHorizontal: spacing.md,
-        paddingVertical: 7,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: colors.border,
-    },
-    ctxModelName: {
-        fontSize: fs.xs,
-        color: colors.textTertiary,
-        fontWeight: "500",
-        flexShrink: 1,
-    },
-    ctxSize: {
-        fontSize: fs.xs,
-        color: colors.textTertiary,
-    },
-    item: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: 10,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: colors.border,
-    },
-    itemPressed: {
-        backgroundColor: colors.bgOverlay,
-    },
-    label: {
-        fontSize: fs.sm,
-        color: colors.textPrimary,
-        fontWeight: "500",
-    },
-    hint: {
-        fontSize: fs.xs,
-        color: colors.textTertiary,
-        marginTop: 2,
-    },
-});
-
-const queuedDraftStyles = StyleSheet.create({
-    container: {
-        gap: 6,
-        marginBottom: 8,
-    },
-    item: {
-        flexDirection: "row",
-        alignItems: "center",
-        borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.bgSecondary,
-        paddingLeft: spacing.sm,
-        paddingRight: 6,
-        paddingVertical: 6,
-        gap: 6,
-    },
-    body: {
-        flex: 1,
-        minWidth: 0,
-    },
-    badge: {
-        alignSelf: "flex-start",
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: borderRadius.full,
-        backgroundColor: colors.accentMuted,
-        marginBottom: 4,
-    },
-    badgeText: {
-        color: colors.accent,
-        fontSize: fs.xs,
-        fontWeight: "700",
-    },
-    content: {
-        color: colors.textPrimary,
-        fontSize: fs.sm,
-        lineHeight: 18,
-    },
-    meta: {
-        color: colors.textTertiary,
-        fontSize: fs.xs,
-        marginTop: 4,
-    },
-    actionButton: {
-        width: 28,
-        height: 28,
-        borderRadius: borderRadius.sm,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-});

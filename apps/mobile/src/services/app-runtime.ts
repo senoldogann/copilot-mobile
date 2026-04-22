@@ -2,8 +2,10 @@ import { AppState } from "react-native";
 import type { AppStateStatus } from "react-native";
 import {
     listSessions,
+    reportNotificationPresence,
     requestCapabilities,
     resumeSession,
+    syncRemoteNotificationRegistration,
     tryResumeFromStoredCredentials,
 } from "./bridge";
 import { loadActiveSessionId, loadSessionPreferences } from "./credentials";
@@ -16,10 +18,22 @@ import {
 import { useConnectionStore } from "../stores/connection-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useSessionStore } from "../stores/session-store";
+import { useWorkspaceDirectoryStore } from "../stores/workspace-directory-store";
+import { getAppVisibilityState, setAppVisibilityState } from "./app-visibility";
 import { armBackgroundCompletion, clearBackgroundCompletion } from "./background-completion";
 
-let currentAppState: AppStateStatus = AppState.currentState;
+let currentAppState: AppStateStatus = getAppVisibilityState();
 let runtimeInitialized = false;
+let runtimeBootstrapId = 0;
+
+function createRuntimeBootstrapId(): number {
+    runtimeBootstrapId += 1;
+    return runtimeBootstrapId;
+}
+
+function isRuntimeBootstrapCurrent(bootstrapId: number): boolean {
+    return runtimeInitialized && bootstrapId === runtimeBootstrapId;
+}
 
 function openSessionFromNotification(sessionId: string): void {
     const sessionStore = useSessionStore.getState();
@@ -48,6 +62,15 @@ function syncOnForeground(): void {
 
     void dismissCompletionNotifications();
     void prepareNotificationPermissions();
+    void syncRemoteNotificationRegistration({
+        allowPrompt: true,
+        force: false,
+    });
+
+    if (activeSessionId === null) {
+        sessionStore.setSessionLoading(false);
+        sessionStore.setAssistantTyping(false);
+    }
 
     if (activeSessionId !== null) {
         sessionStore.setSessionLoading(true);
@@ -64,17 +87,39 @@ function syncOnForeground(): void {
 
     if (connectionStore.state === "disconnected") {
         void tryResumeFromStoredCredentials({
-            reconnectOnFailure: false,
+            reconnectOnFailure: true,
             reportErrors: false,
         });
     }
 }
 
-async function hydrateMobileState(): Promise<void> {
-    await useChatHistoryStore.getState().hydrate();
+async function hydrateMobileState(bootstrapId: number): Promise<void> {
+    const chatHistoryStore = useChatHistoryStore.getState();
+    await chatHistoryStore.hydrate();
+    if (!isRuntimeBootstrapCurrent(bootstrapId)) {
+        return;
+    }
+
+    await useWorkspaceDirectoryStore.getState().hydrate();
+    if (!isRuntimeBootstrapCurrent(bootstrapId)) {
+        return;
+    }
+
+    const persistedConversationId = chatHistoryStore.activeConversationId;
+    if (persistedConversationId !== null) {
+        useSessionStore.getState().replaceChatItems(
+            chatHistoryStore.getConversationItems(persistedConversationId)
+        );
+    }
+    if (!isRuntimeBootstrapCurrent(bootstrapId)) {
+        return;
+    }
 
     const sessionStore = useSessionStore.getState();
     const storedPreferences = await loadSessionPreferences();
+    if (!isRuntimeBootstrapCurrent(bootstrapId)) {
+        return;
+    }
     if (storedPreferences !== null) {
         sessionStore.hydratePreferences(storedPreferences);
     }
@@ -84,16 +129,37 @@ async function hydrateMobileState(): Promise<void> {
     }
 
     const storedActiveSessionId = await loadActiveSessionId();
+    if (!isRuntimeBootstrapCurrent(bootstrapId)) {
+        return;
+    }
     if (storedActiveSessionId !== null) {
         sessionStore.setActiveSession(storedActiveSessionId);
     }
 }
 
+function startRuntimeBootstrap(): void {
+    const bootstrapId = createRuntimeBootstrapId();
+
+    void (async () => {
+        await hydrateMobileState(bootstrapId);
+        if (!isRuntimeBootstrapCurrent(bootstrapId)) {
+            return;
+        }
+        await tryResumeFromStoredCredentials({
+            reconnectOnFailure: true,
+            reportErrors: false,
+        });
+    })();
+}
+
 function handleAppStateChange(nextAppState: AppStateStatus): void {
     const previousAppState = currentAppState;
     currentAppState = nextAppState;
+    setAppVisibilityState(nextAppState);
+    void reportNotificationPresence(nextAppState);
 
     if (nextAppState !== "active") {
+        createRuntimeBootstrapId();
         const sessionStore = useSessionStore.getState();
         if (sessionStore.activeSessionId !== null && sessionStore.isAssistantTyping) {
             armBackgroundCompletion(sessionStore.activeSessionId);
@@ -101,10 +167,13 @@ function handleAppStateChange(nextAppState: AppStateStatus): void {
         return;
     }
 
-    if (previousAppState !== "active") {
-        clearBackgroundCompletion();
-        syncOnForeground();
+    if (previousAppState === "active") {
+        return;
     }
+
+    clearBackgroundCompletion();
+    startRuntimeBootstrap();
+    syncOnForeground();
 }
 
 export function initializeAppRuntime(): () => void {
@@ -113,21 +182,22 @@ export function initializeAppRuntime(): () => void {
     }
 
     runtimeInitialized = true;
+    setAppVisibilityState(AppState.currentState);
+    currentAppState = getAppVisibilityState();
     void initializeNotifications();
     void initializeNotificationRouting(openSessionFromNotification);
     if (currentAppState === "active") {
         void prepareNotificationPermissions();
-    }
-    void (async () => {
-        await hydrateMobileState();
-        await tryResumeFromStoredCredentials({
-            reconnectOnFailure: false,
-            reportErrors: false,
+        void syncRemoteNotificationRegistration({
+            allowPrompt: true,
+            force: false,
         });
-    })();
+    }
+    startRuntimeBootstrap();
     const subscription = AppState.addEventListener("change", handleAppStateChange);
 
     return () => {
+        createRuntimeBootstrapId();
         subscription.remove();
         runtimeInitialized = false;
     };

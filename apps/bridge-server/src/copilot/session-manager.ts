@@ -18,6 +18,7 @@ import type {
     CapabilitiesStatePayload,
     PlanExitRequestPayload,
     SessionMessageAttachment,
+    SessionMessageInput,
     SessionHistoryItem,
     SessionInfo,
     SessionUsagePayload,
@@ -35,8 +36,10 @@ import {
     resolveWorkspaceRoot,
     switchWorkspaceBranch,
 } from "../utils/workspace.js";
+import type { createCompletionNotifier } from "../notifications/completion-notifier.js";
 
 type SendFn = (message: ServerMessage) => void;
+type CompletionNotifier = ReturnType<typeof createCompletionNotifier>;
 type PendingPermission = {
     payload: ServerMessage & { type: "permission.request" };
     onTimeout: () => void;
@@ -115,9 +118,14 @@ function normalizeToolCompletionStatus(
     return "failed";
 }
 
+function isSessionNotFoundResumeError(error: unknown): boolean {
+    return error instanceof Error && /session not found/i.test(error.message);
+}
+
 export function createSessionManager(
     copilotClient: AdaptedCopilotClient,
-    send: SendFn
+    send: SendFn,
+    completionNotifier: CompletionNotifier
 ) {
     const activeSessions = new Map<string, AdaptedCopilotSession>();
     const pendingPermissions = new Map<string, PendingPermission>();
@@ -199,6 +207,7 @@ export function createSessionManager(
             return;
         }
         state.busy = busy;
+        completionNotifier.onBusyStateChanged(sessionId, busy);
         emitSessionState(sessionId);
     }
 
@@ -215,6 +224,18 @@ export function createSessionManager(
             runtimeMode: nextState.runtimeMode,
             busy: existingBusy,
         };
+    }
+
+    function isLiveSessionActivityMessage(type: ServerMessage["type"]): boolean {
+        return type === "assistant.message_delta"
+            || type === "assistant.reasoning_delta"
+            || type === "assistant.message"
+            || type === "assistant.reasoning"
+            || type === "assistant.intent"
+            || type === "tool.execution_start"
+            || type === "tool.execution_partial_result"
+            || type === "tool.execution_progress"
+            || type === "tool.execution_complete";
     }
 
     function createPermissionTimeout(
@@ -308,6 +329,7 @@ export function createSessionManager(
             };
 
         session.onMessage((content: string) => {
+            completionNotifier.replaceAssistantPreview(sessionId, content);
             emit({
                 ...makeBase(),
                 type: "assistant.message",
@@ -316,6 +338,7 @@ export function createSessionManager(
         });
 
         session.onDelta((delta: string, index: number) => {
+            completionNotifier.appendAssistantPreview(sessionId, delta);
             emit({
                 ...makeBase(),
                 type: "assistant.message_delta",
@@ -520,6 +543,7 @@ export function createSessionManager(
         });
 
         session.onSessionError((errorType: string, message: string) => {
+            completionNotifier.recordSessionError(sessionId, errorType, message);
             setSessionBusy(sessionId, false);
             emit({
                 ...makeBase(),
@@ -529,6 +553,7 @@ export function createSessionManager(
         });
 
         session.onTitleChanged((title: string) => {
+            completionNotifier.updateSessionTitle(sessionId, title);
             emit({
                 ...makeBase(),
                 type: "session.title_changed",
@@ -567,7 +592,11 @@ export function createSessionManager(
     }
 
     return {
-        async createSession(config: SessionConfig): Promise<void> {
+        async createSession(
+            config: SessionConfig,
+            deviceId: string,
+            initialMessage?: SessionMessageInput
+        ): Promise<void> {
             if (activeSessions.size >= MAX_SESSIONS) {
                 send({
                     ...makeBase(),
@@ -594,6 +623,11 @@ export function createSessionManager(
                             : "interactive",
                     busy: false,
                 });
+                completionNotifier.bindSessionToDevice(session.id, deviceId);
+                const createdTitle = session.getInfo().title;
+                if (typeof createdTitle === "string" && createdTitle.trim().length > 0) {
+                    completionNotifier.updateSessionTitle(session.id, createdTitle);
+                }
                 wireSessionEvents(session);
 
                 lastHostCapabilities = session.getCapabilities();
@@ -606,6 +640,30 @@ export function createSessionManager(
 
                 emitCapabilitiesState();
                 emitSessionState(session.id);
+
+                if (initialMessage === undefined) {
+                    return;
+                }
+
+                try {
+                    setSessionBusy(session.id, true);
+                    await session.send(
+                        initialMessage.attachments !== undefined && initialMessage.attachments.length > 0
+                            ? { prompt: initialMessage.prompt, attachments: initialMessage.attachments }
+                            : { prompt: initialMessage.prompt }
+                    );
+                } catch (sendError) {
+                    setSessionBusy(session.id, false);
+                    send({
+                        ...makeBase(),
+                        type: "error",
+                        payload: {
+                            code: "SDK_ERROR",
+                            message: sendError instanceof Error ? sendError.message : "Initial message send failed",
+                            retry: true,
+                        },
+                    });
+                }
             } catch (err) {
                 const message = err instanceof Error ? err.message : "Session creation failed";
                 send({
@@ -620,51 +678,40 @@ export function createSessionManager(
             }
         },
 
-        async resumeSession(sessionId: string): Promise<void> {
+        async resumeSession(sessionId: string, deviceId: string): Promise<void> {
             try {
                 const previousSession = activeSessions.get(sessionId);
                 const session = await copilotClient.resumeSession(sessionId);
                 activeSessions.set(session.id, session);
+                completionNotifier.bindSessionToDevice(session.id, deviceId);
+                const resumedTitle = session.getInfo().title;
+                if (typeof resumedTitle === "string" && resumedTitle.trim().length > 0) {
+                    completionNotifier.updateSessionTitle(session.id, resumedTitle);
+                }
+                let historyFetchStarted = false;
+                let historyDelivered = false;
+                let liveActivityObserved = false;
+                let shouldFetchHistoryOnIdle = false;
+                let historyFetchDelayTimer: ReturnType<typeof setTimeout> | null = null;
+                const queuedResumeMessages: Array<ServerMessage> = [];
 
                 if (previousSession !== undefined && previousSession !== session) {
                     previousSession.unsubscribeAll();
                 }
 
-                // Eski dinleyicileri temizle ve yeniden bağla — reconnect sonrası duplikasyonu engeller
+                // Clear previous listeners before re-wiring to avoid duplicate events after reconnect.
                 session.unsubscribeAll();
-
-                const deferredMessages: Array<ServerMessage> = [];
-                let shouldDefer = true;
                 wireSessionEvents(session, (message) => {
-                    if (shouldDefer) {
-                        deferredMessages.push(message);
-                        return;
+                    if (isLiveSessionActivityMessage(message.type)) {
+                        liveActivityObserved = true;
+                        shouldFetchHistoryOnIdle = true;
+                        if (!historyDelivered) {
+                            queuedResumeMessages.push(message);
+                            return;
+                        }
                     }
-
                     send(message);
                 });
-
-                let history: ReadonlyArray<SessionHistoryItem>;
-                try {
-                    history = await session.getHistory();
-                } catch (error) {
-                    shouldDefer = false;
-                    session.unsubscribeAll();
-                    wireSessionEvents(session);
-                    discardPendingPrompts(session.id);
-                    for (const deferredMessage of deferredMessages) {
-                        if (
-                            deferredMessage.type === "permission.request"
-                            || deferredMessage.type === "user_input.request"
-                        ) {
-                            continue;
-                        }
-                        send(deferredMessage);
-                    }
-                    throw error;
-                }
-
-                shouldDefer = false;
 
                 lastHostCapabilities = session.getCapabilities();
                 const resumedState = await session.getState(
@@ -678,30 +725,86 @@ export function createSessionManager(
                     payload: { session: session.getInfo() },
                 });
 
-                send({
-                    ...makeBase(),
-                    type: "session.history",
-                    payload: {
-                        sessionId: session.id,
-                        items: history,
-                    },
-                });
-
-                replayPendingPrompts(session.id);
-
-                for (const message of deferredMessages) {
-                    if (
-                        message.type === "permission.request"
-                        || message.type === "user_input.request"
-                    ) {
-                        continue;
-                    }
-                    send(message);
-                }
-
                 emitCapabilitiesState();
                 emitSessionState(session.id);
+
+                const fetchHistory = (): void => {
+                    if (historyFetchStarted) {
+                        return;
+                    }
+
+                    historyFetchStarted = true;
+                    if (historyFetchDelayTimer !== null) {
+                        clearTimeout(historyFetchDelayTimer);
+                        historyFetchDelayTimer = null;
+                    }
+
+                    void session.getHistory()
+                        .then((history: ReadonlyArray<SessionHistoryItem>) => {
+                            send({
+                                ...makeBase(),
+                                type: "session.history",
+                                payload: {
+                                    sessionId: session.id,
+                                    items: history,
+                                },
+                            });
+                            historyDelivered = true;
+                            while (queuedResumeMessages.length > 0) {
+                                const queuedMessage = queuedResumeMessages.shift();
+                                if (queuedMessage !== undefined) {
+                                    send(queuedMessage);
+                                }
+                            }
+                        })
+                        .catch((error: unknown) => {
+                            console.warn("[session-manager] Failed to fetch session history during resume", {
+                                sessionId: session.id,
+                                error: error instanceof Error ? error.message : String(error),
+                            });
+                            historyDelivered = true;
+                            while (queuedResumeMessages.length > 0) {
+                                const queuedMessage = queuedResumeMessages.shift();
+                                if (queuedMessage !== undefined) {
+                                    send(queuedMessage);
+                                }
+                            }
+                        })
+                        .finally(() => {
+                            replayPendingPrompts(session.id);
+                        });
+                };
+
+                session.onIdle(() => {
+                    if (shouldFetchHistoryOnIdle) {
+                        shouldFetchHistoryOnIdle = false;
+                        fetchHistory();
+                    }
+                });
+
+                historyFetchDelayTimer = setTimeout(() => {
+                    historyFetchDelayTimer = null;
+                    if (liveActivityObserved) {
+                        shouldFetchHistoryOnIdle = true;
+                        return;
+                    }
+                    fetchHistory();
+                }, 350);
             } catch (err) {
+                if (isSessionNotFoundResumeError(err)) {
+                    const errorMessage = err instanceof Error ? err.message : "Session not found";
+                    send({
+                        ...makeBase(),
+                        type: "error",
+                        payload: {
+                            code: "SESSION_NOT_FOUND",
+                            message: errorMessage,
+                            retry: false,
+                        },
+                    });
+                    return;
+                }
+
                 const message = err instanceof Error ? err.message : "Session resume failed";
                 send({
                     ...makeBase(),
@@ -744,6 +847,7 @@ export function createSessionManager(
                 activeSessions.delete(sessionId);
             }
             sessionStates.delete(sessionId);
+            completionNotifier.forgetSession(sessionId);
             try {
                 await copilotClient.deleteSession(sessionId);
             } catch (err) {
@@ -763,7 +867,8 @@ export function createSessionManager(
         async sendMessage(
             sessionId: string,
             content: string,
-            attachments?: ReadonlyArray<SessionMessageAttachment>
+            attachments: ReadonlyArray<SessionMessageAttachment> | undefined,
+            deviceId: string
         ): Promise<void> {
             const session = activeSessions.get(sessionId);
             if (session === undefined) {
@@ -780,6 +885,7 @@ export function createSessionManager(
             }
 
             try {
+                completionNotifier.bindSessionToDevice(sessionId, deviceId);
                 setSessionBusy(sessionId, true);
                 await session.send(
                     attachments !== undefined && attachments.length > 0
@@ -902,7 +1008,9 @@ export function createSessionManager(
         async listWorkspaceTree(
             sessionId: string,
             requestedWorkspaceRelativePath = ".",
-            maxDepth = 3
+            maxDepth = 3,
+            offset = 0,
+            pageSize = 200
         ): Promise<void> {
             const context = getSessionContext(sessionId);
             if (context === undefined) {
@@ -914,7 +1022,9 @@ export function createSessionManager(
                 const tree = await buildWorkspaceTree(
                     resolveWorkspaceRoot(context),
                     requestedWorkspaceRelativePath,
-                    maxDepth
+                    maxDepth,
+                    offset,
+                    pageSize
                 );
                 send({
                     ...makeBase(),
@@ -924,6 +1034,7 @@ export function createSessionManager(
                         context,
                         workspaceRoot: tree.workspaceRoot,
                         requestedWorkspaceRelativePath: tree.requestedWorkspaceRelativePath,
+                        offset,
                         tree: tree.tree,
                         truncated: tree.truncated,
                     },

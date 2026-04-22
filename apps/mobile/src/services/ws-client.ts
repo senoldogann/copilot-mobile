@@ -32,6 +32,7 @@ type PendingMessage = {
 
 const PENDING_TIMEOUT_MS = 30_000;
 const MAX_PENDING_MESSAGES = 100;
+const AUTHENTICATION_TIMEOUT_MS = 12_000;
 
 function createSeqGenerator(): () => number {
     let counter = 0;
@@ -80,6 +81,27 @@ export function createWSClient(config: WSClientConfig) {
     const nextSeq = createSeqGenerator();
     let pendingPairMessage: ClientMessage | null = null;
     let pendingResumeMessage: ClientMessage | null = null;
+    let authenticationTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function describeSocketClose(code: number, reason: string): string {
+        if (reason.trim().length > 0) {
+            return `Connection closed (${code}): ${reason}`;
+        }
+
+        if (code === 1008) {
+            return "Connection rejected by the companion";
+        }
+
+        if (code === 1006) {
+            return "Connection closed unexpectedly";
+        }
+
+        if (code === 1011) {
+            return "Companion encountered an internal error";
+        }
+
+        return `Connection closed (${code})`;
+    }
 
     function setState(next: ConnectionState): void {
         if (state === next) return;
@@ -88,6 +110,10 @@ export function createWSClient(config: WSClientConfig) {
     }
 
     function cleanup(): void {
+        if (authenticationTimer !== null) {
+            clearTimeout(authenticationTimer);
+            authenticationTimer = null;
+        }
         if (reconnectTimer !== null) {
             clearTimeout(reconnectTimer);
             reconnectTimer = null;
@@ -114,6 +140,28 @@ export function createWSClient(config: WSClientConfig) {
             type,
             payload,
         } as ClientMessage;
+    }
+
+    function armAuthenticationTimeout(): void {
+        if (authenticationTimer !== null) {
+            clearTimeout(authenticationTimer);
+        }
+
+        authenticationTimer = setTimeout(() => {
+            authenticationTimer = null;
+            if (state === "authenticated") {
+                return;
+            }
+
+            const errorMessage = "Authentication timed out while connecting to your Mac companion";
+            cleanup();
+            setState("disconnected");
+            rejectPendingMessages(errorMessage);
+            if (reportConnectionErrors) {
+                config.onError(errorMessage);
+            }
+            scheduleReconnect();
+        }, AUTHENTICATION_TIMEOUT_MS);
     }
 
     function sendRaw(message: ClientMessage): void {
@@ -272,7 +320,27 @@ export function createWSClient(config: WSClientConfig) {
         const message = result.data as ServerMessage;
         lastServerSeq = message.seq;
 
+        if (message.type === "error" && state !== "authenticated") {
+            const errorMessage = `[${message.payload.code}] ${message.payload.message}`;
+            disconnectWithError(errorMessage);
+            return;
+        }
+
         if (message.type === "auth.authenticated") {
+            if (authenticationTimer !== null) {
+                clearTimeout(authenticationTimer);
+                authenticationTimer = null;
+            }
+            const requiresPinnedDirectFingerprint =
+                message.payload.transportMode === "direct"
+                && serverUrl !== null
+                && serverUrl.startsWith("wss://");
+
+            if (requiresPinnedDirectFingerprint && expectedFingerprint === null) {
+                disconnectWithError("Direct wss:// connections require a pinned certificate fingerprint");
+                return;
+            }
+
             if (
                 expectedFingerprint !== null
                 && message.payload.certFingerprint !== expectedFingerprint
@@ -339,6 +407,7 @@ export function createWSClient(config: WSClientConfig) {
                 sendRaw(pendingResumeMessage);
                 pendingResumeMessage = null;
             }
+            armAuthenticationTimeout();
         };
 
         ws.onmessage = (event) => {
@@ -346,8 +415,13 @@ export function createWSClient(config: WSClientConfig) {
         };
 
         ws.onclose = (event) => {
+            const wasAuthenticated = state === "authenticated";
+            const closeMessage = describeSocketClose(event.code, event.reason);
             setState("disconnected");
             cleanup();
+            if (!wasAuthenticated && reportConnectionErrors && event.code !== 1000) {
+                config.onError(closeMessage);
+            }
             if (event.code !== 1000) {
                 scheduleReconnect();
             }
@@ -367,7 +441,7 @@ export function createWSClient(config: WSClientConfig) {
         transportMode = qrPayload.transportMode;
         relayAccessToken = qrPayload.relayAccessToken ?? null;
         lastServerSeq = 0;
-        reconnectOnClose = true;
+        reconnectOnClose = false;
         reportConnectionErrors = true;
         pendingResumeMessage = null;
         pendingPairMessage = buildMessage("auth.pair", {
@@ -375,7 +449,7 @@ export function createWSClient(config: WSClientConfig) {
             transportMode: qrPayload.transportMode,
         });
         connectToURL(serverUrl, {
-            reconnectOnFailure: true,
+            reconnectOnFailure: false,
             reportErrors: true,
         });
     }

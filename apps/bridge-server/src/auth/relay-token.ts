@@ -2,6 +2,22 @@ import jwt from "jsonwebtoken";
 
 const RELAY_SECRET_ENV = "COPILOT_MOBILE_RELAY_SECRET";
 const RELAY_ACCESS_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
+const MIN_RELAY_SECRET_BYTES = 32;
+
+function validateRelaySecret(secret: string): string {
+    const normalizedSecret = secret.trim();
+    if (Buffer.byteLength(normalizedSecret, "utf8") < MIN_RELAY_SECRET_BYTES) {
+        throw new Error(
+            `${RELAY_SECRET_ENV} must be at least ${MIN_RELAY_SECRET_BYTES} bytes of high-entropy secret material.`
+        );
+    }
+
+    if (/^(changeme|password|secret|test|dev|relay-test-secret)$/i.test(normalizedSecret)) {
+        throw new Error(`${RELAY_SECRET_ENV} is too weak. Generate a random secret instead.`);
+    }
+
+    return normalizedSecret;
+}
 
 type RelayTokenRole = "mobile" | "companion";
 
@@ -21,7 +37,7 @@ export function getRequiredRelaySecret(): string {
         );
     }
 
-    return relaySecret;
+    return validateRelaySecret(relaySecret);
 }
 
 export function createRelayAccessToken(role: RelayTokenRole, companionId: string): string {

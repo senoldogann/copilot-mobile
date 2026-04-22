@@ -1,132 +1,41 @@
 #!/usr/bin/env node
 
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { execFileSync, spawn } from "node:child_process";
+import { existsSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
-import { fileURLToPath } from "node:url";
+import { loadConfig, resolveWorkspaceRoot, writeConfig } from "./lib/config.mjs";
+import { bootoutLaunchAgent, bootstrapLaunchAgent, writeLaunchAgentPlist } from "./lib/launch-agent.mjs";
+import {
+    ensureCompanionDirectories,
+    getCompanionLogsDirectory,
+    getDaemonEntryPoint,
+    getPackageRootDirectory,
+} from "./lib/paths.mjs";
 
-const DEFAULT_BRIDGE_PORT = 9876;
-const REQUIRED_PUBLIC_URL_ENV = "COPILOT_MOBILE_PUBLIC_WS_URL";
-const RELAY_URL_ENV = "COPILOT_MOBILE_RELAY_URL";
-const PROCESS_MARKER = "--managed-by-cli";
-const MANAGEMENT_STATUS_PATH = "/__copilot_mobile/status";
-const MANAGEMENT_QR_PATH = "/__copilot_mobile/qr";
-const MANAGEMENT_DASHBOARD_PATH = "/__copilot_mobile/dashboard";
-
-function getRootDirectory() {
-    const currentFilePath = fileURLToPath(import.meta.url);
-    return path.resolve(path.dirname(currentFilePath), "..");
-}
+const STATUS_PATH = "/__copilot_mobile/status";
+const QR_PATH = "/__copilot_mobile/qr";
+const DASHBOARD_PATH = "/__copilot_mobile/dashboard";
 
 function printUsage() {
-    console.log("Usage: copilot-mobile <up|status|qr|dashboard|down>");
+    console.log("Usage: copilot-mobile <login|up|status|qr|logs|down>");
 }
 
-function getCliStateDirectory(rootDirectory) {
-    return path.join(rootDirectory, ".copilot-mobile-cli");
-}
-
-function getCliStatePath(rootDirectory) {
-    return path.join(getCliStateDirectory(rootDirectory), "managed-bridge.json");
-}
-
-function writeCliState(rootDirectory, state) {
-    mkdirSync(getCliStateDirectory(rootDirectory), { recursive: true });
-    writeFileSync(getCliStatePath(rootDirectory), JSON.stringify(state, null, 2));
-}
-
-function readCliState(rootDirectory) {
-    const statePath = getCliStatePath(rootDirectory);
-    if (!existsSync(statePath)) {
-        return null;
-    }
-
-    try {
-        return JSON.parse(readFileSync(statePath, "utf8"));
-    } catch {
-        return null;
+function assertMacOS() {
+    if (process.platform !== "darwin") {
+        throw new Error("copilot-mobile desktop companion v1 currently supports macOS only.");
     }
 }
 
-function clearCliState(rootDirectory) {
-    const statePath = getCliStatePath(rootDirectory);
-    if (existsSync(statePath)) {
-        rmSync(statePath);
-    }
+function sleep(milliseconds) {
+    return new Promise((resolve) => {
+        setTimeout(resolve, milliseconds);
+    });
 }
 
-function isProcessAlive(pid) {
-    try {
-        process.kill(pid, 0);
-        return true;
-    } catch {
-        return false;
-    }
-}
-
-function parseBridgePort() {
-    const rawPort = process.env.BRIDGE_PORT;
-    if (typeof rawPort !== "string" || rawPort.trim().length === 0) {
-        return DEFAULT_BRIDGE_PORT;
-    }
-
-    const parsedPort = Number.parseInt(rawPort, 10);
-    if (!Number.isInteger(parsedPort) || parsedPort <= 0 || parsedPort > 65535) {
-        throw new Error(`BRIDGE_PORT must be a valid TCP port. Received: ${rawPort}`);
-    }
-
-    return parsedPort;
-}
-
-function getBridgeBootstrapLabel() {
-    const relayUrl = process.env[RELAY_URL_ENV];
-    if (typeof relayUrl === "string" && relayUrl.trim().length > 0) {
-        let parsedRelayUrl;
-        try {
-            parsedRelayUrl = new URL(relayUrl);
-        } catch {
-            throw new Error(
-                `${RELAY_URL_ENV} must be a valid ws:// or wss:// URL. Received: ${relayUrl}`
-            );
-        }
-
-        if (parsedRelayUrl.protocol !== "ws:" && parsedRelayUrl.protocol !== "wss:") {
-            throw new Error(
-                `${RELAY_URL_ENV} must use ws:// or wss://. Received: ${relayUrl}`
-            );
-        }
-
-        return `${RELAY_URL_ENV}=${relayUrl}`;
-    }
-
-    const publicUrl = process.env[REQUIRED_PUBLIC_URL_ENV];
-    if (typeof publicUrl !== "string" || publicUrl.trim().length === 0) {
-        throw new Error(
-            `Missing required ${REQUIRED_PUBLIC_URL_ENV} or ${RELAY_URL_ENV}. Prepare a relay URL or a public reverse-proxy URL first, then run copilot-mobile up.`
-        );
-    }
-
-    let parsedUrl;
-    try {
-        parsedUrl = new URL(publicUrl);
-    } catch {
-        throw new Error(
-            `${REQUIRED_PUBLIC_URL_ENV} must be a valid wss:// URL. Received: ${publicUrl}`
-        );
-    }
-
-    if (parsedUrl.protocol !== "wss:") {
-        throw new Error(
-            `${REQUIRED_PUBLIC_URL_ENV} must use the wss:// protocol. Received: ${publicUrl}`
-        );
-    }
-
-    return `${REQUIRED_PUBLIC_URL_ENV}=${publicUrl}`;
-}
-
-async function requestJson(method, port, requestPath) {
-    const response = await fetch(`http://127.0.0.1:${port}${requestPath}`, {
+async function requestJson(method, port, path) {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
         method,
         headers: {
             "content-type": "application/json",
@@ -136,280 +45,384 @@ async function requestJson(method, port, requestPath) {
 
     if (!response.ok) {
         const body = await response.text();
-        throw new Error(`Bridge management request failed (${response.status}): ${body}`);
+        throw new Error(`Companion request failed (${response.status}): ${body}`);
     }
 
     return response.json();
 }
 
-async function fetchBridgeStatus(port) {
-    return requestJson("GET", port, MANAGEMENT_STATUS_PATH);
+function isManagedStatusPayload(payload) {
+    return typeof payload === "object"
+        && payload !== null
+        && typeof payload.status === "object"
+        && payload.status !== null
+        && typeof payload.status.daemonState === "string"
+        && typeof payload.status.copilotAuthenticated === "boolean";
 }
 
-async function fetchFreshQrCode(port) {
-    return requestJson("POST", port, MANAGEMENT_QR_PATH);
+async function fetchManagedStatus(port) {
+    const payload = await requestJson("GET", port, STATUS_PATH);
+    if (!isManagedStatusPayload(payload)) {
+        throw new Error("Legacy bridge detected on the configured port.");
+    }
+
+    return payload;
 }
 
-function sleep(milliseconds) {
-    return new Promise((resolve) => {
-        setTimeout(resolve, milliseconds);
-    });
-}
-
-async function waitForBridge(port) {
+async function waitForStatus(port) {
     let lastError = null;
-    for (let attempt = 0; attempt < 20; attempt += 1) {
+    for (let attempt = 0; attempt < 30; attempt += 1) {
         try {
-            return await fetchBridgeStatus(port);
+            return await requestJson("GET", port, STATUS_PATH);
         } catch (error) {
             lastError = error;
             await sleep(500);
         }
     }
 
-    throw new Error(`Bridge did not become ready on port ${port}. ${String(lastError)}`);
+    throw new Error(`Companion daemon did not become ready on port ${port}. ${String(lastError)}`);
 }
 
-function runPnpmCommand(rootDirectory, args) {
-    execFileSync("pnpm", args, {
-        cwd: rootDirectory,
-        stdio: "inherit",
-    });
-}
+async function waitForRelayReady(port) {
+    let lastStatus = null;
+    for (let attempt = 0; attempt < 40; attempt += 1) {
+        const payload = await fetchManagedStatus(port);
+        lastStatus = payload;
 
-function getBridgeEntryPoint(rootDirectory) {
-    return path.join(rootDirectory, "apps", "bridge-server", "dist", "server.js");
-}
+        if (payload.status.mode !== "hosted") {
+            return payload;
+        }
 
-function spawnManagedBridge(rootDirectory, publicUrl) {
-    const bridgeEntryPoint = getBridgeEntryPoint(rootDirectory);
-    if (!existsSync(bridgeEntryPoint)) {
-        throw new Error(`Bridge build output is missing: ${bridgeEntryPoint}`);
+        if (
+            payload.status.relay?.connectedToRelay === true
+            && payload.status.relay?.connectedToLocalBridge === true
+        ) {
+            return payload;
+        }
+
+        await sleep(500);
     }
 
-    const child = spawn(process.execPath, [bridgeEntryPoint, PROCESS_MARKER], {
-        cwd: rootDirectory,
-        env: {
-            ...process.env,
-            [REQUIRED_PUBLIC_URL_ENV]: publicUrl,
-        },
-        detached: true,
-        stdio: "ignore",
-    });
-
-    child.unref();
-    return child.pid;
+    const lastError = lastStatus?.status?.lastError ?? "Relay bridge did not become ready in time.";
+    throw new Error(lastError);
 }
 
-function printStatus(statusPayload) {
-    const status = statusPayload.status;
-    console.log("Bridge is running.");
-    console.log(`PID: ${status.pid}`);
-    console.log(`Port: ${status.port}`);
-    console.log(`Public URL: ${status.publicUrl}`);
-    if (status.companionId !== null) {
-        console.log(`Companion ID: ${status.companionId}`);
-    }
-    if (status.relay !== null) {
-        console.log(`Relay URL: ${status.relay.relayUrl}`);
-        console.log(`Relay connected: ${status.relay.connectedToRelay ? "yes" : "no"}`);
-        console.log(`Local bridge linked: ${status.relay.connectedToLocalBridge ? "yes" : "no"}`);
-    }
+function printStatus(payload) {
+    const status = payload.status;
+    console.log(`Daemon: ${status.daemonState}`);
+    console.log(`Mode: ${status.mode}`);
+    console.log(`Bridge PID: ${status.pid}`);
+    console.log(`Bridge port: ${status.port}`);
+    console.log(`Workspace root: ${status.workspaceRoot ?? "-"}`);
+    console.log(`Public endpoint: ${status.publicUrl}`);
+    console.log(`Companion ID: ${status.companionId ?? "-"}`);
+    console.log(`Copilot auth: ${status.copilotAuthenticated ? "ready" : "missing"}`);
+    console.log(`Relay connected: ${status.relay?.connectedToRelay ? "yes" : "no"}`);
+    console.log(`Local bridge linked: ${status.relay?.connectedToLocalBridge ? "yes" : "no"}`);
     console.log(`Client connected: ${status.hasClient ? "yes" : "no"}`);
     console.log(`Pairing token active: ${status.pairingActive ? "yes" : "no"}`);
+    console.log(`Last pairing: ${status.lastPairingAt !== null ? new Date(status.lastPairingAt).toLocaleString() : "-"}`);
+    console.log(`Last error: ${status.lastError ?? "-"}`);
 }
 
-function printQrCode(qrPayload) {
-    const qrCode = qrPayload.qrCode;
+function printQrCode(payload) {
+    const qrCode = payload.qrCode;
     console.log("\n┌─────────────────────────────────────────┐");
-    console.log("│   Copilot Mobile Bridge — QR Pairing    │");
+    console.log("│ Copilot Mobile Companion — Pairing QR   │");
     console.log("└─────────────────────────────────────────┘\n");
     console.log(qrCode.ascii);
     console.log(`\nConnection: ${qrCode.payload.url}`);
     console.log(`Mode: ${qrCode.payload.transportMode}`);
-    console.log(`Token expires at: ${new Date(qrCode.expiresAt).toISOString()}\n`);
+    console.log(`Expires at: ${new Date(qrCode.expiresAt).toISOString()}\n`);
 }
 
-function openDashboard(port) {
-    const dashboardUrl = `http://127.0.0.1:${port}${MANAGEMENT_DASHBOARD_PATH}`;
-
-    if (process.platform === "darwin") {
-        execFileSync("open", [dashboardUrl], { stdio: "ignore" });
-        console.log(`Opened dashboard: ${dashboardUrl}`);
-        return;
+function requiresDaemonRestart(statusPayload, config) {
+    const status = statusPayload.status;
+    if (status.mode !== config.mode) {
+        return true;
     }
 
-    if (process.platform === "win32") {
-        execFileSync("cmd", ["/c", "start", "", dashboardUrl], { stdio: "ignore" });
-        console.log(`Opened dashboard: ${dashboardUrl}`);
-        return;
+    if (config.mode === "hosted" && status.hostedApiBaseUrl !== config.hostedApiBaseUrl) {
+        return true;
     }
 
-    execFileSync("xdg-open", [dashboardUrl], { stdio: "ignore" });
-    console.log(`Opened dashboard: ${dashboardUrl}`);
+    if (config.mode === "self_hosted" && status.hostedRelayBaseUrl !== config.hostedRelayBaseUrl) {
+        return true;
+    }
+
+    if ((status.workspaceRoot ?? null) !== (config.workspaceRoot ?? null)) {
+        return true;
+    }
+
+    return false;
+}
+
+function stopManagedDaemon(statusPayload) {
+    const unloaded = bootoutLaunchAgent();
+
+    if (typeof statusPayload?.status?.pid !== "number") {
+        return unloaded;
+    }
+
+    try {
+        process.kill(statusPayload.status.pid, "SIGTERM");
+        return true;
+    } catch {
+        return unloaded;
+    }
+}
+
+function resolveCopilotBinary() {
+    try {
+        const require = createRequire(import.meta.url);
+        const packageJsonPath = require.resolve("@github/copilot/package.json");
+        const packageJson = require(packageJsonPath);
+        const binValue = typeof packageJson.bin === "string"
+            ? packageJson.bin
+            : packageJson.bin?.copilot;
+        if (typeof binValue !== "string") {
+            return "copilot";
+        }
+
+        return path.resolve(path.dirname(packageJsonPath), binValue);
+    } catch {
+        return "copilot";
+    }
+}
+
+function runCopilotLogin() {
+    const copilotBinary = resolveCopilotBinary();
+    const child = spawn(copilotBinary, ["login"], {
+        stdio: "inherit",
+        env: process.env,
+    });
+
+    child.on("exit", (code, signal) => {
+        if (typeof signal === "string") {
+            process.kill(process.pid, signal);
+            return;
+        }
+
+        process.exit(code ?? 1);
+    });
+}
+
+function runLocalBuildStep(command, args, label, cwd) {
+    const result = spawnSync(command, args, {
+        cwd,
+        stdio: "inherit",
+        env: process.env,
+    });
+
+    if (result.status !== 0) {
+        throw new Error(`${label} failed.`);
+    }
+}
+
+function maybeRefreshLocalCompanionBundle() {
+    const packageRoot = getPackageRootDirectory();
+    const rootPackageJsonPath = path.join(packageRoot, "package.json");
+    const desktopBuildScriptPath = path.join(packageRoot, "scripts", "build-desktop-runtime.mjs");
+    const sharedPackageJsonPath = path.join(packageRoot, "packages", "shared", "package.json");
+    const daemonSourcePath = path.join(packageRoot, "apps", "bridge-server", "src", "daemon.ts");
+
+    if (
+        !existsSync(rootPackageJsonPath)
+        || !existsSync(desktopBuildScriptPath)
+        || !existsSync(sharedPackageJsonPath)
+        || !existsSync(daemonSourcePath)
+    ) {
+        return false;
+    }
+
+    console.log("Refreshing local companion bundle...");
+    runLocalBuildStep("pnpm", ["build:shared"], "Shared runtime build", packageRoot);
+    runLocalBuildStep("pnpm", ["build:desktop"], "Desktop companion build", packageRoot);
+    return true;
+}
+
+function truncateManagedDaemonLogs() {
+    writeFileSync(`${getCompanionLogsDirectory()}/daemon.stdout.log`, "");
+    writeFileSync(`${getCompanionLogsDirectory()}/daemon.stderr.log`, "");
 }
 
 async function handleUp() {
-    const rootDirectory = getRootDirectory();
-    const port = parseBridgePort();
-    const bootstrapLabel = getBridgeBootstrapLabel();
-
-    try {
-        const runningStatus = await fetchBridgeStatus(port);
-        console.error("Bridge is already running.");
-        printStatus(runningStatus);
-        process.exit(1);
-    } catch {
-        // Continue — bridge is not up on this port.
+    assertMacOS();
+    ensureCompanionDirectories();
+    const bundleRefreshed = maybeRefreshLocalCompanionBundle();
+    const config = loadConfig();
+    const workspaceRoot = resolveWorkspaceRoot(process.cwd());
+    if (config.workspaceRoot !== workspaceRoot) {
+        config.workspaceRoot = workspaceRoot;
+        writeConfig(config);
     }
 
-    runPnpmCommand(rootDirectory, ["build:shared"]);
-    runPnpmCommand(rootDirectory, ["build:bridge"]);
-
-    const pid = spawnManagedBridge(rootDirectory, process.env[REQUIRED_PUBLIC_URL_ENV] ?? "");
     try {
-        const statusPayload = await waitForBridge(port);
-        const qrPayload = await fetchFreshQrCode(port);
+        const status = await fetchManagedStatus(config.managementPort);
+        if (bundleRefreshed || requiresDaemonRestart(status, config)) {
+            stopManagedDaemon(status);
+            await sleep(1_000);
+        } else {
+            const readyStatus = await waitForRelayReady(config.managementPort);
+            const qrPayload = await requestJson("POST", config.managementPort, QR_PATH);
+            printStatus(readyStatus);
+            printQrCode(qrPayload);
+            return;
+        }
+    } catch (error) {
+        if (error instanceof Error && error.message.includes("Legacy bridge detected")) {
+            throw new Error("A legacy bridge is already listening on this port. Stop it before starting the managed companion.");
+        }
+    }
 
-        writeCliState(rootDirectory, {
-            pid,
-            port,
-            bootstrapLabel,
-            rootDirectory,
-            managedAt: new Date().toISOString(),
-        });
+    const daemonEntryPoint = getDaemonEntryPoint();
+    if (!existsSync(daemonEntryPoint)) {
+        throw new Error("Desktop daemon bundle is missing. Run `pnpm build:desktop` first.");
+    }
 
-        console.log(`Bridge started in the background with PID ${pid}.`);
-        printStatus(statusPayload);
+    writeLaunchAgentPlist(config.workspaceRoot ?? null);
+    truncateManagedDaemonLogs();
+
+    let agentBootstrapped = false;
+    try {
+        await bootstrapLaunchAgent();
+        agentBootstrapped = true;
+
+        await waitForStatus(config.managementPort);
+        const status = await waitForRelayReady(config.managementPort);
+        if (!isManagedStatusPayload(status)) {
+            throw new Error("Managed companion daemon started, but the status payload is incompatible.");
+        }
+        if (status.status.copilotAuthenticated !== true) {
+            throw new Error("GitHub Copilot CLI authentication is missing. Run `copilot-mobile login` and try again.");
+        }
+
+        const qrPayload = await requestJson("POST", config.managementPort, QR_PATH);
+        printStatus(status);
         printQrCode(qrPayload);
     } catch (error) {
-        if (Number.isInteger(pid) && pid > 0 && isProcessAlive(pid)) {
-            process.kill(pid, "SIGTERM");
+        if (agentBootstrapped) {
+            bootoutLaunchAgent();
         }
-        clearCliState(rootDirectory);
-        throw error;
+
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`${message} Check logs at ${getCompanionLogsDirectory()}/daemon.stderr.log`);
     }
 }
 
 async function handleStatus() {
-    const rootDirectory = getRootDirectory();
-    const port = parseBridgePort();
+    assertMacOS();
+    const config = loadConfig();
 
     try {
-        const statusPayload = await fetchBridgeStatus(port);
-        printStatus(statusPayload);
-        return;
-    } catch {
-        const cliState = readCliState(rootDirectory);
-        if (cliState !== null && Number.isInteger(cliState.pid) && isProcessAlive(cliState.pid)) {
-            console.log(
-                `Managed bridge process found for this repo (PID ${cliState.pid}), but the local status endpoint is unavailable.`
-            );
-            process.exit(1);
+        const status = await fetchManagedStatus(config.managementPort);
+        printStatus(status);
+    } catch (error) {
+        if (error instanceof Error && error.message.includes("Legacy bridge detected")) {
+            console.log("Legacy bridge detected on this port. Stop it manually, then run `copilot-mobile up`.");
+            return;
         }
-
-        clearCliState(rootDirectory);
-        console.log("Bridge is not running.");
+        console.log("Daemon: stopped");
     }
 }
 
 async function handleQr() {
-    const port = parseBridgePort();
+    assertMacOS();
+    const config = loadConfig();
+    await waitForRelayReady(config.managementPort);
+    const payload = await requestJson("POST", config.managementPort, QR_PATH);
+    printQrCode(payload);
+}
 
-    try {
-        const qrPayload = await fetchFreshQrCode(port);
-        printQrCode(qrPayload);
-    } catch (error) {
-        throw new Error(
-            `Bridge is not running or QR generation failed on port ${port}. Start it with "pnpm dev:bridge:direct" for local development or "pnpm bridge:up" for relay/public mode. ${String(error)}`
-        );
-    }
+function handleLogs() {
+    assertMacOS();
+    ensureCompanionDirectories();
+    const logPath = `${getCompanionLogsDirectory()}/daemon.stderr.log`;
+    const child = spawn("tail", ["-n", "100", "-f", logPath], {
+        stdio: "inherit",
+    });
+
+    child.on("exit", (code, signal) => {
+        if (typeof signal === "string") {
+            process.kill(process.pid, signal);
+            return;
+        }
+
+        process.exit(code ?? 0);
+    });
 }
 
 async function handleDashboard() {
-    const port = parseBridgePort();
-
-    try {
-        await fetchBridgeStatus(port);
-    } catch (error) {
-        throw new Error(
-            `Bridge is not running on port ${port}. Start it first with "pnpm dev:bridge:direct" or "pnpm bridge:up". ${String(error)}`
-        );
+    assertMacOS();
+    const config = loadConfig();
+    const status = await fetchManagedStatus(config.managementPort);
+    if (status.status.daemonState !== "running") {
+        throw new Error("Companion daemon is not running. Start it with `copilot-mobile up`.");
     }
-
-    openDashboard(port);
+    console.log(`Dashboard URL: http://127.0.0.1:${config.dashboardPort}${DASHBOARD_PATH}`);
 }
 
 async function handleDown() {
-    const rootDirectory = getRootDirectory();
-    const port = parseBridgePort();
-    let pid = null;
+    assertMacOS();
+    const config = loadConfig();
 
     try {
-        const statusPayload = await fetchBridgeStatus(port);
-        pid = statusPayload.status.pid;
+        const status = await requestJson("GET", config.managementPort, STATUS_PATH);
+        if (isManagedStatusPayload(status)) {
+            stopManagedDaemon(status);
+        } else if (typeof status?.status?.pid === "number") {
+            process.kill(status.status.pid, "SIGTERM");
+        }
     } catch {
-        const cliState = readCliState(rootDirectory);
-        pid = cliState?.pid ?? null;
+        bootoutLaunchAgent();
     }
-
-    if (pid === null) {
-        clearCliState(rootDirectory);
-        console.log("Bridge is not running.");
-        return;
-    }
-
-    process.kill(pid, "SIGTERM");
 
     for (let attempt = 0; attempt < 20; attempt += 1) {
         try {
-            await fetchBridgeStatus(port);
+            await requestJson("GET", config.managementPort, STATUS_PATH);
+            await sleep(250);
         } catch {
-            clearCliState(rootDirectory);
-            console.log(`Bridge stopped (PID ${pid}).`);
+            console.log("Companion daemon stopped.");
             return;
         }
-        await sleep(250);
     }
 
-    throw new Error(`Bridge process ${pid} did not stop after SIGTERM.`);
+    throw new Error("Companion daemon did not stop cleanly.");
 }
 
 async function main() {
     const command = process.argv[2];
-
     if (typeof command !== "string") {
         printUsage();
         process.exit(1);
     }
 
-    if (command === "up") {
-        await handleUp();
-        return;
+    switch (command) {
+        case "login":
+            runCopilotLogin();
+            return;
+        case "up":
+            await handleUp();
+            return;
+        case "status":
+            await handleStatus();
+            return;
+        case "qr":
+            await handleQr();
+            return;
+        case "logs":
+            handleLogs();
+            return;
+        case "dashboard":
+            await handleDashboard();
+            return;
+        case "down":
+            await handleDown();
+            return;
+        default:
+            printUsage();
+            process.exit(1);
     }
-
-    if (command === "status") {
-        await handleStatus();
-        return;
-    }
-
-    if (command === "qr") {
-        await handleQr();
-        return;
-    }
-
-    if (command === "dashboard") {
-        await handleDashboard();
-        return;
-    }
-
-    if (command === "down") {
-        await handleDown();
-        return;
-    }
-
-    printUsage();
-    process.exit(1);
 }
 
 main().catch((error) => {

@@ -28,22 +28,12 @@ function extractRepositoryName(repository: string): string {
     return parts[parts.length - 1] ?? sanitized;
 }
 
-function resolveCanonicalWorkspaceRoot(
-    workspaceRoot: string,
-    knownGitRoots: ReadonlyArray<string>
-): string {
-    const matches = knownGitRoots
-        .filter((root) => workspaceRoot === root || workspaceRoot.startsWith(`${root}/`))
-        .sort((left, right) => right.length - left.length);
-
-    return matches[0] ?? workspaceRoot;
-}
-
-function getWorkspaceKey(
-    session: SessionInfo,
-    knownGitRoots: ReadonlyArray<string>
-): string {
+function getWorkspaceKey(session: SessionInfo): string {
     const context = session.context;
+
+    if (context?.workspaceRoot !== undefined && context.workspaceRoot.length > 0) {
+        return context.workspaceRoot;
+    }
 
     if (context?.gitRoot !== undefined && context.gitRoot.length > 0) {
         return context.gitRoot;
@@ -53,23 +43,23 @@ function getWorkspaceKey(
         return context.repository;
     }
 
-    if (context?.workspaceRoot !== undefined && context.workspaceRoot.length > 0) {
-        return resolveCanonicalWorkspaceRoot(context.workspaceRoot, knownGitRoots);
-    }
-
     return "__none__";
 }
 
 function getWorkspaceDisplayName(session: SessionInfo): string {
     const context = session.context;
 
-    if (context?.repository !== undefined && context.repository.length > 0) {
-        return extractRepositoryName(context.repository);
+    if (context?.workspaceRoot !== undefined && context.workspaceRoot.length > 0) {
+        return extractPathName(context.workspaceRoot);
     }
 
     const workspaceKey = context?.gitRoot ?? context?.workspaceRoot ?? "__none__";
     if (workspaceKey === "__none__") {
         return "Other";
+    }
+
+    if (context?.repository !== undefined && context.repository.length > 0) {
+        return extractRepositoryName(context.repository);
     }
 
     return extractPathName(workspaceKey);
@@ -118,36 +108,18 @@ export function formatSessionPreview(session: SessionInfo): string {
     return previewParts.join(" · ");
 }
 
-function buildSessionSignature(session: SessionInfo): string {
-    const summary = session.summary?.trim() ?? session.title?.trim() ?? "";
-    if (summary.length > 0) {
-        return `summary:${summary}\u0000${formatSessionPreview(session)}`;
-    }
-
-    if (session.context?.repository !== undefined || session.context?.branch !== undefined) {
-        return `context:${formatSessionTitle(session)}\u0000${formatSessionPreview(session)}`;
-    }
-
-    return `id:${session.id}`;
-}
-
 function sortSessionsByLatest(sessions: ReadonlyArray<SessionInfo>): Array<SessionInfo> {
     return [...sessions].sort((left, right) => right.lastActiveAt - left.lastActiveAt);
 }
 
 export function buildWorkspaceGroups(
-    sessions: ReadonlyArray<SessionInfo>
+    sessions: ReadonlyArray<SessionInfo>,
+    savedWorkspaceRoots: ReadonlyArray<string> = []
 ): ReadonlyArray<WorkspaceGroup> {
-    const knownGitRoots = [...new Set(
-        sessions
-            .map((session) => session.context?.gitRoot)
-            .filter((value): value is string => value !== undefined && value.length > 0)
-    )].sort((left, right) => right.length - left.length);
-
     const workspaceMap = new Map<string, Array<SessionInfo>>();
 
     for (const session of sessions) {
-        const workspaceKey = getWorkspaceKey(session, knownGitRoots);
+        const workspaceKey = getWorkspaceKey(session);
         const existing = workspaceMap.get(workspaceKey);
         if (existing !== undefined) {
             existing.push(session);
@@ -156,37 +128,24 @@ export function buildWorkspaceGroups(
         workspaceMap.set(workspaceKey, [session]);
     }
 
+    for (const savedWorkspaceRoot of savedWorkspaceRoots) {
+        if (!workspaceMap.has(savedWorkspaceRoot)) {
+            workspaceMap.set(savedWorkspaceRoot, []);
+        }
+    }
+
     const groups: Array<WorkspaceGroup> = [];
 
     for (const [workspaceKey, groupSessions] of workspaceMap.entries()) {
         const sortedSessions = sortSessionsByLatest(groupSessions);
-        const signatureMap = new Map<string, Array<SessionInfo>>();
-
-        for (const session of sortedSessions) {
-            const signature = buildSessionSignature(session);
-            const existing = signatureMap.get(signature);
-            if (existing !== undefined) {
-                existing.push(session);
-                continue;
-            }
-            signatureMap.set(signature, [session]);
-        }
-
-        const entries = [...signatureMap.entries()]
-            .map(([signature, signatureSessions]) => {
-                const cluster = sortSessionsByLatest(signatureSessions);
-                const primarySession = cluster[0]!;
-
-                return {
-                    key: signature,
-                    primarySession,
-                    sessions: cluster,
-                    duplicateCount: cluster.length - 1,
-                    title: formatSessionTitle(primarySession),
-                    preview: formatSessionPreview(primarySession),
-                } satisfies WorkspaceSessionEntry;
-            })
-            .sort((left, right) => right.primarySession.lastActiveAt - left.primarySession.lastActiveAt);
+        const entries = sortedSessions.map((session) => ({
+            key: session.id,
+            primarySession: session,
+            sessions: [session],
+            duplicateCount: 0,
+            title: formatSessionTitle(session),
+            preview: formatSessionPreview(session),
+        } satisfies WorkspaceSessionEntry));
 
         const primarySession = sortedSessions[0];
         groups.push({
@@ -195,7 +154,7 @@ export function buildWorkspaceGroups(
                 ? (primarySession.context?.repository !== undefined && primarySession.context.repository.length > 0
                     ? getWorkspaceDisplayName(primarySession)
                     : extractPathName(workspaceKey === "__none__" ? "Other" : workspaceKey))
-                : "Other",
+                : extractPathName(workspaceKey === "__none__" ? "Other" : workspaceKey),
             entries,
             totalSessions: groupSessions.length,
         });
@@ -204,7 +163,10 @@ export function buildWorkspaceGroups(
     groups.sort((left, right) => {
         const leftLatest = left.entries[0]?.primarySession.lastActiveAt ?? 0;
         const rightLatest = right.entries[0]?.primarySession.lastActiveAt ?? 0;
-        return rightLatest - leftLatest;
+        if (leftLatest !== rightLatest) {
+            return rightLatest - leftLatest;
+        }
+        return left.displayName.localeCompare(right.displayName);
     });
 
     return groups;
