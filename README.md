@@ -25,11 +25,21 @@ Masaüstü bilgisayarınızdaki GitHub Copilot oturumunu telefonunuzdan kullanma
 
 ## Gereksinimler
 
+- macOS çalışan bir bilgisayar
 - Node.js ≥ 20
 - pnpm ≥ 9
-- GitHub Copilot hesabı (CLI üzerinden oturum açılmış)
-- iOS veya Android cihaz (Expo Go veya development build)
-- Dış ağ erişimi için public bir relay veya reverse-proxy WebSocket URL gerekir
+- GitHub Copilot hesabı ve masaüstünde giriş yapılmış Copilot CLI
+- iOS veya Android cihaz
+- Dış ağ erişimi için public bir relay/control-plane deployment'ı
+
+Son kullanıcı akışında ekstra masaüstü kurulumu şudur:
+
+1. Mac'e `npm install -g copilot-mobile`
+2. Bir kez `copilot-mobile login`
+3. Servisi başlatmak için `copilot-mobile up`
+4. Telefonda QR taratıp eşleştirmek
+
+Bir kez eşleştirdikten sonra Mac açık, kullanıcı oturumu aktif ve companion sağlıklı kaldığı sürece servis LaunchAgent üzerinden arka planda çalışmaya devam eder. Telefonun aynı ağda olması gerekmez; hosted relay kullanıldığında farklı ağdan reconnect desteklenir.
 
 ## Kurulum
 
@@ -48,9 +58,10 @@ Global npm kurulumunda hedef akış:
 npm install -g copilot-mobile
 copilot-mobile login
 copilot-mobile up
+copilot-mobile doctor
 ```
 
-`copilot-mobile login` resmi Copilot CLI `copilot login` akışını çalıştırır. `up` komutu macOS altında `~/Library/LaunchAgents/com.copilotmobile.bridge.plist` yazar, daemon'ı arka planda başlatır ve pairing QR'ı doğrudan terminale basar.
+`copilot-mobile login` resmi Copilot CLI `copilot login` akışını çalıştırır. `up` komutu macOS altında `~/Library/LaunchAgents/com.copilotmobile.bridge.plist` yazar, daemon'ı arka planda başlatır ve pairing QR'ı doğrudan terminale basar. `doctor` komutu Copilot auth, LaunchAgent, daemon bundle, relay linki ve localhost management health sinyallerini tek ekranda doğrular.
 
 Repo içinden test ederken aynı komutları `node ./bin/copilot-mobile.mjs <komut>` veya `pnpm copilot-mobile <komut>` ile de çalıştırabilirsiniz.
 
@@ -137,8 +148,10 @@ copilot-mobile/
 | `copilot-mobile login` | Resmi Copilot CLI login akışını çalıştır |
 | `copilot-mobile up` | LaunchAgent'i kur/yenile, daemon'ı başlat ve terminalde pairing QR üret |
 | `copilot-mobile status` | Daemon, Copilot auth, relay ve last error durumunu göster |
+| `copilot-mobile doctor` | Companion'ın production-ready pairing ve reconnect için hazır olup olmadığını denetle |
 | `copilot-mobile qr` | Çalışan daemon'dan yeni pairing QR iste |
 | `copilot-mobile logs` | Daemon stderr logunu tail et |
+| `copilot-mobile dashboard` | Local dashboard URL'ini yazdır |
 | `copilot-mobile down` | LaunchAgent'i unload et ve daemon'ı durdur |
 | `pnpm dev:companion:macos` | Native macOS companion shell aç |
 | `pnpm dev:relay:cloudflare` | Cloudflare Worker relay'i local dev modda aç |
@@ -167,11 +180,17 @@ copilot-mobile/
 - Hosted relay kullanıyorsanız public API ve public relay base URL değerlerini `COPILOT_MOBILE_HOSTED_API_BASE_URL` ve `COPILOT_MOBILE_HOSTED_RELAY_BASE_URL` ile verebilirsiniz.
 - Local smoke test için `pnpm dev:relay` açıp aynı makinede hosted-flow'u deneyebilirsiniz; bu durumda relay tarafı `COPILOT_MOBILE_RELAY_SECRET` bekler.
 - `status` ve `qr` komutları daemon içindeki localhost management endpoint'lerine bağlanır; bu endpoint'ler dış ağdan erişilemez.
+- `doctor` komutu localhost health endpoint'ini, LaunchAgent dosyasını, daemon bundle'ını ve Copilot CLI auth durumunu birlikte doğrular. CI veya destek akışı için `copilot-mobile doctor --json` kullanılabilir.
 - Dashboard browser yüzeyi aynı management endpoint'lerini kullanır ve QR yenileme, logs açma, servis durdurma aksiyonlarını buradan verir.
 - `dev:companion:macos` komutu aynı management endpoint'lerini native bir macOS shell içinden kullanır; bridge lifecycle, QR ve dashboard görüntüsünü tek pencerede toplar.
 - Public relay tabanlı companion QR'ları `transportMode: "relay"` ile advertise edilir; legacy direct mod yalnızca private-network debug akışı için tutulur.
 - Session completion için local notifications dev build veya production build içinde, kullanıcı izin verdiyse çalışır. Expo Go remote push akışını desteklemez.
 - Voice dictation `expo-speech-recognition` ile development build gerektirir; Expo Go içinde native modül yüklenmez. `app.json` içinde plugin iOS (`NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`) ve Android (`RECORD_AUDIO`, Google quick search box paket görünürlüğü) izinlerini otomatik ekler. Dev build almak için: `pnpm --filter @copilot-mobile/mobile expo prebuild --clean` ardından `pnpm --filter @copilot-mobile/mobile expo run:ios` veya `run:android`. Dil varsayılan olarak `en-US`; başka locale'ler için `ChatInput` içindeki `startVoiceDictation({ lang })` argümanı güncellenir.
+- `@github/copilot` paketinin JS fallback yolu Node.js 24 isteyebilir; normal global kurulumda platform binary çözüldüğünde companion akışı Node.js 20+ ile çalışır. Bu yüzden destek ve release kontrolünde `copilot-mobile doctor` çıktısı esas alınmalıdır.
+
+Production ve App Store öncesi release checklist'i için:
+
+- [docs/project-runbook-and-appstore-readiness.md](/Users/dogan/Desktop/copilot-mobile/docs/project-runbook-and-appstore-readiness.md)
 
 ## Teknoloji
 

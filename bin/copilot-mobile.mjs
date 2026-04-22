@@ -6,20 +6,29 @@ import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
 import process from "node:process";
 import { loadConfig, resolveWorkspaceRoot, writeConfig } from "./lib/config.mjs";
-import { bootoutLaunchAgent, bootstrapLaunchAgent, writeLaunchAgentPlist } from "./lib/launch-agent.mjs";
+import {
+    bootoutLaunchAgent,
+    bootstrapLaunchAgent,
+    resolvePreferredCopilotCliPath,
+    writeLaunchAgentPlist,
+} from "./lib/launch-agent.mjs";
 import {
     ensureCompanionDirectories,
     getCompanionLogsDirectory,
+    getCompanionConfigPath,
     getDaemonEntryPoint,
+    getLaunchAgentPath,
     getPackageRootDirectory,
 } from "./lib/paths.mjs";
 
 const STATUS_PATH = "/__copilot_mobile/status";
+const HEALTH_PATH = "/health";
 const QR_PATH = "/__copilot_mobile/qr";
 const DASHBOARD_PATH = "/__copilot_mobile/dashboard";
+const NODEJS_MAJOR_REQUIREMENT = 20;
 
 function printUsage() {
-    console.log("Usage: copilot-mobile <login|up|status|qr|logs|down>");
+    console.log("Usage: copilot-mobile <login|up|status|doctor|qr|logs|dashboard|down> [--json]");
 }
 
 function assertMacOS() {
@@ -67,6 +76,10 @@ async function fetchManagedStatus(port) {
     }
 
     return payload;
+}
+
+async function fetchManagedHealth(port) {
+    return requestJson("GET", port, HEALTH_PATH);
 }
 
 async function waitForStatus(port) {
@@ -122,6 +135,7 @@ function printStatus(payload) {
     console.log(`Client connected: ${status.hasClient ? "yes" : "no"}`);
     console.log(`Pairing token active: ${status.pairingActive ? "yes" : "no"}`);
     console.log(`Last pairing: ${status.lastPairingAt !== null ? new Date(status.lastPairingAt).toLocaleString() : "-"}`);
+    console.log(`Session expires: ${status.sessionExpiresAt !== null ? new Date(status.sessionExpiresAt).toLocaleString() : "-"}`);
     console.log(`Last error: ${status.lastError ?? "-"}`);
 }
 
@@ -244,6 +258,299 @@ function maybeRefreshLocalCompanionBundle() {
 function truncateManagedDaemonLogs() {
     writeFileSync(`${getCompanionLogsDirectory()}/daemon.stdout.log`, "");
     writeFileSync(`${getCompanionLogsDirectory()}/daemon.stderr.log`, "");
+}
+
+function parseCommandOptions(args) {
+    return {
+        json: args.includes("--json"),
+    };
+}
+
+function getNodeVersionCheck() {
+    const rawVersion = process.versions.node;
+    const majorVersion = Number.parseInt(rawVersion.split(".")[0] ?? "", 10);
+    const supported = Number.isInteger(majorVersion) && majorVersion >= NODEJS_MAJOR_REQUIREMENT;
+
+    return {
+        supported,
+        detail: supported
+            ? `Node.js v${rawVersion} satisfies the companion package requirement (>= ${NODEJS_MAJOR_REQUIREMENT}).`
+            : `Node.js v${rawVersion} is too old. Install Node.js ${NODEJS_MAJOR_REQUIREMENT}+ before using the companion.`,
+    };
+}
+
+async function getCopilotAuthSnapshot(copilotCliPath) {
+    if (typeof copilotCliPath !== "string" || copilotCliPath.length === 0) {
+        return {
+            ok: false,
+            detail: "GitHub Copilot CLI binary could not be resolved.",
+        };
+    }
+
+    const { CopilotClient } = await import("@github/copilot-sdk");
+    const client = new CopilotClient({
+        autoStart: false,
+        cliPath: copilotCliPath,
+        logLevel: "error",
+    });
+
+    try {
+        await client.start();
+        const auth = await client.getAuthStatus();
+        const status = await client.getStatus();
+        return {
+            ok: auth.isAuthenticated === true,
+            detail: auth.isAuthenticated === true
+                ? `Authenticated as ${auth.login ?? auth.statusMessage ?? "unknown"} on ${auth.host ?? "GitHub"}. Copilot CLI ${status.version}.`
+                : auth.statusMessage ?? "GitHub Copilot CLI is not authenticated. Run `copilot-mobile login`.",
+            auth,
+            status,
+        };
+    } finally {
+        const stopErrors = await client.stop();
+        if (stopErrors.length > 0) {
+            throw new Error(stopErrors.map((error) => error.message).join(" "));
+        }
+    }
+}
+
+function createDoctorCheck(id, label, status, detail) {
+    return { id, label, status, detail };
+}
+
+function hasDoctorFailures(checks) {
+    return checks.some((check) => check.status === "fail");
+}
+
+function printDoctorReport(report) {
+    console.log("Copilot Mobile Doctor");
+    console.log(`Status: ${report.ready ? "ready" : "action_required"}`);
+    console.log("");
+
+    for (const check of report.checks) {
+        console.log(`[${check.status}] ${check.label}`);
+        console.log(check.detail);
+        console.log("");
+    }
+
+    if (report.snapshot !== null) {
+        console.log("Companion Snapshot");
+        console.log(`Mode: ${report.snapshot.mode}`);
+        console.log(`Daemon: ${report.snapshot.daemonState}`);
+        console.log(`Public endpoint: ${report.snapshot.publicUrl}`);
+        console.log(`Workspace root: ${report.snapshot.workspaceRoot ?? "-"}`);
+        console.log(`Relay connected: ${report.snapshot.relay?.connectedToRelay ? "yes" : "no"}`);
+        console.log(`Local bridge linked: ${report.snapshot.relay?.connectedToLocalBridge ? "yes" : "no"}`);
+        console.log(`Client connected: ${report.snapshot.hasClient ? "yes" : "no"}`);
+        console.log(`Session expires: ${report.snapshot.sessionExpiresAt !== null ? new Date(report.snapshot.sessionExpiresAt).toLocaleString() : "-"}`);
+        console.log(`Last error: ${report.snapshot.lastError ?? "-"}`);
+        console.log("");
+    }
+
+    if (report.nextActions.length > 0) {
+        console.log("Next Actions");
+        for (const action of report.nextActions) {
+            console.log(`- ${action}`);
+        }
+    }
+}
+
+async function buildDoctorReport() {
+    const checks = [];
+    const nextActions = [];
+    const onMacOS = process.platform === "darwin";
+    checks.push(createDoctorCheck(
+        "platform",
+        "Platform",
+        onMacOS ? "pass" : "fail",
+        onMacOS
+            ? "macOS detected. The desktop companion can use LaunchAgent lifecycle normally."
+            : `Detected platform: ${process.platform}. The desktop companion supports macOS only.`
+    ));
+    if (!onMacOS) {
+        nextActions.push("Run the desktop companion on a Mac, then pair the iPhone app with that Mac.");
+        return {
+            ready: false,
+            checks,
+            nextActions,
+            snapshot: null,
+        };
+    }
+
+    const nodeVersionCheck = getNodeVersionCheck();
+    checks.push(createDoctorCheck(
+        "node",
+        "Node.js",
+        nodeVersionCheck.supported ? "pass" : "fail",
+        nodeVersionCheck.detail
+    ));
+    if (!nodeVersionCheck.supported) {
+        nextActions.push(`Upgrade Node.js to ${NODEJS_MAJOR_REQUIREMENT}+ and reinstall the global npm package.`);
+    }
+
+    const daemonEntryPoint = getDaemonEntryPoint();
+    const daemonBundleReady = existsSync(daemonEntryPoint);
+    checks.push(createDoctorCheck(
+        "bundle",
+        "Desktop daemon bundle",
+        daemonBundleReady ? "pass" : "fail",
+        daemonBundleReady
+            ? `Daemon bundle is present at ${daemonEntryPoint}.`
+            : `Daemon bundle is missing at ${daemonEntryPoint}.`
+    ));
+    if (!daemonBundleReady) {
+        nextActions.push("Reinstall the npm package or run `pnpm build:desktop` before starting the companion.");
+    }
+
+    const copilotCliPath = resolvePreferredCopilotCliPath();
+    const copilotCliReady = typeof copilotCliPath === "string" && copilotCliPath.length > 0;
+    checks.push(createDoctorCheck(
+        "copilot_cli",
+        "GitHub Copilot CLI",
+        copilotCliReady ? "pass" : "fail",
+        copilotCliReady
+            ? `Resolved GitHub Copilot CLI at ${copilotCliPath}.`
+            : "GitHub Copilot CLI binary was not found in common locations or PATH."
+    ));
+    if (!copilotCliReady) {
+        nextActions.push("Install GitHub Copilot CLI and ensure the `copilot` binary is available in PATH.");
+    }
+
+    if (copilotCliReady) {
+        try {
+            const authSnapshot = await getCopilotAuthSnapshot(copilotCliPath);
+            checks.push(createDoctorCheck(
+                "copilot_auth",
+                "Copilot authentication",
+                authSnapshot.ok ? "pass" : "fail",
+                authSnapshot.detail
+            ));
+            if (!authSnapshot.ok) {
+                nextActions.push("Run `copilot-mobile login` on the Mac companion account.");
+            }
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            checks.push(createDoctorCheck(
+                "copilot_auth",
+                "Copilot authentication",
+                "fail",
+                `Could not verify Copilot authentication: ${message}`
+            ));
+            nextActions.push("Run `copilot-mobile login` and retry `copilot-mobile doctor`.");
+        }
+    }
+
+    let config;
+    try {
+        config = loadConfig();
+        checks.push(createDoctorCheck(
+            "config",
+            "Companion config",
+            "pass",
+            `Config loaded from ${getCompanionConfigPath()} with mode ${config.mode} and workspace ${config.workspaceRoot ?? "-"}.`
+        ));
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        checks.push(createDoctorCheck(
+            "config",
+            "Companion config",
+            "fail",
+            message
+        ));
+        nextActions.push("Fix the companion config file under `~/.copilot-mobile/config.json`.");
+        return {
+            ready: false,
+            checks,
+            nextActions,
+            snapshot: null,
+        };
+    }
+
+    const launchAgentPath = getLaunchAgentPath();
+    const launchAgentReady = existsSync(launchAgentPath);
+    checks.push(createDoctorCheck(
+        "launch_agent",
+        "LaunchAgent",
+        launchAgentReady ? "pass" : "fail",
+        launchAgentReady
+            ? `LaunchAgent plist is present at ${launchAgentPath}.`
+            : `LaunchAgent plist is missing at ${launchAgentPath}.`
+    ));
+    if (!launchAgentReady) {
+        nextActions.push("Run `copilot-mobile up` once so the LaunchAgent is installed for the current macOS user.");
+    }
+
+    let snapshot = null;
+    try {
+        const healthPayload = await fetchManagedHealth(config.managementPort);
+        const statusPayload = await fetchManagedStatus(config.managementPort);
+        snapshot = statusPayload.status;
+        checks.push(createDoctorCheck(
+            "daemon",
+            "Companion daemon",
+            healthPayload.health?.ready === true ? "pass" : "fail",
+            healthPayload.health?.ready === true
+                ? `Daemon is running on port ${config.managementPort} and reports ready.`
+                : `Daemon responded on port ${config.managementPort} but is not fully ready yet.`
+        ));
+
+        if (config.mode === "hosted" || config.mode === "self_hosted") {
+            const relayReady = snapshot.relay?.connectedToRelay === true
+                && snapshot.relay?.connectedToLocalBridge === true;
+            checks.push(createDoctorCheck(
+                "relay",
+                "Relay link",
+                relayReady ? "pass" : "fail",
+                relayReady
+                    ? "Relay is connected and linked back to the local bridge."
+                    : `Relay status is not ready. connectedToRelay=${String(snapshot.relay?.connectedToRelay ?? false)}, connectedToLocalBridge=${String(snapshot.relay?.connectedToLocalBridge ?? false)}.`
+            ));
+            if (!relayReady) {
+                nextActions.push("Check hosted relay deployment, secrets, and network reachability before pairing users.");
+            }
+        } else {
+            checks.push(createDoctorCheck(
+                "relay",
+                "Relay link",
+                "info",
+                "Direct mode is active. Different-network reconnect is not expected without a hosted relay."
+            ));
+        }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        checks.push(createDoctorCheck(
+            "daemon",
+            "Companion daemon",
+            "fail",
+            `Daemon is not reachable on localhost:${config.managementPort}. ${message}`
+        ));
+        nextActions.push("Run `copilot-mobile up` and wait for the QR code before pairing the phone.");
+    }
+
+    if (snapshot?.lastError) {
+        checks.push(createDoctorCheck(
+            "last_error",
+            "Last daemon error",
+            "warn",
+            snapshot.lastError
+        ));
+    }
+
+    if (snapshot?.sessionExpiresAt !== null && snapshot?.sessionExpiresAt !== undefined) {
+        checks.push(createDoctorCheck(
+            "session_expiry",
+            "Relay session expiry",
+            "info",
+            `Current relay session expires at ${new Date(snapshot.sessionExpiresAt).toLocaleString()}.`
+        ));
+    }
+
+    return {
+        ready: !hasDoctorFailures(checks),
+        checks,
+        nextActions,
+        snapshot,
+    };
 }
 
 async function handleUp() {
@@ -390,11 +697,31 @@ async function handleDown() {
     throw new Error("Companion daemon did not stop cleanly.");
 }
 
+async function handleDoctor(options) {
+    const report = await buildDoctorReport();
+
+    if (options.json) {
+        console.log(JSON.stringify(report, null, 2));
+    } else {
+        printDoctorReport(report);
+    }
+
+    if (!report.ready) {
+        process.exitCode = 1;
+    }
+}
+
 async function main() {
     const command = process.argv[2];
-    if (typeof command !== "string") {
+    const options = parseCommandOptions(process.argv.slice(3));
+    if (
+        typeof command !== "string"
+        || command === "help"
+        || command === "--help"
+        || command === "-h"
+    ) {
         printUsage();
-        process.exit(1);
+        process.exit(typeof command === "string" ? 0 : 1);
     }
 
     switch (command) {
@@ -406,6 +733,9 @@ async function main() {
             return;
         case "status":
             await handleStatus();
+            return;
+        case "doctor":
+            await handleDoctor(options);
             return;
         case "qr":
             await handleQr();

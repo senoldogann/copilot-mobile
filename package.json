@@ -19,6 +19,7 @@
     "scripts": {
         "copilot-mobile": "node ./bin/copilot-mobile.mjs",
         "login": "node ./bin/copilot-mobile.mjs login",
+        "doctor": "node ./bin/copilot-mobile.mjs doctor",
         "dev:bridge": "pnpm --filter bridge-server dev",
         "dev:bridge:direct": "node ./bin/dev-bridge-direct.mjs",
         "dev:companion:local": "node ./bin/dev-companion-local.mjs",
@@ -33,6 +34,7 @@
         "deploy:relay:cloudflare": "pnpm --filter @copilot-mobile/cloudflare-relay deploy",
         "bridge:up": "node ./bin/copilot-mobile.mjs up",
         "bridge:status": "node ./bin/copilot-mobile.mjs status",
+        "bridge:doctor": "node ./bin/copilot-mobile.mjs doctor",
         "bridge:qr": "node ./bin/copilot-mobile.mjs qr",
         "bridge:dashboard": "node ./bin/copilot-mobile.mjs dashboard",
         "bridge:down": "node ./bin/copilot-mobile.mjs down",

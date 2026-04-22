@@ -49,7 +49,7 @@ function sleep(milliseconds) {
     });
 }
 
-function resolvePreferredCopilotCliPath() {
+export function resolvePreferredCopilotCliPath() {
     const configuredPath = process.env.COPILOT_CLI_PATH;
     if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
         const resolvedPath = configuredPath.trim();

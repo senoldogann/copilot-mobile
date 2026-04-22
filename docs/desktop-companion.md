@@ -25,6 +25,7 @@ The daemon is installed as a user `LaunchAgent` at `~/Library/LaunchAgents/com.c
 - `copilot-mobile login`
 - `copilot-mobile up`
 - `copilot-mobile status`
+- `copilot-mobile doctor`
 - `copilot-mobile qr`
 - `copilot-mobile logs`
 - `copilot-mobile down`
@@ -79,10 +80,14 @@ What is ready now:
 - macOS LaunchAgent lifecycle
 - Hosted relay/control-plane endpoints in `apps/relay-server`
 - Dashboard QR refresh / open logs / stop service actions
+- `copilot-mobile doctor` readiness check for auth, LaunchAgent, daemon health, and relay link state
 
 What still needs product hardening before App Store-grade rollout:
 
 - Production relay hosting and secrets management
-- Full mobile reconnect token refresh without long-lived relay token assumptions
 - End-to-end onboarding polish for non-technical users
 - App Store metadata, privacy manifest, and release operations
+
+The detailed release checklist now lives in:
+
+- [docs/project-runbook-and-appstore-readiness.md](/Users/dogan/Desktop/copilot-mobile/docs/project-runbook-and-appstore-readiness.md)
