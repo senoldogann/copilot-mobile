@@ -1,4 +1,4 @@
-# Copilot Mobile Runbook And App Store Readiness
+# Code Companion Runbook And App Store Readiness
 
 This document describes the release-oriented desktop companion flow and the current readiness state as of April 23, 2026.
 
@@ -55,15 +55,15 @@ If the phone shows `No script URL provided`, Metro is not reachable. Check:
 - Local Network permission enabled
 - Metro running on port `8081`
 
-## Desktop Companion Flow
+## Mac Companion Flow
 
 Target end-user flow:
 
 ```bash
-npm install -g copilot-mobile
-copilot-mobile login
-copilot-mobile up
-copilot-mobile doctor
+npm install -g code-companion
+code-companion login
+code-companion up
+code-companion doctor
 ```
 
 After the QR is scanned once:
@@ -98,7 +98,7 @@ pnpm dev:companion:local
 For a hosted relay deployment, set the same relay secret on both the bridge host and the relay host:
 
 ```bash
-export COPILOT_MOBILE_RELAY_SECRET="replace-with-a-long-random-secret"
+export CODE_COMPANION_SELF_HOSTED_RELAY_SECRET="replace-with-a-long-random-secret"
 ```
 
 Or open the native macOS companion shell:
@@ -196,10 +196,10 @@ Current state: internal production-validation ready, but not yet claimable as pu
 
 Required outcome:
 
-- users install `copilot-mobile` globally with npm
-- users run `copilot-mobile login` once
-- users run `copilot-mobile up`
-- `copilot-mobile doctor` returns `ready`
+- users install `code-companion` globally with npm
+- users run `code-companion login` once
+- users run `code-companion up`
+- `code-companion doctor` returns `ready`
 
 Release gate:
 
@@ -207,6 +207,7 @@ Release gate:
 - LaunchAgent installs cleanly under the logged-in macOS user
 - Copilot CLI path resolves without manual edits
 - the product copy clearly explains that the Mac companion is required
+- iOS debug device builds do not require a Push Notifications-capable provisioning profile
 
 ### 2. Reconnect Validation Matrix
 
@@ -243,7 +244,9 @@ Release gate:
 - privacy, permission, and notification copy match the actual runtime behavior
 - support docs explain what users install, what keeps running in the background, and what breaks reconnect
 - App Store reviewer notes explain that code execution happens on the user's own Mac through GitHub Copilot CLI
+- App Store Connect metadata does not contain placeholder privacy or support URLs
+- Reviewer package includes a sample QR and a short setup video
 
 ## Recommendation
 
-Use `copilot-mobile doctor` as the first support and release gate. If it is not green, do not proceed to public pairing or reconnect validation.
+Use `code-companion doctor` as the first support and release gate. If it is not green, do not proceed to public pairing or reconnect validation.

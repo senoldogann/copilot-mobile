@@ -8,11 +8,13 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import React, { useEffect, useState } from "react";
 import { initializeAppRuntime } from "../src/services/app-runtime";
+import { loadOnboardingCompleted } from "../src/services/credentials";
 import { useThemeStore } from "../src/theme/theme-store";
 import { ThemeProvider, useAppTheme } from "../src/theme/theme-context";
 
 export default function RootLayout() {
     const [themeReady, setThemeReady] = useState(false);
+    const [initialScreen, setInitialScreen] = useState<"(drawer)" | "onboarding" | null>(null);
 
     useEffect(() => {
         void useThemeStore.getState().hydrate().finally(() => {
@@ -22,7 +24,27 @@ export default function RootLayout() {
 
     useEffect(() => initializeAppRuntime(), []);
 
-    if (!themeReady) {
+    useEffect(() => {
+        if (!themeReady) {
+            return;
+        }
+
+        let cancelled = false;
+
+        void loadOnboardingCompleted().then((completed) => {
+            if (cancelled) {
+                return;
+            }
+
+            setInitialScreen(completed ? "(drawer)" : "onboarding");
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [themeReady]);
+
+    if (!themeReady || initialScreen === null) {
         return null;
     }
 
@@ -30,20 +52,21 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaProvider>
                 <ThemeProvider>
-                    <RootNavigator />
+                    <RootNavigator initialScreen={initialScreen} />
                 </ThemeProvider>
             </SafeAreaProvider>
         </GestureHandlerRootView>
     );
 }
 
-function RootNavigator() {
+function RootNavigator({ initialScreen }: { initialScreen: "(drawer)" | "onboarding" }) {
     const theme = useAppTheme();
 
     return (
         <>
             <StatusBar style={theme.resolvedScheme === "light" ? "dark" : "light"} />
             <Stack
+                initialRouteName={initialScreen}
                 screenOptions={{
                     headerShown: false,
                     contentStyle: { backgroundColor: theme.colors.bg },
@@ -63,6 +86,18 @@ function RootNavigator() {
                         headerStyle: { backgroundColor: theme.colors.bg },
                         headerTintColor: theme.colors.textPrimary,
                         headerTitleStyle: { fontWeight: "600" },
+                    }}
+                />
+                <Stack.Screen
+                    name="onboarding"
+                    options={{
+                        headerShown: true,
+                        title: "Getting Started",
+                        headerBackButtonDisplayMode: "minimal",
+                        headerStyle: { backgroundColor: theme.colors.bg },
+                        headerTintColor: theme.colors.textPrimary,
+                        headerTitleStyle: { fontWeight: "600" },
+                        contentStyle: { backgroundColor: theme.colors.bg },
                     }}
                 />
                 <Stack.Screen

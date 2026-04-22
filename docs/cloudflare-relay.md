@@ -1,12 +1,12 @@
 # Cloudflare Hosted Relay
 
-This is the production-oriented remote networking path for Copilot Mobile.
+This is the production-oriented remote networking path for Code Companion.
 
 The goal is:
 
 1. Deploy the relay/control-plane once to Cloudflare Workers.
 2. Point the desktop companion at that public URL.
-3. Let end users run only `copilot-mobile login` and `copilot-mobile up`.
+3. Let end users run only `code-companion login` and `code-companion up`.
 
 ## App Location
 
@@ -64,13 +64,13 @@ https://copilot-mobile-relay.senoldogan0233.workers.dev
 
 The desktop companion now uses this hosted API by default, so end users do not need to export any relay environment variables.
 
-## Desktop Companion
+## Mac Companion
 
 After the Worker is deployed, run from any terminal:
 
 ```bash
-copilot-mobile login
-copilot-mobile up
+code-companion login
+code-companion up
 ```
 
 The command will:

@@ -9,6 +9,8 @@ import {
     getDaemonEntryPoint,
     getDaemonStderrPath,
     getDaemonStdoutPath,
+    getLegacyLaunchAgentLabel,
+    getLegacyLaunchAgentPath,
     getLaunchAgentLabel,
     getLaunchAgentPath,
 } from "./paths.mjs";
@@ -21,7 +23,7 @@ const COMMON_COPILOT_CLI_PATHS = [
 function getLaunchctlDomain() {
     const uid = process.getuid?.();
     if (typeof uid !== "number") {
-        throw new Error("copilot-mobile companion currently supports macOS user sessions only.");
+        throw new Error("Code Companion currently supports macOS user sessions only.");
     }
 
     return `gui/${uid}`;
@@ -83,7 +85,10 @@ export function writeLaunchAgentPlist(workspaceRoot) {
         ? workspaceRoot
         : getCompanionRootDirectory();
     const workspaceRootEnvironment = typeof workspaceRoot === "string" && workspaceRoot.length > 0
-        ? `\n        <key>COPILOT_MOBILE_WORKSPACE_ROOT</key>\n        <string>${workspaceRoot}</string>`
+        ? [
+            `\n        <key>CODE_COMPANION_WORKSPACE_ROOT</key>\n        <string>${workspaceRoot}</string>`,
+            `\n        <key>COPILOT_MOBILE_WORKSPACE_ROOT</key>\n        <string>${workspaceRoot}</string>`,
+        ].join("")
         : "";
     const copilotCliPath = resolvePreferredCopilotCliPath();
     const copilotCliEnvironment = typeof copilotCliPath === "string" && copilotCliPath.length > 0
@@ -103,6 +108,10 @@ export function writeLaunchAgentPlist(workspaceRoot) {
     </array>
     <key>EnvironmentVariables</key>
     <dict>
+        <key>CODE_COMPANION_CONFIG_PATH</key>
+        <string>${getCompanionConfigPath()}</string>
+        <key>CODE_COMPANION_LOGS_DIR</key>
+        <string>${getCompanionLogsDirectory()}</string>
         <key>COPILOT_MOBILE_CONFIG_PATH</key>
         <string>${getCompanionConfigPath()}</string>
         <key>COPILOT_MOBILE_LOGS_DIR</key>
@@ -129,10 +138,12 @@ export function writeLaunchAgentPlist(workspaceRoot) {
 export async function bootstrapLaunchAgent() {
     const domain = getLaunchctlDomain();
     const plistPath = getLaunchAgentPath();
+    const legacyPlistPath = getLegacyLaunchAgentPath();
 
     let bootstrapError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
         runLaunchctl(["bootout", domain, plistPath], true);
+        runLaunchctl(["bootout", domain, legacyPlistPath], true);
         try {
             runLaunchctl(["bootstrap", domain, plistPath], false);
             bootstrapError = null;
@@ -148,14 +159,26 @@ export async function bootstrapLaunchAgent() {
     }
 
     runLaunchctl(["kickstart", "-k", `${domain}/${getLaunchAgentLabel()}`], true);
+    runLaunchctl(["kickstart", "-k", `${domain}/${getLegacyLaunchAgentLabel()}`], true);
 }
 
 export function bootoutLaunchAgent() {
     const domain = getLaunchctlDomain();
     const plistPath = getLaunchAgentPath();
-    if (!existsSync(plistPath)) {
+    const legacyPlistPath = getLegacyLaunchAgentPath();
+    const hasPrimaryPlist = existsSync(plistPath);
+    const hasLegacyPlist = existsSync(legacyPlistPath);
+
+    if (!hasPrimaryPlist && !hasLegacyPlist) {
         return false;
     }
 
-    return runLaunchctl(["bootout", domain, plistPath], true);
+    const primaryResult = hasPrimaryPlist
+        ? runLaunchctl(["bootout", domain, plistPath], true)
+        : false;
+    const legacyResult = hasLegacyPlist
+        ? runLaunchctl(["bootout", domain, legacyPlistPath], true)
+        : false;
+
+    return primaryResult || legacyResult;
 }

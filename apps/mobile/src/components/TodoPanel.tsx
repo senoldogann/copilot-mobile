@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import type { AgentTodo } from "../stores/session-store-types";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 
@@ -30,7 +30,25 @@ function TodoStatusIcon({ status }: { status: AgentTodo["status"] }) {
     );
 }
 
-export function TodoPanel({ todos }: TodoPanelProps) {
+function areTodosEqual(
+    left: ReadonlyArray<AgentTodo>,
+    right: ReadonlyArray<AgentTodo>
+): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((todo, index) => {
+        const candidate = right[index];
+        return candidate !== undefined
+            && candidate.id === todo.id
+            && candidate.content === todo.content
+            && candidate.status === todo.status
+            && candidate.priority === todo.priority;
+    });
+}
+
+function TodoPanelInner({ todos }: TodoPanelProps) {
     const styles = useThemedStyles(createStyles);
     const [expanded, setExpanded] = useState(false);
 
@@ -70,10 +88,15 @@ export function TodoPanel({ todos }: TodoPanelProps) {
             </Pressable>
 
             {expanded && (
-                <View style={styles.list}>
+                <ScrollView
+                    style={styles.listScroll}
+                    contentContainerStyle={styles.list}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={false}
+                >
                     {todos.map((todo, index) => (
                         <View
-                            key={todo.id}
+                            key={`${todo.id}:${index}:${todo.content}`}
                             style={[
                                 styles.item,
                                 index < todos.length - 1 && styles.itemBorder,
@@ -97,11 +120,16 @@ export function TodoPanel({ todos }: TodoPanelProps) {
                             </View>
                         </View>
                     ))}
-                </View>
+                </ScrollView>
             )}
         </View>
     );
 }
+
+export const TodoPanel = React.memo(
+    TodoPanelInner,
+    (previousProps, nextProps) => areTodosEqual(previousProps.todos, nextProps.todos)
+);
 
 const createStyles = (theme: AppTheme) => StyleSheet.create({
     container: {
@@ -167,6 +195,9 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         fontSize: 14,
         marginLeft: 8,
         color: theme.colors.textSecondary,
+    },
+    listScroll: {
+        maxHeight: 220,
     },
     list: {
         paddingHorizontal: 12,

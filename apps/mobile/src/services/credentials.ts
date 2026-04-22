@@ -3,14 +3,47 @@
 import * as SecureStore from "expo-secure-store";
 import type { TransportMode } from "@copilot-mobile/shared";
 
-const KEY_DEVICE_CREDENTIAL = "copilot_mobile_device_credential";
-const KEY_SERVER_URL = "copilot_mobile_server_url";
-const KEY_CERT_FINGERPRINT = "copilot_mobile_cert_fingerprint";
-const KEY_DEVICE_ID = "copilot_mobile_device_id";
-const KEY_TRANSPORT_MODE = "copilot_mobile_transport_mode";
-const KEY_RELAY_ACCESS_TOKEN = "copilot_mobile_relay_access_token";
-const KEY_ACTIVE_SESSION_ID = "copilot_mobile_active_session_id";
-const KEY_SESSION_PREFERENCES = "copilot_mobile_session_preferences";
+type SecureStoreKeyPair = {
+    primary: string;
+    legacy: string;
+};
+
+const KEY_DEVICE_CREDENTIAL: SecureStoreKeyPair = {
+    primary: "code_companion_device_credential",
+    legacy: "copilot_mobile_device_credential",
+};
+const KEY_SERVER_URL: SecureStoreKeyPair = {
+    primary: "code_companion_server_url",
+    legacy: "copilot_mobile_server_url",
+};
+const KEY_CERT_FINGERPRINT: SecureStoreKeyPair = {
+    primary: "code_companion_cert_fingerprint",
+    legacy: "copilot_mobile_cert_fingerprint",
+};
+const KEY_DEVICE_ID: SecureStoreKeyPair = {
+    primary: "code_companion_device_id",
+    legacy: "copilot_mobile_device_id",
+};
+const KEY_TRANSPORT_MODE: SecureStoreKeyPair = {
+    primary: "code_companion_transport_mode",
+    legacy: "copilot_mobile_transport_mode",
+};
+const KEY_RELAY_ACCESS_TOKEN: SecureStoreKeyPair = {
+    primary: "code_companion_relay_access_token",
+    legacy: "copilot_mobile_relay_access_token",
+};
+const KEY_ACTIVE_SESSION_ID: SecureStoreKeyPair = {
+    primary: "code_companion_active_session_id",
+    legacy: "copilot_mobile_active_session_id",
+};
+const KEY_SESSION_PREFERENCES: SecureStoreKeyPair = {
+    primary: "code_companion_session_preferences",
+    legacy: "copilot_mobile_session_preferences",
+};
+const KEY_ONBOARDING_COMPLETED: SecureStoreKeyPair = {
+    primary: "code_companion_onboarding_completed",
+    legacy: "copilot_mobile_onboarding_completed",
+};
 
 export type StoredCredentials = {
     deviceCredential: string;
@@ -43,16 +76,27 @@ export type StoredSessionPreferences = {
     autoApproveReads: boolean;
 };
 
-async function setItem(key: string, value: string): Promise<void> {
-    await SecureStore.setItemAsync(key, value);
+async function setItem(key: SecureStoreKeyPair, value: string): Promise<void> {
+    await SecureStore.setItemAsync(key.primary, value);
+    await SecureStore.setItemAsync(key.legacy, value);
 }
 
-async function getItem(key: string): Promise<string | null> {
-    return SecureStore.getItemAsync(key);
+async function getItem(key: SecureStoreKeyPair): Promise<string | null> {
+    const primaryValue = await SecureStore.getItemAsync(key.primary);
+    if (primaryValue !== null) {
+        return primaryValue;
+    }
+
+    const legacyValue = await SecureStore.getItemAsync(key.legacy);
+    if (legacyValue !== null) {
+        await SecureStore.setItemAsync(key.primary, legacyValue);
+    }
+    return legacyValue;
 }
 
-async function removeItem(key: string): Promise<void> {
-    await SecureStore.deleteItemAsync(key);
+async function removeItem(key: SecureStoreKeyPair): Promise<void> {
+    await SecureStore.deleteItemAsync(key.primary);
+    await SecureStore.deleteItemAsync(key.legacy);
 }
 
 export async function saveCredentials(creds: StoredCredentials): Promise<void> {
@@ -161,4 +205,17 @@ export async function loadSessionPreferences(): Promise<StoredSessionPreferences
     } catch {
         return null;
     }
+}
+
+export async function saveOnboardingCompleted(completed: boolean): Promise<void> {
+    if (!completed) {
+        await removeItem(KEY_ONBOARDING_COMPLETED);
+        return;
+    }
+
+    await setItem(KEY_ONBOARDING_COMPLETED, "1");
+}
+
+export async function loadOnboardingCompleted(): Promise<boolean> {
+    return (await getItem(KEY_ONBOARDING_COMPLETED)) === "1";
 }

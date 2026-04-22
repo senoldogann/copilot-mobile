@@ -48,18 +48,37 @@ type RuntimeState = {
     sessionExpiresAt?: number | null;
 };
 
-const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".copilot-mobile", "config.json");
-const DEFAULT_LOGS_DIR = path.join(os.homedir(), ".copilot-mobile", "logs");
-const RELAY_SECRET_ENV = "COPILOT_MOBILE_RELAY_SECRET";
+const DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".code-companion", "config.json");
+const LEGACY_DEFAULT_CONFIG_PATH = path.join(os.homedir(), ".copilot-mobile", "config.json");
+const DEFAULT_LOGS_DIR = path.join(os.homedir(), ".code-companion", "logs");
+const LEGACY_DEFAULT_LOGS_DIR = path.join(os.homedir(), ".copilot-mobile", "logs");
+const RELAY_SECRET_ENV_NAMES = [
+    "CODE_COMPANION_SELF_HOSTED_RELAY_SECRET",
+    "CODE_COMPANION_RELAY_SECRET",
+    "COPILOT_MOBILE_RELAY_SECRET",
+] as const;
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
 const RETRY_REFRESH_DELAY_MS = 60 * 1000;
 
+function readEnv(names: ReadonlyArray<string>): string | undefined {
+    for (const name of names) {
+        const value = process.env[name];
+        if (typeof value === "string" && value.trim().length > 0) {
+            return value.trim();
+        }
+    }
+
+    return undefined;
+}
+
 function getConfigPath(): string {
-    return process.env["COPILOT_MOBILE_CONFIG_PATH"] ?? DEFAULT_CONFIG_PATH;
+    return readEnv(["CODE_COMPANION_CONFIG_PATH", "COPILOT_MOBILE_CONFIG_PATH"])
+        ?? (existsSync(DEFAULT_CONFIG_PATH) ? DEFAULT_CONFIG_PATH : LEGACY_DEFAULT_CONFIG_PATH);
 }
 
 function getLogsDirectory(): string {
-    return process.env["COPILOT_MOBILE_LOGS_DIR"] ?? DEFAULT_LOGS_DIR;
+    return readEnv(["CODE_COMPANION_LOGS_DIR", "COPILOT_MOBILE_LOGS_DIR"])
+        ?? (existsSync(DEFAULT_LOGS_DIR) ? DEFAULT_LOGS_DIR : LEGACY_DEFAULT_LOGS_DIR);
 }
 
 function parseDesktopConfig(rawConfig: unknown): DesktopConfig {
@@ -123,7 +142,7 @@ function parseDesktopConfig(rawConfig: unknown): DesktopConfig {
 
 function loadDesktopConfig(configPath: string): DesktopConfig {
     if (!existsSync(configPath)) {
-        throw new Error(`Desktop config not found at ${configPath}. Run \`copilot-mobile up\` again.`);
+        throw new Error(`Desktop config not found at ${configPath}. Run \`code-companion up\` again.`);
     }
 
     const rawConfig = JSON.parse(readFileSync(configPath, "utf8")) as unknown;
@@ -244,7 +263,9 @@ function buildSelfHostedSession(config: DesktopConfig): HostedSessionResponse {
         throw new Error("Self-hosted mode requires selfHostedRelayUrl and selfHostedRelaySecret.");
     }
 
-    process.env[RELAY_SECRET_ENV] = config.selfHostedRelaySecret;
+    for (const envName of RELAY_SECRET_ENV_NAMES) {
+        process.env[envName] = config.selfHostedRelaySecret;
+    }
 
     const relayBaseUrl = config.selfHostedRelayUrl.replace(/\/$/, "");
     const companionId = typeof config.companionId === "string" && config.companionId.length > 0
@@ -299,7 +320,7 @@ async function main(): Promise<void> {
 
     if (!available) {
         runtimeState.daemonState = "error";
-        runtimeState.lastError = "GitHub Copilot CLI is not authenticated. Run `copilot-mobile login` first.";
+        runtimeState.lastError = "GitHub Copilot CLI is not authenticated. Run `code-companion login` first.";
         throw new Error(runtimeState.lastError);
     }
 

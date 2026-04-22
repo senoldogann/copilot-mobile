@@ -28,12 +28,12 @@ const DASHBOARD_PATH = "/__copilot_mobile/dashboard";
 const NODEJS_MAJOR_REQUIREMENT = 20;
 
 function printUsage() {
-    console.log("Usage: copilot-mobile <login|up|status|doctor|qr|logs|dashboard|down> [--json]");
+    console.log("Usage: code-companion <login|up|status|doctor|qr|logs|dashboard|down> [--json]");
 }
 
 function assertMacOS() {
     if (process.platform !== "darwin") {
-        throw new Error("copilot-mobile desktop companion v1 currently supports macOS only.");
+        throw new Error("Code Companion desktop companion v1 currently supports macOS only.");
     }
 }
 
@@ -142,7 +142,7 @@ function printStatus(payload) {
 function printQrCode(payload) {
     const qrCode = payload.qrCode;
     console.log("\n┌─────────────────────────────────────────┐");
-    console.log("│ Copilot Mobile Companion — Pairing QR   │");
+    console.log("│    Code Companion Desktop — Pairing QR  │");
     console.log("└─────────────────────────────────────────┘\n");
     console.log(qrCode.ascii);
     console.log(`\nConnection: ${qrCode.payload.url}`);
@@ -302,7 +302,7 @@ async function getCopilotAuthSnapshot(copilotCliPath) {
             ok: auth.isAuthenticated === true,
             detail: auth.isAuthenticated === true
                 ? `Authenticated as ${auth.login ?? auth.statusMessage ?? "unknown"} on ${auth.host ?? "GitHub"}. Copilot CLI ${status.version}.`
-                : auth.statusMessage ?? "GitHub Copilot CLI is not authenticated. Run `copilot-mobile login`.",
+                : auth.statusMessage ?? "GitHub Copilot CLI is not authenticated. Run `code-companion login`.",
             auth,
             status,
         };
@@ -323,7 +323,7 @@ function hasDoctorFailures(checks) {
 }
 
 function printDoctorReport(report) {
-    console.log("Copilot Mobile Doctor");
+    console.log("Code Companion Doctor");
     console.log(`Status: ${report.ready ? "ready" : "action_required"}`);
     console.log("");
 
@@ -426,7 +426,7 @@ async function buildDoctorReport() {
                 authSnapshot.detail
             ));
             if (!authSnapshot.ok) {
-                nextActions.push("Run `copilot-mobile login` on the Mac companion account.");
+                nextActions.push("Run `code-companion login` on the Mac companion account.");
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
@@ -436,7 +436,7 @@ async function buildDoctorReport() {
                 "fail",
                 `Could not verify Copilot authentication: ${message}`
             ));
-            nextActions.push("Run `copilot-mobile login` and retry `copilot-mobile doctor`.");
+            nextActions.push("Run `code-companion login` and retry `code-companion doctor`.");
         }
     }
 
@@ -457,7 +457,7 @@ async function buildDoctorReport() {
             "fail",
             message
         ));
-        nextActions.push("Fix the companion config file under `~/.copilot-mobile/config.json`.");
+        nextActions.push("Fix the companion config file under `~/.code-companion/config.json`.");
         return {
             ready: false,
             checks,
@@ -477,7 +477,7 @@ async function buildDoctorReport() {
             : `LaunchAgent plist is missing at ${launchAgentPath}.`
     ));
     if (!launchAgentReady) {
-        nextActions.push("Run `copilot-mobile up` once so the LaunchAgent is installed for the current macOS user.");
+        nextActions.push("Run `code-companion up` once so the LaunchAgent is installed for the current macOS user.");
     }
 
     let snapshot = null;
@@ -524,7 +524,7 @@ async function buildDoctorReport() {
             "fail",
             `Daemon is not reachable on localhost:${config.managementPort}. ${message}`
         ));
-        nextActions.push("Run `copilot-mobile up` and wait for the QR code before pairing the phone.");
+        nextActions.push("Run `code-companion up` and wait for the QR code before pairing the phone.");
     }
 
     if (snapshot?.lastError) {
@@ -601,7 +601,7 @@ async function handleUp() {
             throw new Error("Managed companion daemon started, but the status payload is incompatible.");
         }
         if (status.status.copilotAuthenticated !== true) {
-            throw new Error("GitHub Copilot CLI authentication is missing. Run `copilot-mobile login` and try again.");
+            throw new Error("GitHub Copilot CLI authentication is missing. Run `code-companion login` and try again.");
         }
 
         const qrPayload = await requestJson("POST", config.managementPort, QR_PATH);
@@ -626,7 +626,7 @@ async function handleStatus() {
         printStatus(status);
     } catch (error) {
         if (error instanceof Error && error.message.includes("Legacy bridge detected")) {
-            console.log("Legacy bridge detected on this port. Stop it manually, then run `copilot-mobile up`.");
+            console.log("Legacy bridge detected on this port. Stop it manually, then run `code-companion up`.");
             return;
         }
         console.log("Daemon: stopped");
@@ -664,7 +664,7 @@ async function handleDashboard() {
     const config = loadConfig();
     const status = await fetchManagedStatus(config.managementPort);
     if (status.status.daemonState !== "running") {
-        throw new Error("Companion daemon is not running. Start it with `copilot-mobile up`.");
+        throw new Error("Companion daemon is not running. Start it with `code-companion up`.");
     }
     console.log(`Dashboard URL: http://127.0.0.1:${config.dashboardPort}${DASHBOARD_PATH}`);
 }

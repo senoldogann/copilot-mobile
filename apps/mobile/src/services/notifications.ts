@@ -226,6 +226,10 @@ export async function prepareNotificationPermissions(): Promise<boolean> {
 export async function resolveRemotePushAvailability(
     options: { allowPrompt: boolean }
 ): Promise<RemotePushAvailability> {
+    if (__DEV__ && Platform.OS === "ios") {
+        return { kind: "unsupported" };
+    }
+
     const notifications = await getNotificationsModule();
     if (notifications === null) {
         return { kind: "unsupported" };

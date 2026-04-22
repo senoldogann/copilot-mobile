@@ -63,7 +63,7 @@ pnpm start:dev-client -- --clear
 If local network access is blocked by iOS, check:
 
 ```text
-iPhone Settings > Apps > Copilot Mobile > Local Network
+iPhone Settings > Apps > Code Companion > Local Network
 ```
 
 If the permission was denied before the plist changes, delete the app from the iPhone and install it again from Xcode.

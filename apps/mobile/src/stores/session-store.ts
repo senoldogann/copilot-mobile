@@ -110,6 +110,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             return {
                 activeSessionId: sessionId,
                 isAbortRequested: false,
+                agentTodos: [],
                 permissionPrompt: nextPermissionPrompt ?? null,
                 permissionPromptQueue: nextPermissionPromptQueue,
                 deferredPermissionPrompts: nextDeferredPermissionPrompts,
@@ -815,6 +816,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             chatItems: [...items],
             isAssistantTyping: false,
             isAbortRequested: false,
+            agentTodos: [],
             permissionPrompt: null,
             permissionPromptQueue: [],
             userInputPrompt: null,

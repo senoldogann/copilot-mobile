@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import { SubagentIcon } from "./Icons";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 
@@ -40,7 +40,24 @@ function SubagentStatusIcon({ status }: { status: SubagentRun["status"] }) {
     );
 }
 
-export function SubagentPanel({ runs }: SubagentPanelProps) {
+function areSubagentRunsEqual(
+    left: ReadonlyArray<SubagentRun>,
+    right: ReadonlyArray<SubagentRun>
+): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((run, index) => {
+        const candidate = right[index];
+        return candidate !== undefined
+            && candidate.requestId === run.requestId
+            && candidate.title === run.title
+            && candidate.status === run.status;
+    });
+}
+
+function SubagentPanelInner({ runs }: SubagentPanelProps) {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
     const [expanded, setExpanded] = useState(false);
@@ -84,7 +101,12 @@ export function SubagentPanel({ runs }: SubagentPanelProps) {
             </Pressable>
 
             {expanded && (
-                <View style={styles.list}>
+                <ScrollView
+                    style={styles.listScroll}
+                    contentContainerStyle={styles.list}
+                    nestedScrollEnabled
+                    showsVerticalScrollIndicator={false}
+                >
                     {runs.map((run, index) => (
                         <View
                             key={run.requestId}
@@ -108,11 +130,16 @@ export function SubagentPanel({ runs }: SubagentPanelProps) {
                             </View>
                         </View>
                     ))}
-                </View>
+                </ScrollView>
             )}
         </View>
     );
 }
+
+export const SubagentPanel = React.memo(
+    SubagentPanelInner,
+    (previousProps, nextProps) => areSubagentRunsEqual(previousProps.runs, nextProps.runs)
+);
 
 const createStyles = (theme: AppTheme) => StyleSheet.create({
     container: {
@@ -173,6 +200,9 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         fontSize: 14,
         marginLeft: 8,
         color: theme.colors.textSecondary,
+    },
+    listScroll: {
+        maxHeight: 208,
     },
     list: {
         paddingHorizontal: 12,

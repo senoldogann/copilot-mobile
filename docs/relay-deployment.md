@@ -1,6 +1,6 @@
 # Relay Deployment
 
-This relay is the public network edge and control-plane for Copilot Mobile. It accepts authenticated companion and mobile sockets, and it also exposes the hosted companion registration/session endpoints used by `copilot-mobile up`.
+This relay is the public network edge and control-plane for Code Companion. It accepts authenticated companion and mobile sockets, and it also exposes the hosted companion registration/session endpoints used by `code-companion up`.
 
 ## Required Environment
 
@@ -65,14 +65,14 @@ Expected public routes:
 - `/connect/companion/:companionId`
 - `/health`
 
-## Desktop Companion
+## Mac Companion
 
 For a hosted deployment:
 
 ```bash
 export COPILOT_MOBILE_HOSTED_API_BASE_URL="https://your-relay-domain.example.com"
 export COPILOT_MOBILE_HOSTED_RELAY_BASE_URL="wss://your-relay-domain.example.com"
-copilot-mobile up
+code-companion up
 ```
 
 The desktop companion will register once, obtain a companion session from the control-plane, connect the outbound companion socket, and embed the mobile relay token into the pairing QR.

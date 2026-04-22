@@ -4,7 +4,8 @@ import * as SecureStore from "expo-secure-store";
 
 import { applyThemeColors, type ThemeMode, type ThemeVariant } from "./colors";
 
-const THEME_PREFERENCES_KEY = "copilot_mobile_theme_preferences";
+const THEME_PREFERENCES_KEY = "code_companion_theme_preferences";
+const LEGACY_THEME_PREFERENCES_KEY = "copilot_mobile_theme_preferences";
 
 type ThemePreferences = {
     mode: ThemeMode;
@@ -23,9 +24,14 @@ const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
 };
 
 async function persistThemePreferences(preferences: ThemePreferences): Promise<void> {
+    const serializedPreferences = JSON.stringify(preferences);
     await SecureStore.setItemAsync(
         THEME_PREFERENCES_KEY,
-        JSON.stringify(preferences),
+        serializedPreferences,
+    );
+    await SecureStore.setItemAsync(
+        LEGACY_THEME_PREFERENCES_KEY,
+        serializedPreferences,
     );
 }
 
@@ -58,9 +64,13 @@ export const useThemeStore = create<ThemeStore>((set) => ({
     hydrated: false,
 
     hydrate: async () => {
-        const preferences = readThemePreferences(
-            await SecureStore.getItemAsync(THEME_PREFERENCES_KEY)
-        );
+        const rawValue = await SecureStore.getItemAsync(THEME_PREFERENCES_KEY)
+            ?? await SecureStore.getItemAsync(LEGACY_THEME_PREFERENCES_KEY);
+        if (rawValue !== null) {
+            await SecureStore.setItemAsync(THEME_PREFERENCES_KEY, rawValue);
+        }
+
+        const preferences = readThemePreferences(rawValue);
         applyThemeColors(preferences.mode, preferences.variant, Appearance.getColorScheme());
         set({
             ...preferences,

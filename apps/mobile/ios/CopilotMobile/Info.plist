@@ -7,7 +7,7 @@
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
-    <string>Copilot Mobile</string>
+    <string>Code Companion</string>
     <key>CFBundleExecutable</key>
     <string>$(EXECUTABLE_NAME)</string>
     <key>CFBundleIdentifier</key>
@@ -27,6 +27,8 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
+          <string>code-companion</string>
+          <string>dev.senoldogan.codecompanion</string>
           <string>copilot-mobile</string>
           <string>dev.senoldogan.copilot-mobile</string>
         </array>
@@ -51,11 +53,11 @@
     <key>NSCameraUsageDescription</key>
     <string>Camera permission is required for QR code scanning</string>
     <key>NSFaceIDUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
+    <string>Allow Code Companion to use Face ID when biometric authentication is available.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Local network access is required to connect to your Copilot Bridge running on your computer</string>
+    <string>Local network access helps your iPhone connect to your desktop companion during setup</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Photo library access is required to attach images to Copilot chats</string>
+    <string>Photo library access is required to attach images to your chat</string>
     <key>NSUserActivityTypes</key>
     <array>
       <string>$(PRODUCT_BUNDLE_IDENTIFIER).expo.index_route</string>

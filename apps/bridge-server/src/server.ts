@@ -1,4 +1,4 @@
-// Copilot Mobile Bridge Server — main entry point
+// Code Companion bridge server — main entry point
 
 import { createCopilotAdapter } from "./copilot/client.js";
 import { createBridgeServer } from "./ws/server.js";
@@ -8,10 +8,33 @@ import { createRelayProxy } from "./relay/proxy.js";
 import { createRelayAccessToken, getRequiredRelaySecret } from "./auth/relay-token.js";
 import { DEFAULT_WS_PORT } from "@copilot-mobile/shared";
 
-const REQUIRED_PUBLIC_URL_ENV = "COPILOT_MOBILE_PUBLIC_WS_URL";
-const REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV = "COPILOT_MOBILE_PUBLIC_CERT_FINGERPRINT";
-const RELAY_BASE_URL_ENV = "COPILOT_MOBILE_RELAY_URL";
-const ALLOW_INSECURE_DIRECT_WS_ENV = "COPILOT_MOBILE_ALLOW_INSECURE_DIRECT_WS";
+const REQUIRED_PUBLIC_URL_ENV_NAMES = [
+    "CODE_COMPANION_PUBLIC_WS_URL",
+    "COPILOT_MOBILE_PUBLIC_WS_URL",
+] as const;
+const REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV_NAMES = [
+    "CODE_COMPANION_PUBLIC_CERT_FINGERPRINT",
+    "COPILOT_MOBILE_PUBLIC_CERT_FINGERPRINT",
+] as const;
+const RELAY_BASE_URL_ENV_NAMES = [
+    "CODE_COMPANION_RELAY_URL",
+    "COPILOT_MOBILE_RELAY_URL",
+] as const;
+const ALLOW_INSECURE_DIRECT_WS_ENV_NAMES = [
+    "CODE_COMPANION_ALLOW_INSECURE_DIRECT_WS",
+    "COPILOT_MOBILE_ALLOW_INSECURE_DIRECT_WS",
+] as const;
+
+function readEnv(names: ReadonlyArray<string>): string | undefined {
+    for (const name of names) {
+        const value = process.env[name];
+        if (typeof value === "string" && value.trim().length > 0) {
+            return value.trim();
+        }
+    }
+
+    return undefined;
+}
 
 function isDirectHostname(hostname: string): boolean {
     const normalized = hostname.trim().toLowerCase();
@@ -49,7 +72,7 @@ function isAllowedPublicWebSocketUrl(parsedUrl: URL): boolean {
 
     return parsedUrl.protocol === "ws:"
         && isDirectHostname(parsedUrl.hostname)
-        && process.env[ALLOW_INSECURE_DIRECT_WS_ENV] === "1";
+        && ALLOW_INSECURE_DIRECT_WS_ENV_NAMES.some((envName) => process.env[envName] === "1");
 }
 
 function isInsecureDirectWebSocketUrl(parsedUrl: URL): boolean {
@@ -57,10 +80,10 @@ function isInsecureDirectWebSocketUrl(parsedUrl: URL): boolean {
 }
 
 function getRequiredPublicWebSocketUrl(): string {
-    const publicWebSocketUrl = process.env[REQUIRED_PUBLIC_URL_ENV];
+    const publicWebSocketUrl = readEnv(REQUIRED_PUBLIC_URL_ENV_NAMES);
     if (typeof publicWebSocketUrl !== "string" || publicWebSocketUrl.trim().length === 0) {
         throw new Error(
-            `Missing required ${REQUIRED_PUBLIC_URL_ENV}. Prepare a public relay or reverse-proxy wss:// URL, or opt into insecure private-network ws:// development with ${ALLOW_INSECURE_DIRECT_WS_ENV}=1 before starting the bridge.`
+            `Missing required ${REQUIRED_PUBLIC_URL_ENV_NAMES[0]}. Prepare a public relay or reverse-proxy wss:// URL, or opt into insecure private-network ws:// development with ${ALLOW_INSECURE_DIRECT_WS_ENV_NAMES[0]}=1 before starting the bridge.`
         );
     }
 
@@ -69,14 +92,14 @@ function getRequiredPublicWebSocketUrl(): string {
         parsedUrl = new URL(publicWebSocketUrl);
     } catch {
         throw new Error(
-            `${REQUIRED_PUBLIC_URL_ENV} must be a valid wss:// URL. Received: ${publicWebSocketUrl}`
+            `${REQUIRED_PUBLIC_URL_ENV_NAMES[0]} must be a valid wss:// URL. Received: ${publicWebSocketUrl}`
         );
     }
 
     if (isAllowedPublicWebSocketUrl(parsedUrl)) {
         if (isInsecureDirectWebSocketUrl(parsedUrl)) {
             console.warn(
-                `[security] Insecure direct ws:// mode enabled for private-network development only via ${ALLOW_INSECURE_DIRECT_WS_ENV}=1.`
+                `[security] Insecure direct ws:// mode enabled for private-network development only via ${ALLOW_INSECURE_DIRECT_WS_ENV_NAMES[0]}=1.`
             );
             console.warn(
                 `[security] Do not expose this mode through public IPs, tunnels, reverse proxies, or production daemon installs.`
@@ -86,7 +109,7 @@ function getRequiredPublicWebSocketUrl(): string {
     }
 
     throw new Error(
-        `${REQUIRED_PUBLIC_URL_ENV} must use wss://, or ws:// only for localhost/private-network development URLs when ${ALLOW_INSECURE_DIRECT_WS_ENV}=1. Received: ${publicWebSocketUrl}`
+        `${REQUIRED_PUBLIC_URL_ENV_NAMES[0]} must use wss://, or ws:// only for localhost/private-network development URLs when ${ALLOW_INSECURE_DIRECT_WS_ENV_NAMES[0]}=1. Received: ${publicWebSocketUrl}`
     );
 }
 
@@ -97,10 +120,10 @@ function getRequiredPublicCertFingerprint(publicWebSocketUrl: string): string | 
         return null;
     }
 
-    const rawFingerprint = process.env[REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV];
+    const rawFingerprint = readEnv(REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV_NAMES);
     if (typeof rawFingerprint !== "string" || rawFingerprint.trim().length === 0) {
         throw new Error(
-            `${REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV} is required for direct wss:// pairing so the mobile client can pin the presented certificate.`
+            `${REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV_NAMES[0]} is required for direct wss:// pairing so the mobile client can pin the presented certificate.`
         );
     }
 
@@ -108,7 +131,7 @@ function getRequiredPublicCertFingerprint(publicWebSocketUrl: string): string | 
 }
 
 function getOptionalRelayBaseUrl(): string | null {
-    const rawRelayUrl = process.env[RELAY_BASE_URL_ENV];
+    const rawRelayUrl = readEnv(RELAY_BASE_URL_ENV_NAMES);
     if (typeof rawRelayUrl !== "string" || rawRelayUrl.trim().length === 0) {
         return null;
     }
@@ -118,13 +141,13 @@ function getOptionalRelayBaseUrl(): string | null {
         parsedUrl = new URL(rawRelayUrl);
     } catch {
         throw new Error(
-            `${RELAY_BASE_URL_ENV} must be a valid ws:// or wss:// URL. Received: ${rawRelayUrl}`
+            `${RELAY_BASE_URL_ENV_NAMES[0]} must be a valid ws:// or wss:// URL. Received: ${rawRelayUrl}`
         );
     }
 
     if (parsedUrl.protocol !== "ws:" && parsedUrl.protocol !== "wss:") {
         throw new Error(
-            `${RELAY_BASE_URL_ENV} must use ws:// or wss://. Received: ${rawRelayUrl}`
+            `${RELAY_BASE_URL_ENV_NAMES[0]} must use ws:// or wss://. Received: ${rawRelayUrl}`
         );
     }
 
@@ -170,7 +193,7 @@ function isNodeListenError(error: unknown): error is NodeJS.ErrnoException {
 }
 
 async function main(): Promise<void> {
-    console.log("Starting Copilot Mobile Bridge...\n");
+    console.log("Starting Code Companion bridge...\n");
     const bridgePort = Number.parseInt(process.env["BRIDGE_PORT"] ?? "", 10) || DEFAULT_WS_PORT;
     const relayBaseUrl = getOptionalRelayBaseUrl();
     const relayConfig = relayBaseUrl !== null

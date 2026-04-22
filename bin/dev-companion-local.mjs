@@ -111,7 +111,7 @@ async function waitForBridge(port) {
 function printQrCode(qrPayload) {
     const qrCode = qrPayload.qrCode;
     console.log("\n┌─────────────────────────────────────────┐");
-    console.log("│   Copilot Mobile Companion — QR Ready   │");
+    console.log("│    Code Companion Desktop — QR Ready    │");
     console.log("└─────────────────────────────────────────┘\n");
     console.log(qrCode.ascii);
     console.log(`\nConnection: ${qrCode.payload.url}`);

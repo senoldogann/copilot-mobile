@@ -1,4 +1,4 @@
-# Copilot Mobile Bridge — Tasarım Dokümanı
+# Code Companion Bridge — Tasarım Dokümanı
 
 > **Tarih:** 20 Nisan 2026  
 > **Yazar:** Senol Dogan  

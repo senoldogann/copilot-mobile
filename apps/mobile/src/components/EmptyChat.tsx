@@ -50,8 +50,9 @@ function ConnectingSpinner() {
 
 const companionSetupSteps = [
     "Requires a Mac that stays powered on while you use the app.",
-    "On your Mac run npm install -g copilot-mobile, then copilot-mobile login and copilot-mobile up.",
-    "Scan the QR code once to pair. After that, your iPhone reconnects through the Mac companion.",
+    "On your Mac run npm install -g code-companion, then code-companion login and code-companion up.",
+    "Scan the QR code once to pair this iPhone with your Mac companion.",
+    "Allow notifications if you want alerts when approvals are needed or a run finishes in the background.",
 ] as const;
 
 export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Props) {
@@ -79,7 +80,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
                 </View>
                 <Text style={styles.title}>Connect to your Mac companion</Text>
                 <Text style={styles.subtitle}>
-                    Copilot Mobile works with a Mac companion. Finish the Mac setup first, then scan the pairing QR code.
+                    This app is a mobile client for a Mac companion. Finish the Mac setup first, then scan the pairing QR code.
                 </Text>
                 <View style={styles.requirementsCard}>
                     {companionSetupSteps.map((step, index) => (
@@ -91,6 +92,15 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
                         </View>
                     ))}
                 </View>
+                <Pressable
+                    style={({ pressed }) => [
+                        styles.secondaryButton,
+                        pressed && styles.secondaryButtonPressed,
+                    ]}
+                    onPress={() => router.push("/onboarding")}
+                >
+                    <Text style={styles.secondaryButtonText}>Open Setup Guide</Text>
+                </Pressable>
                 <Pressable
                     style={({ pressed }) => [
                         styles.scanButton,
@@ -109,7 +119,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
             <View style={styles.logoContainer}>
                 <CopilotBadge size={64} iconSize={36} />
             </View>
-            <Text style={styles.title}>GitHub Copilot</Text>
+            <Text style={styles.title}>Code Companion</Text>
             <Text style={styles.subtitle}>
                 Ask about coding, debugging, and more
             </Text>
@@ -233,6 +243,26 @@ function createStyles(theme: AppTheme) {
             color: theme.colors.textSecondary,
             fontSize: theme.fontSize.sm,
             lineHeight: 18,
+        },
+        secondaryButton: {
+            width: "100%",
+            alignItems: "center",
+            justifyContent: "center",
+            paddingVertical: theme.spacing.md,
+            paddingHorizontal: 28,
+            borderRadius: theme.borderRadius.md,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.bgSecondary,
+            marginBottom: theme.spacing.sm,
+        },
+        secondaryButtonPressed: {
+            opacity: 0.82,
+        },
+        secondaryButtonText: {
+            color: theme.colors.textPrimary,
+            fontSize: theme.fontSize.base,
+            fontWeight: "600",
         },
         scanButton: {
             backgroundColor: theme.colors.accent,

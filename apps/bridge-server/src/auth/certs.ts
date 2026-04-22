@@ -1,20 +1,57 @@
 // TLS certificate and JWT secret management
-// Stored in ~/.copilot-mobile/
+// Stored in ~/.code-companion/ with legacy migration from ~/.copilot-mobile/
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, renameSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync, renameSync, copyFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { randomBytes, createHash } from "node:crypto";
 import {
     CONFIG_DIR_NAME,
+    LEGACY_CONFIG_DIR_NAME,
     CERT_FILENAME,
     KEY_FILENAME,
     JWT_SECRET_FILENAME,
+    COMPANION_ID_FILENAME,
 } from "@copilot-mobile/shared";
 
+function getPrimaryConfigDir(): string {
+    return join(homedir(), CONFIG_DIR_NAME);
+}
+
+function getLegacyConfigDir(): string {
+    return join(homedir(), LEGACY_CONFIG_DIR_NAME);
+}
+
+function migrateLegacyConfigFiles(): void {
+    const primaryConfigDir = getPrimaryConfigDir();
+    const legacyConfigDir = getLegacyConfigDir();
+    const fileNames = [CERT_FILENAME, KEY_FILENAME, JWT_SECRET_FILENAME, COMPANION_ID_FILENAME] as const;
+
+    if (!existsSync(legacyConfigDir)) {
+        return;
+    }
+
+    if (!existsSync(primaryConfigDir)) {
+        mkdirSync(primaryConfigDir, { mode: 0o700, recursive: true });
+    }
+
+    for (const fileName of fileNames) {
+        const primaryPath = join(primaryConfigDir, fileName);
+        const legacyPath = join(legacyConfigDir, fileName);
+
+        if (existsSync(primaryPath) || !existsSync(legacyPath)) {
+            continue;
+        }
+
+        copyFileSync(legacyPath, primaryPath);
+        chmodSync(primaryPath, fileName === CERT_FILENAME ? 0o644 : 0o600);
+    }
+}
+
 export function getConfigDir(): string {
-    const dir = join(homedir(), CONFIG_DIR_NAME);
+    migrateLegacyConfigFiles();
+    const dir = getPrimaryConfigDir();
     if (!existsSync(dir)) {
         mkdirSync(dir, { mode: 0o700, recursive: true });
     }
@@ -94,7 +131,7 @@ export function setupTLSWithOpenSSL(configDir: string): void {
         "-out", certPath,
         "-days", "365",
         "-nodes",
-        "-subj", "/CN=copilot-mobile-bridge",
+        "-subj", "/CN=code-companion-bridge",
     ], { stdio: "ignore" });
     chmodSync(keyPath, 0o600);
 }

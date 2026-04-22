@@ -1,8 +1,9 @@
 {
-    "name": "copilot-mobile",
+    "name": "code-companion",
     "version": "0.1.0",
     "type": "module",
     "bin": {
+        "code-companion": "./bin/copilot-mobile.mjs",
         "copilot-mobile": "./bin/copilot-mobile.mjs"
     },
     "files": [
@@ -17,6 +18,7 @@
         "access": "public"
     },
     "scripts": {
+        "code-companion": "node ./bin/copilot-mobile.mjs",
         "copilot-mobile": "node ./bin/copilot-mobile.mjs",
         "login": "node ./bin/copilot-mobile.mjs login",
         "doctor": "node ./bin/copilot-mobile.mjs doctor",

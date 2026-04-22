@@ -1,4 +1,4 @@
-# Copilot Mobile — Audit Bulguları ve Aksiyon Planı
+# Code Companion — Audit Bulguları ve Aksiyon Planı
 
 Tarih: 2026-04-21
 

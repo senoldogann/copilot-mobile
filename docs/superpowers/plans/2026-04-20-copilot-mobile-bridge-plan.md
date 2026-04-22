@@ -1,4 +1,4 @@
-# Copilot Mobile Bridge — Uygulama Planı
+# Code Companion Bridge — Uygulama Planı
 
 > **Agentic workers için:** Bu planı uygulamak için superpowers:subagent-driven-development veya superpowers:executing-plans skill'ini kullanın. Adımlar checkbox (`- [ ]`) syntax'ı ile takip edilir.
 

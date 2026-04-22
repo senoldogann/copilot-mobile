@@ -6,7 +6,11 @@ import { CameraView, useCameraPermissions } from "expo-camera";
 import { useRouter } from "expo-router";
 import { qrPayloadSchema } from "@copilot-mobile/shared";
 import type { QRPayload } from "@copilot-mobile/shared";
-import { connectWithQR } from "../src/services/bridge";
+import {
+    connectWithQR,
+    syncRemoteNotificationRegistration,
+} from "../src/services/bridge";
+import { prepareNotificationPermissions } from "../src/services/notifications";
 import { useConnectionStore } from "../src/stores/connection-store";
 import { useThemedStyles, type AppTheme } from "../src/theme/theme-context";
 
@@ -22,6 +26,12 @@ export default function ScanScreen() {
 
     useEffect(() => {
         if (connectionState === "authenticated") {
+            void prepareNotificationPermissions().then(() => (
+                syncRemoteNotificationRegistration({
+                    allowPrompt: false,
+                    force: true,
+                })
+            ));
             router.replace("/");
         }
     }, [connectionState, router]);
@@ -67,7 +77,7 @@ export default function ScanScreen() {
             const qrPayloadResult = qrPayloadSchema.safeParse(parsed);
 
             if (!qrPayloadResult.success) {
-                Alert.alert("Invalid QR Code", "This QR code does not belong to a Copilot Mobile bridge.", [
+                Alert.alert("Invalid QR Code", "This QR code does not belong to your desktop companion.", [
                     { text: "Retry", onPress: () => setScanned(false) },
                 ]);
                 return;
@@ -143,12 +153,23 @@ export default function ScanScreen() {
                 <Text style={styles.instructions}>
                     {isPairing
                         ? "Connecting to your Mac companion..."
-                        : "Scan the QR code shown by copilot-mobile up on your Mac"}
+                        : "Scan the QR code shown by code-companion up on your Mac"}
                 </Text>
                 {!isPairing && (
-                    <Text style={styles.instructionsCaption}>
-                        Keep your Mac on and signed in with GitHub Copilot. After pairing, you can reconnect even when your iPhone is on a different network.
-                    </Text>
+                    <>
+                        <Text style={styles.instructionsCaption}>
+                            Keep your Mac on, signed in, and online. After pairing, you can reconnect even when your iPhone is on a different network.
+                        </Text>
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.secondaryButton,
+                                pressed && styles.secondaryButtonPressed,
+                            ]}
+                            onPress={() => router.push("/onboarding")}
+                        >
+                            <Text style={styles.secondaryButtonText}>Need setup help?</Text>
+                        </Pressable>
+                    </>
                 )}
             </View>
 
@@ -228,6 +249,23 @@ function createStyles(theme: AppTheme) {
         buttonText: {
             color: theme.colors.textOnAccent,
             fontSize: 16,
+            fontWeight: "600",
+        },
+        secondaryButton: {
+            marginTop: 16,
+            borderRadius: theme.borderRadius.lg,
+            borderWidth: 1,
+            borderColor: theme.colors.textOnAccent + "33",
+            backgroundColor: theme.colors.overlay,
+            paddingVertical: 10,
+            paddingHorizontal: 18,
+        },
+        secondaryButtonPressed: {
+            opacity: 0.82,
+        },
+        secondaryButtonText: {
+            color: theme.colors.textOnAccent,
+            fontSize: 13,
             fontWeight: "600",
         },
         rescanContainer: {

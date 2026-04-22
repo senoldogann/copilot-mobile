@@ -746,7 +746,7 @@ export function ChatInput({
             if (!permission.granted) {
                 Alert.alert(
                     "Photo Access Required",
-                    "Enable photo library access to attach images to your Copilot message.",
+                    "Enable photo library access to attach images to your message.",
                 );
                 return;
             }

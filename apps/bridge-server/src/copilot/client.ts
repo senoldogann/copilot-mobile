@@ -53,6 +53,17 @@ const COMMON_COPILOT_CLI_PATHS: ReadonlyArray<string> = [
     "/usr/local/bin/copilot",
 ];
 
+function readEnv(names: ReadonlyArray<string>): string | undefined {
+    for (const name of names) {
+        const value = process.env[name];
+        if (typeof value === "string" && value.trim().length > 0) {
+            return value.trim();
+        }
+    }
+
+    return undefined;
+}
+
 /** Detect git repository root starting from `dir`. Falls back to `dir` itself. */
 function detectGitRoot(dir: string): string {
     try {
@@ -66,7 +77,9 @@ function detectGitRoot(dir: string): string {
     }
 }
 
-const PROCESS_CWD = path.resolve(process.env["COPILOT_MOBILE_WORKSPACE_ROOT"] ?? process.cwd());
+const PROCESS_CWD = path.resolve(
+    readEnv(["CODE_COMPANION_WORKSPACE_ROOT", "COPILOT_MOBILE_WORKSPACE_ROOT"]) ?? process.cwd()
+);
 const WORKSPACE_ROOT = detectGitRoot(PROCESS_CWD);
 
 function resolveRequestedWorkspaceRoot(workspaceRoot: string | undefined): string {

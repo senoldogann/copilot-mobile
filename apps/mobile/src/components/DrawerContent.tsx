@@ -1055,7 +1055,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     <View style={styles.headerIcon}>
                         <CopilotBadge size={28} iconSize={15} />
                     </View>
-                    <Text style={styles.headerTitle}>GitHub Copilot</Text>
+                    <Text style={styles.headerTitle}>Code Companion</Text>
                 </View>
                 <View style={styles.headerActions}>
                     <Pressable

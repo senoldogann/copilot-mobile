@@ -52,7 +52,7 @@ struct CompanionWindowView: View {
 
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Copilot Mobile Companion")
+            Text("Code Companion Desktop")
                 .font(.system(size: 28, weight: .bold, design: .rounded))
 
             Text(model.statusSummary)

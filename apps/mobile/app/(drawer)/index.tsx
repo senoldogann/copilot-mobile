@@ -52,7 +52,12 @@ import {
     disconnect,
 } from "../../src/services/bridge";
 import { startDraftConversation } from "../../src/services/new-chat";
-import { getSubagentDisplayName, isSubagentToolName } from "../../src/utils/tool-introspection";
+import {
+    deriveAgentTodosFromItems,
+    getCurrentTurnItems,
+    getSubagentDisplayName,
+    isSubagentToolName,
+} from "../../src/utils/tool-introspection";
 
 function basename(path: string): string {
     const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -61,20 +66,9 @@ function basename(path: string): string {
 }
 
 function buildSubagentRuns(
-    items: ReadonlyArray<ChatItem>,
+    currentTurnItems: ReadonlyArray<ChatItem>,
     isAssistantTyping: boolean
 ): ReadonlyArray<SubagentRun> {
-    if (!isAssistantTyping) {
-        return [];
-    }
-
-    const lastUserMessageIndex = [...items]
-        .map((item, index) => ({ item, index }))
-        .reverse()
-        .find(({ item }) => item.type === "user")
-        ?.index ?? -1;
-
-    const currentTurnItems = items.slice(lastUserMessageIndex + 1);
     const runMap = new Map<string, SubagentRun>();
 
     for (const item of currentTurnItems) {
@@ -85,11 +79,22 @@ function buildSubagentRuns(
         runMap.set(item.requestId, {
             requestId: item.requestId,
             title: getSubagentDisplayName(item),
-            status: item.status === "failed" ? "failed" : "running",
+            status: item.status === "failed"
+                ? "failed"
+                : item.status === "completed" || item.status === "no_results"
+                    ? "completed"
+                    : "running",
         });
     }
 
-    return [...runMap.values()];
+    const runs = [...runMap.values()];
+    const hasRunningRun = runs.some((run) => run.status === "running");
+
+    if (hasRunningRun || (isAssistantTyping && runs.length > 0)) {
+        return runs;
+    }
+
+    return [];
 }
 
 // Özel başlık — GitHub Copilot mobil stili üst bar
@@ -159,7 +164,7 @@ const ChatHeader = React.memo(function ChatHeader() {
             ? basename(draftWorkspaceRoot)
         : activeSession?.context?.workspaceRoot !== undefined
             ? basename(activeSession.context.workspaceRoot)
-            : currentRepository ?? "copilot-mobile";
+            : currentRepository ?? "workspace";
     const summaryChanges = hasBoundWorkspaceSession ? uncommittedChanges : [];
     const changeTotals = useMemo(() => (
         summaryChanges.reduce(
@@ -357,10 +362,39 @@ export default function ChatScreen() {
         connectionState === "connecting" || connectionState === "connected";
     const inputDisabled = !isConnected || isSessionLoading;
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
-    const subagentRuns = useMemo(
-        () => buildSubagentRuns(chatItems, isTyping),
-        [chatItems, isTyping],
+    const currentTurnItems = useMemo(
+        () => getCurrentTurnItems(chatItems),
+        [chatItems],
     );
+    const subagentRunsSignature = useMemo(() => (
+        currentTurnItems
+            .filter((item): item is Extract<ChatItem, { type: "tool" }> =>
+                item.type === "tool" && isSubagentToolName(item.toolName)
+            )
+            .map((item) => `${item.requestId}:${item.status}:${item.toolName}:${item.argumentsText ?? ""}`)
+            .join("|")
+    ), [currentTurnItems]);
+    const subagentRuns = useMemo(
+        () => buildSubagentRuns(currentTurnItems, isTyping),
+        [isTyping, subagentRunsSignature],
+    );
+    const hasRunningToolInCurrentTurn = useMemo(
+        () => currentTurnItems.some((item) => item.type === "tool" && item.status === "running"),
+        [currentTurnItems],
+    );
+    const visibleAgentTodos = useMemo(() => {
+        const hasActiveTurn = isTyping || hasRunningToolInCurrentTurn;
+        if (!hasActiveTurn) {
+            return [];
+        }
+
+        const derivedTodos = deriveAgentTodosFromItems(currentTurnItems);
+        if (derivedTodos.length > 0) {
+            return derivedTodos;
+        }
+
+        return agentTodos;
+    }, [agentTodos, currentTurnItems, hasRunningToolInCurrentTurn, isTyping]);
 
     useEffect(() => {
         if (permissionPrompt !== null || userInputPrompt !== null || planExitPrompt !== null) {
@@ -754,8 +788,8 @@ export default function ChatScreen() {
                     <SubagentPanel runs={subagentRuns} />
                 )}
 
-                {agentTodos.length > 0 && (
-                    <TodoPanel todos={agentTodos} />
+                {visibleAgentTodos.length > 0 && (
+                    <TodoPanel todos={visibleAgentTodos} />
                 )}
 
                 <ChatInput

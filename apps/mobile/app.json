@@ -1,18 +1,18 @@
 {
   "expo": {
-    "name": "Copilot Mobile",
-    "slug": "copilot-mobile",
+    "name": "Code Companion",
+    "slug": "code-companion",
     "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "scheme": "copilot-mobile",
+    "scheme": "code-companion",
     "splash": {
       "backgroundColor": "#1e1e1e"
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "dev.senoldogan.copilot-mobile",
+      "bundleIdentifier": "dev.senoldogan.codecompanion",
       "infoPlist": {
         "NSCameraUsageDescription": "Camera access is required to scan the QR code shown by your Mac companion",
         "NSLocalNetworkUsageDescription": "Local network access helps your iPhone discover and connect to your Mac companion during setup",
@@ -29,7 +29,7 @@
             "adaptiveIcon": {
                 "backgroundColor": "#1e1e1e"
             },
-            "package": "dev.senoldogan.copilotmobile",
+            "package": "dev.senoldogan.codecompanion",
       "permissions": [
                 "android.permission.CAMERA"
             ]
@@ -50,8 +50,8 @@
       [
         "expo-image-picker",
         {
-          "photosPermission": "Photo library access is required to attach images to Copilot chats",
-          "cameraPermission": "Camera access is required to capture images for Copilot chats",
+          "photosPermission": "Photo library access is required to attach images to your chat",
+          "cameraPermission": "Camera access is required to capture images for your chat",
           "microphonePermission": false
         }
       ],

@@ -85,7 +85,7 @@ async function fetchFreshQrCode(port) {
 function printQrCode(qrPayload) {
     const qrCode = qrPayload.qrCode;
     console.log("\n┌─────────────────────────────────────────┐");
-    console.log("│   Copilot Mobile Bridge — QR Pairing    │");
+    console.log("│    Code Companion — QR Pairing Ready    │");
     console.log("└─────────────────────────────────────────┘\n");
     console.log(qrCode.ascii);
     console.log(`\nConnection: ${qrCode.payload.url}`);
@@ -114,7 +114,7 @@ function assertPortAvailable(port) {
             if (error.code === "EADDRINUSE") {
                 reject(
                     new Error(
-                        `Port ${port} is already in use, but it does not look like a healthy Copilot Mobile bridge. Stop the owner with "lsof -nP -iTCP:${port} -sTCP:LISTEN" and then rerun "pnpm dev:bridge:direct".`
+                        `Port ${port} is already in use, but it does not look like a healthy Code Companion bridge. Stop the owner with "lsof -nP -iTCP:${port} -sTCP:LISTEN" and then rerun "pnpm dev:bridge:direct".`
                     )
                 );
                 return;

@@ -13,7 +13,6 @@ import {
     dismissCompletionNotifications,
     initializeNotifications,
     initializeNotificationRouting,
-    prepareNotificationPermissions,
 } from "./notifications";
 import { useConnectionStore } from "../stores/connection-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
@@ -63,9 +62,8 @@ function syncOnForeground(): void {
     const hasVisibleChatState = sessionStore.chatItems.length > 0 || sessionStore.isAssistantTyping;
 
     void dismissCompletionNotifications();
-    void prepareNotificationPermissions();
     void syncRemoteNotificationRegistration({
-        allowPrompt: true,
+        allowPrompt: false,
         force: false,
     });
 
@@ -195,9 +193,8 @@ export function initializeAppRuntime(): () => void {
     void initializeNotifications();
     void initializeNotificationRouting(openSessionFromNotification);
     if (currentAppState === "active") {
-        void prepareNotificationPermissions();
         void syncRemoteNotificationRegistration({
-            allowPrompt: true,
+            allowPrompt: false,
             force: false,
         });
     }

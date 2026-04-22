@@ -58,12 +58,12 @@ function buildNotificationPayload(state: CompletedCycleSnapshot, sessionId: stri
     const title = state.title?.trim().length
         ? state.title.trim()
         : state.latestError !== null
-            ? "Copilot run failed"
-            : "Copilot finished working";
+            ? "Session failed"
+            : "Session finished";
     const bodySource = state.latestError ?? state.latestPreview;
     const body = bodySource.trim().length > 0
         ? sanitizeNotificationText(bodySource)
-        : "Open Copilot Mobile to review the latest session output.";
+        : "Open Code Companion to review the latest session output.";
 
     return {
         sessionId,
@@ -282,7 +282,7 @@ export function createCompletionNotifier(deps: {
 
         notifyPermissionPrompt(sessionId: string, requestId: string, summary: string): void {
             const state = getSessionState(sessionId);
-            const title = state.title?.trim().length ? state.title.trim() : "Copilot needs approval";
+            const title = state.title?.trim().length ? state.title.trim() : "Approval needed";
             void notifyForPrompt({
                 sessionId,
                 requestId,
@@ -294,7 +294,7 @@ export function createCompletionNotifier(deps: {
 
         notifyUserInputPrompt(sessionId: string, requestId: string, prompt: string): void {
             const state = getSessionState(sessionId);
-            const title = state.title?.trim().length ? state.title.trim() : "Copilot needs input";
+            const title = state.title?.trim().length ? state.title.trim() : "Input needed";
             void notifyForPrompt({
                 sessionId,
                 requestId,

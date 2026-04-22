@@ -1,52 +1,52 @@
-# Desktop Companion
+# Mac Companion
 
-This is the current macOS-first desktop companion flow for Copilot Mobile.
+This is the current macOS-first desktop companion flow for Code Companion.
 
 ## Goal
 
 The desktop side should feel like:
 
 1. Install the iPhone app.
-2. Install the desktop CLI with `npm install -g copilot-mobile`.
-3. Run `copilot-mobile login` once.
-4. Run `copilot-mobile up`.
+2. Install the desktop CLI with `npm install -g code-companion`.
+3. Run `code-companion login` once.
+4. Run `code-companion up`.
 5. Scan the QR from the local dashboard.
 
-The daemon is installed as a user `LaunchAgent` at `~/Library/LaunchAgents/com.copilotmobile.bridge.plist`.
+The daemon is installed as a user `LaunchAgent` at `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`.
 
 ## Runtime Files
 
-- Config: `~/.copilot-mobile/config.json`
-- Logs: `~/.copilot-mobile/logs/`
-- LaunchAgent: `~/Library/LaunchAgents/com.copilotmobile.bridge.plist`
+- Config: `~/.code-companion/config.json`
+- Logs: `~/.code-companion/logs/`
+- LaunchAgent: `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`
 
 ## Stable Commands
 
-- `copilot-mobile login`
-- `copilot-mobile up`
-- `copilot-mobile status`
-- `copilot-mobile doctor`
-- `copilot-mobile qr`
-- `copilot-mobile logs`
-- `copilot-mobile down`
+- `code-companion login`
+- `code-companion up`
+- `code-companion status`
+- `code-companion doctor`
+- `code-companion qr`
+- `code-companion logs`
+- `code-companion down`
 
 ## Local Smoke Test
 
 For repo-local testing, run the relay/control-plane locally:
 
 ```bash
-export COPILOT_MOBILE_RELAY_SECRET="replace-with-a-long-random-secret"
+export CODE_COMPANION_SELF_HOSTED_RELAY_SECRET="replace-with-a-long-random-secret"
 pnpm dev:relay
 ```
 
 Then in another terminal:
 
 ```bash
-copilot-mobile login
-copilot-mobile up
-copilot-mobile status
-copilot-mobile qr
-copilot-mobile down
+code-companion login
+code-companion up
+code-companion status
+code-companion qr
+code-companion down
 ```
 
 If you are testing from the repo instead of a global npm install, use:
@@ -66,7 +66,7 @@ Use a deployed relay/control-plane and set:
 ```bash
 export COPILOT_MOBILE_HOSTED_API_BASE_URL="https://relay.example.com"
 export COPILOT_MOBILE_HOSTED_RELAY_BASE_URL="wss://relay.example.com"
-copilot-mobile up
+code-companion up
 ```
 
 The phone can then pair and connect from a different network through the relay.
@@ -80,7 +80,7 @@ What is ready now:
 - macOS LaunchAgent lifecycle
 - Hosted relay/control-plane endpoints in `apps/relay-server`
 - Dashboard QR refresh / open logs / stop service actions
-- `copilot-mobile doctor` readiness check for auth, LaunchAgent, daemon health, and relay link state
+- `code-companion doctor` readiness check for auth, LaunchAgent, daemon health, and relay link state
 
 What still needs product hardening before App Store-grade rollout:
 

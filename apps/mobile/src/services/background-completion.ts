@@ -108,12 +108,12 @@ export function notifyIfBackgroundCompletion(sessionId: string): void {
 
     const title = session?.title?.trim().length
         ? session.title.trim()
-        : "Copilot finished working";
+        : "Session finished";
     const body = latestAssistant !== undefined
         ? sanitizeNotificationText(latestAssistant.content)
         : cachedAssistantContent !== undefined
             ? sanitizeNotificationText(cachedAssistantContent)
-        : "Open Copilot Mobile to review the latest session output.";
+        : "Open Code Companion to review the latest session output.";
 
     latestAssistantContentBySession.delete(sessionId);
 
@@ -134,7 +134,7 @@ export function notifyBackgroundCompletionFailure(sessionId: string, errorMessag
     const session = sessionStore.sessions.find((item) => item.id === sessionId);
     const title = session?.title?.trim().length
         ? session.title.trim()
-        : "Copilot run failed";
+        : "Session failed";
     const body = sanitizeNotificationText(errorMessage);
 
     void notifySessionCompleted({ sessionId, title, body });

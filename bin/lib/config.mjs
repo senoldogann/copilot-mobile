@@ -2,17 +2,32 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { getCompanionConfigPath, ensureCompanionDirectories } from "./paths.mjs";
+import {
+    ensureCompanionDirectories,
+    getCompanionConfigPath,
+    getReadableCompanionConfigPath,
+} from "./paths.mjs";
 
 const DEFAULT_BRIDGE_PORT = 9876;
 const DEFAULT_HOSTED_API_BASE_URL = "https://copilot-mobile-relay.senoldogan0233.workers.dev";
 const LEGACY_DEFAULT_HOSTED_API_BASE_URL = "http://127.0.0.1:8787";
 const LEGACY_DEFAULT_HOSTED_RELAY_BASE_URL = "ws://127.0.0.1:8787";
-const HOSTED_API_BASE_URL_ENV = "COPILOT_MOBILE_HOSTED_API_BASE_URL";
-const HOSTED_RELAY_BASE_URL_ENV = "COPILOT_MOBILE_HOSTED_RELAY_BASE_URL";
-const SELF_HOSTED_RELAY_URL_ENV = "COPILOT_MOBILE_SELF_HOSTED_RELAY_URL";
-const SELF_HOSTED_RELAY_SECRET_ENV = "COPILOT_MOBILE_SELF_HOSTED_RELAY_SECRET";
-const MODE_ENV = "COPILOT_MOBILE_MODE";
+const HOSTED_API_BASE_URL_ENVS = ["CODE_COMPANION_HOSTED_API_BASE_URL", "COPILOT_MOBILE_HOSTED_API_BASE_URL"];
+const HOSTED_RELAY_BASE_URL_ENVS = ["CODE_COMPANION_HOSTED_RELAY_BASE_URL", "COPILOT_MOBILE_HOSTED_RELAY_BASE_URL"];
+const SELF_HOSTED_RELAY_URL_ENVS = ["CODE_COMPANION_SELF_HOSTED_RELAY_URL", "COPILOT_MOBILE_SELF_HOSTED_RELAY_URL"];
+const SELF_HOSTED_RELAY_SECRET_ENVS = ["CODE_COMPANION_SELF_HOSTED_RELAY_SECRET", "COPILOT_MOBILE_SELF_HOSTED_RELAY_SECRET"];
+const MODE_ENVS = ["CODE_COMPANION_MODE", "COPILOT_MOBILE_MODE"];
+
+function readEnv(names) {
+    for (const name of names) {
+        const value = process.env[name];
+        if (typeof value === "string" && value.trim().length > 0) {
+            return value.trim();
+        }
+    }
+
+    return null;
+}
 
 function detectGitRoot(currentWorkingDirectory) {
     try {
@@ -50,16 +65,16 @@ function deriveHostedRelayBaseUrl(hostedApiBaseUrl) {
 }
 
 function getDefaultHostedApiBaseUrl() {
-    const fromEnv = process.env[HOSTED_API_BASE_URL_ENV];
-    if (typeof fromEnv === "string" && fromEnv.trim().length > 0) {
-        return fromEnv.trim().replace(/\/$/, "");
+    const fromEnv = readEnv(HOSTED_API_BASE_URL_ENVS);
+    if (fromEnv !== null) {
+        return fromEnv.replace(/\/$/, "");
     }
 
     return DEFAULT_HOSTED_API_BASE_URL;
 }
 
 function getDefaultMode() {
-    const rawMode = process.env[MODE_ENV];
+    const rawMode = readEnv(MODE_ENVS);
     if (rawMode === "self_hosted") {
         return "self_hosted";
     }
@@ -71,7 +86,7 @@ function buildDefaultConfig() {
     const bridgePort = parsePort(process.env.BRIDGE_PORT, DEFAULT_BRIDGE_PORT, "BRIDGE_PORT");
     const hostedApiBaseUrl = getDefaultHostedApiBaseUrl();
     const hostedRelayBaseUrl = (
-        process.env[HOSTED_RELAY_BASE_URL_ENV]?.trim().replace(/\/$/, "")
+        readEnv(HOSTED_RELAY_BASE_URL_ENVS)?.replace(/\/$/, "")
         ?? deriveHostedRelayBaseUrl(hostedApiBaseUrl)
     );
 
@@ -173,7 +188,7 @@ function applyDefaultHostedMigration(config) {
 
 export function loadConfig() {
     ensureCompanionDirectories();
-    const configPath = getCompanionConfigPath();
+    const configPath = getReadableCompanionConfigPath();
 
     if (!existsSync(configPath)) {
         const config = normalizeConfig({});
@@ -186,7 +201,7 @@ export function loadConfig() {
         const config = normalizeConfig(rawConfig);
 
         const migrated = applyDefaultHostedMigration(config);
-        if (migrated || applyEnvironmentOverrides(config)) {
+        if (migrated || applyEnvironmentOverrides(config) || configPath !== getCompanionConfigPath()) {
             writeConfig(config);
         }
 
@@ -200,33 +215,33 @@ export function loadConfig() {
 function applyEnvironmentOverrides(config) {
     let changed = false;
 
-    const rawMode = process.env[MODE_ENV];
+    const rawMode = readEnv(MODE_ENVS);
     if (rawMode === "hosted" || rawMode === "self_hosted") {
         config.mode = rawMode;
         changed = true;
     }
 
-    const hostedApiBaseUrl = process.env[HOSTED_API_BASE_URL_ENV];
-    if (typeof hostedApiBaseUrl === "string" && hostedApiBaseUrl.trim().length > 0) {
-        config.hostedApiBaseUrl = hostedApiBaseUrl.trim().replace(/\/$/, "");
+    const hostedApiBaseUrl = readEnv(HOSTED_API_BASE_URL_ENVS);
+    if (hostedApiBaseUrl !== null) {
+        config.hostedApiBaseUrl = hostedApiBaseUrl.replace(/\/$/, "");
         changed = true;
     }
 
-    const hostedRelayBaseUrl = process.env[HOSTED_RELAY_BASE_URL_ENV];
-    if (typeof hostedRelayBaseUrl === "string" && hostedRelayBaseUrl.trim().length > 0) {
-        config.hostedRelayBaseUrl = hostedRelayBaseUrl.trim().replace(/\/$/, "");
+    const hostedRelayBaseUrl = readEnv(HOSTED_RELAY_BASE_URL_ENVS);
+    if (hostedRelayBaseUrl !== null) {
+        config.hostedRelayBaseUrl = hostedRelayBaseUrl.replace(/\/$/, "");
         changed = true;
     }
 
-    const selfHostedRelayUrl = process.env[SELF_HOSTED_RELAY_URL_ENV];
-    if (typeof selfHostedRelayUrl === "string" && selfHostedRelayUrl.trim().length > 0) {
-        config.selfHostedRelayUrl = selfHostedRelayUrl.trim();
+    const selfHostedRelayUrl = readEnv(SELF_HOSTED_RELAY_URL_ENVS);
+    if (selfHostedRelayUrl !== null) {
+        config.selfHostedRelayUrl = selfHostedRelayUrl;
         changed = true;
     }
 
-    const selfHostedRelaySecret = process.env[SELF_HOSTED_RELAY_SECRET_ENV];
-    if (typeof selfHostedRelaySecret === "string" && selfHostedRelaySecret.trim().length > 0) {
-        config.selfHostedRelaySecret = selfHostedRelaySecret.trim();
+    const selfHostedRelaySecret = readEnv(SELF_HOSTED_RELAY_SECRET_ENVS);
+    if (selfHostedRelaySecret !== null) {
+        config.selfHostedRelaySecret = selfHostedRelaySecret;
         changed = true;
     }
 

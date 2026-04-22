@@ -5,7 +5,14 @@ import type { QRPayload } from "@copilot-mobile/shared";
 import { PAIRING_TOKEN_TTL_MS, QR_PAYLOAD_VERSION } from "@copilot-mobile/shared";
 import { generatePairingToken } from "./pairing.js";
 
-const ALLOW_INSECURE_DIRECT_WS_ENV = "COPILOT_MOBILE_ALLOW_INSECURE_DIRECT_WS";
+const ALLOW_INSECURE_DIRECT_WS_ENV_NAMES = [
+    "CODE_COMPANION_ALLOW_INSECURE_DIRECT_WS",
+    "COPILOT_MOBILE_ALLOW_INSECURE_DIRECT_WS",
+] as const;
+
+function isInsecureDirectWsAllowed(): boolean {
+    return ALLOW_INSECURE_DIRECT_WS_ENV_NAMES.some((envName) => process.env[envName] === "1");
+}
 
 export type PairingQRCode = {
     payload: QRPayload;
@@ -59,13 +66,13 @@ function resolveTransportMode(
     if (
         parsedUrl.protocol === "ws:"
         && isDirectHostname(parsedUrl.hostname)
-        && process.env[ALLOW_INSECURE_DIRECT_WS_ENV] === "1"
+        && isInsecureDirectWsAllowed()
     ) {
         return "direct";
     }
 
     throw new Error(
-        `Plain ws:// pairing is only allowed for localhost or private-network development URLs when ${ALLOW_INSECURE_DIRECT_WS_ENV}=1. Use wss:// for public bridge URLs.`
+        `Plain ws:// pairing is only allowed for localhost or private-network development URLs when ${ALLOW_INSECURE_DIRECT_WS_ENV_NAMES[0]}=1. Use wss:// for public bridge URLs.`
     );
 }
 
@@ -100,7 +107,7 @@ export async function generatePairingQRCode(
 
 export function printPairingQRCode(qrCode: PairingQRCode): void {
     console.log("\n┌─────────────────────────────────────────┐");
-    console.log("│   Copilot Mobile Bridge — QR Pairing    │");
+    console.log("│    Code Companion — QR Pairing Ready    │");
     console.log("└─────────────────────────────────────────┘\n");
     console.log(qrCode.ascii);
     console.log(`\nConnection: ${qrCode.payload.url}`);

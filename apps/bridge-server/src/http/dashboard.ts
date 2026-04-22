@@ -285,7 +285,7 @@ export function renderCompanionDashboard(): string {
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Copilot Mobile Companion</title>
+    <title>Code Companion Desktop</title>
     <style>${dashboardStyles}</style>
 </head>
 <body>

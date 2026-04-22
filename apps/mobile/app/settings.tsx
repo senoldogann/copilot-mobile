@@ -1,12 +1,13 @@
 import React from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Constants from "expo-constants";
+import { useRouter } from "expo-router";
 
-import { useConnectionStore } from "../src/stores/connection-store";
 import { type ThemeMode, type ThemeVariant } from "../src/theme/colors";
-import { useAppTheme, useThemedStyles, type AppTheme } from "../src/theme/theme-context";
+import { useThemedStyles, type AppTheme } from "../src/theme/theme-context";
 import { useThemeStore } from "../src/theme/theme-store";
-import { buildConnectionDiagnosticsMetadata } from "../src/view-models/provider-metadata";
+import { prepareNotificationPermissions } from "../src/services/notifications";
+import { syncRemoteNotificationRegistration } from "../src/services/bridge";
 
 const THEME_MODES: ReadonlyArray<{ value: ThemeMode; label: string }> = [
     { value: "light", label: "Light" },
@@ -20,49 +21,6 @@ const THEME_VARIANTS: ReadonlyArray<{ value: ThemeVariant; label: string; swatch
     { value: "claude", label: "Claude", swatch: "#f78166" },
     { value: "ghostty", label: "Ghostty", swatch: "#8fb2ff" },
 ];
-
-function ConnectionInfo() {
-    const styles = useThemedStyles(createStyles);
-    const theme = useAppTheme();
-    const serverUrl = useConnectionStore((state) => state.serverUrl);
-    const fingerprint = useConnectionStore((state) => state.certFingerprint);
-    const deviceId = useConnectionStore((state) => state.deviceId);
-    const connectionError = useConnectionStore((state) => state.error);
-    const connectionState = useConnectionStore((state) => state.state);
-    const metadata = buildConnectionDiagnosticsMetadata(serverUrl, connectionState, Date.now());
-
-    return (
-        <View style={styles.card}>
-            <Text style={styles.cardTitle}>Connection</Text>
-            <View style={styles.metadataChipRow}>
-                {metadata.chips.map((chip) => (
-                    <View key={`${chip.label}:${chip.tone}`} style={styles.metadataChip}>
-                        <Text style={styles.metadataChipText}>{chip.label}</Text>
-                    </View>
-                ))}
-            </View>
-            <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Server</Text>
-                <Text style={styles.infoValue}>{serverUrl ?? "—"}</Text>
-            </View>
-            <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Device ID</Text>
-                <Text style={styles.infoValue}>{deviceId ?? "—"}</Text>
-            </View>
-            <View style={styles.infoRow}>
-                <Text style={styles.infoLabel}>Certificate</Text>
-                <Text style={styles.infoValue} numberOfLines={1}>
-                    {fingerprint !== null ? `${fingerprint.slice(0, 16)}…` : "Relay / local ws"}
-                </Text>
-            </View>
-            {connectionError !== null && (
-                <Text style={[styles.errorText, { color: theme.colors.error }]}>
-                    {connectionError}
-                </Text>
-            )}
-        </View>
-    );
-}
 
 function ThemeSettings() {
     const styles = useThemedStyles(createStyles);
@@ -133,15 +91,58 @@ function ThemeSettings() {
 export default function SettingsScreen() {
     const styles = useThemedStyles(createStyles);
     const appVersion = Constants.expoConfig?.version ?? "0.1.0";
+    const router = useRouter();
+
+    async function handleEnableNotifications(): Promise<void> {
+        try {
+            const granted = await prepareNotificationPermissions();
+            await syncRemoteNotificationRegistration({
+                allowPrompt: false,
+                force: true,
+            });
+            Alert.alert(
+                granted ? "Notifications enabled" : "Notifications not enabled",
+                granted
+                    ? "Background session alerts are now available."
+                    : "You can enable notifications later from iPhone Settings."
+            );
+        } catch (error) {
+            Alert.alert(
+                "Notification setup failed",
+                error instanceof Error ? error.message : String(error)
+            );
+        }
+    }
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-            <ConnectionInfo />
             <ThemeSettings />
 
             <View style={styles.card}>
+                <Text style={styles.cardTitle}>Getting Started</Text>
+                <Text style={styles.cardDescription}>
+                    Replay the onboarding slider, review the Mac companion steps, or enable notifications for background approvals and completion alerts.
+                </Text>
+                <Pressable style={styles.actionButton} onPress={() => router.push("/onboarding")}>
+                    <Text style={styles.actionButtonText}>Open onboarding</Text>
+                </Pressable>
+                <Pressable
+                    style={[styles.actionButton, styles.secondaryActionButton]}
+                    onPress={() => {
+                        void handleEnableNotifications();
+                    }}
+                >
+                    <Text style={[styles.actionButtonText, styles.secondaryActionButtonText]}>
+                        Enable notifications
+                    </Text>
+                </Pressable>
+            </View>
+
+            <View style={styles.card}>
                 <Text style={styles.cardTitle}>Version</Text>
-                <Text style={styles.versionText}>v{appVersion}</Text>
+                <View style={styles.versionPill}>
+                    <Text style={styles.versionText}>v{appVersion}</Text>
+                </View>
             </View>
         </ScrollView>
     );
@@ -175,45 +176,6 @@ function createStyles(theme: AppTheme) {
             fontSize: theme.fontSize.md,
             lineHeight: 18,
             color: theme.colors.textSecondary,
-        },
-        infoRow: {
-            flexDirection: "row",
-            justifyContent: "space-between",
-            gap: theme.spacing.md,
-            paddingVertical: 8,
-            borderBottomWidth: 1,
-            borderBottomColor: theme.colors.borderMuted,
-        },
-        infoLabel: {
-            fontSize: theme.fontSize.md,
-            color: theme.colors.textTertiary,
-        },
-        infoValue: {
-            flex: 1,
-            fontSize: theme.fontSize.md,
-            color: theme.colors.textPrimary,
-            textAlign: "right",
-        },
-        errorText: {
-            fontSize: theme.fontSize.sm,
-        },
-        metadataChipRow: {
-            flexDirection: "row",
-            flexWrap: "wrap",
-            gap: theme.spacing.xs,
-        },
-        metadataChip: {
-            borderRadius: theme.borderRadius.full,
-            borderWidth: 1,
-            borderColor: theme.colors.borderMuted,
-            backgroundColor: theme.colors.bgTertiary,
-            paddingHorizontal: theme.spacing.sm,
-            paddingVertical: 4,
-        },
-        metadataChipText: {
-            color: theme.colors.textSecondary,
-            fontSize: theme.fontSize.xs,
-            fontWeight: "600",
         },
         segmentedControl: {
             flexDirection: "row",
@@ -276,10 +238,41 @@ function createStyles(theme: AppTheme) {
             fontSize: theme.fontSize.lg,
             fontWeight: "700",
         },
+        actionButton: {
+            minHeight: 44,
+            borderRadius: theme.borderRadius.md,
+            backgroundColor: theme.colors.accent,
+            alignItems: "center",
+            justifyContent: "center",
+            paddingHorizontal: theme.spacing.md,
+        },
+        secondaryActionButton: {
+            backgroundColor: theme.colors.bgTertiary,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        actionButtonText: {
+            color: theme.colors.textOnAccent,
+            fontSize: theme.fontSize.md,
+            fontWeight: "700",
+        },
+        secondaryActionButtonText: {
+            color: theme.colors.textPrimary,
+        },
         versionText: {
             color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.lg,
-            fontWeight: "600",
+            fontSize: 26,
+            fontWeight: "800",
+            letterSpacing: 0.2,
+        },
+        versionPill: {
+            alignSelf: "flex-start",
+            borderRadius: theme.borderRadius.full,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.bgTertiary,
+            paddingHorizontal: theme.spacing.lg,
+            paddingVertical: theme.spacing.md,
         },
     });
 }

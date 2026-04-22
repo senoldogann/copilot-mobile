@@ -23,6 +23,7 @@ import {
     dispatchWorkspaceResolveResponse,
     dispatchWorkspaceSearchResponse,
 } from "./workspace-events";
+import { extractAgentTodosFromArgumentsText } from "../utils/tool-introspection";
 
 let transientConnectionErrorTimer: ReturnType<typeof setTimeout> | null = null;
 const STREAM_DELTA_BATCH_WINDOW_MS = 48;
@@ -393,40 +394,6 @@ function assertExhaustive(_value: never, type: string): void {
     console.warn("Unknown server message:", type);
 }
 
-// Tool name patterns that signal a todo write operation (Claude Code's TodoWrite tool)
-const TODO_WRITE_TOOL_NAMES = new Set(["TodoWrite", "todowrite", "todo_write", "todos_write"]);
-
-function isTodoWriteToolName(name: string): boolean {
-    return TODO_WRITE_TOOL_NAMES.has(name) || name.toLowerCase().includes("todowrite");
-}
-
-function parseTodoWriteArguments(args: Record<string, unknown>): ReadonlyArray<AgentTodo> | null {
-    // Claude Code format: { todos: [{ id, content, status, priority }] }
-    const raw = args["todos"] ?? args["items"] ?? args["todo_list"];
-    if (!Array.isArray(raw) || raw.length === 0) return null;
-
-    const todos: Array<AgentTodo> = [];
-    for (const item of raw) {
-        if (typeof item !== "object" || item === null) continue;
-        const entry = item as Record<string, unknown>;
-        const id = String(entry["id"] ?? entry["taskId"] ?? todos.length + 1);
-        const content = String(entry["content"] ?? entry["description"] ?? entry["task"] ?? entry["title"] ?? "");
-        if (content.length === 0) continue;
-        const rawStatus = String(entry["status"] ?? "pending").toLowerCase();
-        const status: TodoItemStatus =
-            rawStatus === "completed" || rawStatus === "done" ? "completed"
-                : rawStatus === "in_progress" || rawStatus === "in progress" ? "in_progress"
-                    : "pending";
-        const rawPriority = String(entry["priority"] ?? "").toLowerCase();
-        const priority = rawPriority === "high" ? "high" as const
-            : rawPriority === "low" ? "low" as const
-                : rawPriority === "medium" ? "medium" as const
-                    : undefined;
-        todos.push({ id, content, status, ...(priority !== undefined ? { priority } : {}) });
-    }
-    return todos.length > 0 ? todos : null;
-}
-
 function restoreCachedConversationForMissingSession(missingSessionId: string): boolean {
     const connectionStore = useConnectionStore.getState();
     const sessionStore = useSessionStore.getState();
@@ -442,6 +409,7 @@ function restoreCachedConversationForMissingSession(missingSessionId: string): b
     clearBackgroundCompletion(missingSessionId);
     sessionStore.setSessionLoading(false);
     sessionStore.setAssistantTyping(false);
+    sessionStore.setAgentTodos([]);
     sessionStore.clearPermissionPrompts();
     sessionStore.setUserInputPrompt(null);
     sessionStore.setPlanExitPrompt(null);
@@ -548,6 +516,7 @@ export function handleServerMessage(message: ServerMessage): void {
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.setAbortRequested(false);
             sessionStore.setAssistantTyping(false);
+            sessionStore.setAgentTodos([]);
             sessionStore.finalizeThinking();
             break;
         }
@@ -612,12 +581,11 @@ export function handleServerMessage(message: ServerMessage): void {
                 message.payload.toolName,
                 formatToolArguments(message.payload.arguments),
             );
-            // Detect TodoWrite — extract the todo list and surface it above the input
-            if (isTodoWriteToolName(message.payload.toolName) && message.payload.arguments !== undefined) {
-                const parsed = parseTodoWriteArguments(message.payload.arguments);
-                if (parsed !== null) {
-                    sessionStore.setAgentTodos(parsed);
-                }
+            const parsedTodos = extractAgentTodosFromArgumentsText(
+                formatToolArguments(message.payload.arguments)
+            );
+            if (parsedTodos !== null) {
+                sessionStore.setAgentTodos(parsedTodos);
             }
             break;
         }
@@ -669,7 +637,7 @@ export function handleServerMessage(message: ServerMessage): void {
                 void notifySessionActionRequired({
                     sessionId: message.payload.sessionId,
                     requestId: message.payload.requestId,
-                    title: readSessionNotificationTitle(message.payload.sessionId, "Copilot needs approval"),
+                    title: readSessionNotificationTitle(message.payload.sessionId, "Approval needed"),
                     body: `Approval needed: ${promptSummary}`,
                 });
             }
@@ -690,7 +658,7 @@ export function handleServerMessage(message: ServerMessage): void {
                 void notifySessionActionRequired({
                     sessionId: message.payload.sessionId,
                     requestId: message.payload.requestId,
-                    title: readSessionNotificationTitle(message.payload.sessionId, "Copilot needs input"),
+                    title: readSessionNotificationTitle(message.payload.sessionId, "Input needed"),
                     body: `Input needed: ${message.payload.prompt}`,
                 });
             }
@@ -718,6 +686,7 @@ export function handleServerMessage(message: ServerMessage): void {
                 clearBackgroundCompletion();
                 sessionStore.setSessionLoading(false);
                 sessionStore.setAssistantTyping(false);
+                sessionStore.setAgentTodos([]);
                 sessionStore.clearPermissionPrompts();
                 sessionStore.setUserInputPrompt(null);
                 sessionStore.setPlanExitPrompt(null);
@@ -744,6 +713,7 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
             sessionStore.setAbortRequested(false);
+            sessionStore.setAgentTodos([]);
             // Clear open dialogs after a fatal error so they do not stay stuck onscreen.
             sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
@@ -793,6 +763,7 @@ export function handleServerMessage(message: ServerMessage): void {
                     flushSessionStreamBuffers(message.payload.sessionId);
                     notifyIfBackgroundCompletion(message.payload.sessionId);
                     sessionStore.setAbortRequested(false);
+                    sessionStore.setAgentTodos([]);
                 }
                 sessionStore.setAssistantTyping(message.payload.busy);
             }
@@ -813,6 +784,7 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
             sessionStore.setAbortRequested(false);
+            sessionStore.setAgentTodos([]);
             sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
             sessionStore.setPlanExitPrompt(null);
