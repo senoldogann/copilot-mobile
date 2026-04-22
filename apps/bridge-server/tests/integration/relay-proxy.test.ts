@@ -240,7 +240,7 @@ afterEach(async () => {
 
 describe("relay proxy", () => {
     it("forwards mobile traffic to the local bridge and back", async () => {
-        process.env["COPILOT_MOBILE_RELAY_SECRET"] = "relay-test-secret";
+        process.env["COPILOT_MOBILE_RELAY_SECRET"] = "relay-test-secret-0123456789abcdef";
         const relayServer = await createTestRelayServer();
         cleanupCallbacks.push(() => relayServer.close());
 

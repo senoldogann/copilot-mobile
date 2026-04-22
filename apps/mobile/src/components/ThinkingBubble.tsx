@@ -2,16 +2,18 @@
 
 import React, { useEffect, useState } from "react";
 import { Pressable, View, Text, StyleSheet } from "react-native";
-import type { ThinkingItem } from "../stores/session-store";
+import type { ThinkingItem } from "../stores/session-store-types";
 import { BrainIcon } from "./ProviderIcon";
 import { SunshineText } from "./ShimmerHighlight";
-import { colors, spacing, fontSize } from "../theme/colors";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 
 type Props = {
     item: ThinkingItem;
 };
 
 function ThinkingBubbleComponent({ item }: Props) {
+    const theme = useAppTheme();
+    const styles = useThemedStyles(createStyles);
     const [expanded, setExpanded] = useState<boolean>(item.isStreaming);
     const hasContent = item.content.length > 0;
     const charLabel = item.content.length > 1000
@@ -35,7 +37,7 @@ function ThinkingBubbleComponent({ item }: Props) {
                     <View style={styles.iconContainer}>
                         <BrainIcon
                             size={14}
-                            color={colors.textTertiary}
+                            color={theme.colors.textTertiary}
                         />
                     </View>
                     <SunshineText
@@ -54,7 +56,7 @@ function ThinkingBubbleComponent({ item }: Props) {
 
             {hasContent && isExpanded && (
                 <View style={styles.inlinePanel}>
-                    <Text style={styles.content} selectable>
+                    <Text style={styles.content}>
                         {item.content}
                         {item.isStreaming && (
                             <Text style={styles.cursor}>▌</Text>
@@ -68,16 +70,16 @@ function ThinkingBubbleComponent({ item }: Props) {
 
 export const ThinkingBubble = React.memo(ThinkingBubbleComponent);
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => StyleSheet.create({
     wrapper: {
-        paddingHorizontal: spacing.lg,
+        paddingHorizontal: theme.spacing.lg,
         paddingVertical: 2,
     },
     row: {
         flexDirection: "row",
         alignItems: "center",
         paddingVertical: 6,
-        gap: spacing.sm,
+        gap: theme.spacing.sm,
     },
     rowWrap: {
         overflow: "hidden",
@@ -92,30 +94,30 @@ const styles = StyleSheet.create({
         fontSize: 13,
     },
     label: {
-        fontSize: fontSize.md,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.md,
+        color: theme.colors.textSecondary,
         fontWeight: "400",
     },
     charCount: {
-        fontSize: fontSize.xs,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textSecondary,
     },
     toggleText: {
-        fontSize: fontSize.xs,
-        color: colors.textSecondary,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textAssistant,
         marginLeft: "auto",
     },
     inlinePanel: {
         marginTop: 2,
         paddingLeft: 26,
-        paddingRight: spacing.sm,
+        paddingRight: theme.spacing.sm,
     },
     content: {
-        fontSize: fontSize.sm,
+        fontSize: theme.fontSize.sm,
         lineHeight: 20,
-        color: colors.textSecondary,
+        color: theme.colors.textAssistant,
     },
     cursor: {
-        color: colors.textSecondary,
+        color: theme.colors.textAssistant,
     },
 });

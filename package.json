@@ -1,27 +1,45 @@
 {
     "name": "copilot-mobile",
-    "private": true,
+    "version": "0.1.0",
+    "type": "module",
     "bin": {
         "copilot-mobile": "./bin/copilot-mobile.mjs"
     },
+    "files": [
+        "bin",
+        "dist/desktop",
+        "apps/bridge-server/dist",
+        "packages/shared/dist",
+        "README.md",
+        "docs"
+    ],
+    "publishConfig": {
+        "access": "public"
+    },
     "scripts": {
         "copilot-mobile": "node ./bin/copilot-mobile.mjs",
+        "login": "node ./bin/copilot-mobile.mjs login",
         "dev:bridge": "pnpm --filter bridge-server dev",
         "dev:bridge:direct": "node ./bin/dev-bridge-direct.mjs",
         "dev:companion:local": "node ./bin/dev-companion-local.mjs",
         "dev:companion:macos": "swift run --package-path apps/macos-companion",
+        "dev:relay:cloudflare": "pnpm --filter @copilot-mobile/cloudflare-relay dev",
         "dev:relay": "pnpm --filter @copilot-mobile/relay-server dev",
-        "dev:mobile": "pnpm --filter mobile start",
+        "dev:mobile": "node ./scripts/dev-mobile.mjs",
         "build:bridge": "pnpm --filter bridge-server build",
         "build:companion:macos": "swift build --package-path apps/macos-companion",
         "build:shared": "pnpm --filter @copilot-mobile/shared build",
+        "build:desktop": "node ./scripts/build-desktop-runtime.mjs",
+        "deploy:relay:cloudflare": "pnpm --filter @copilot-mobile/cloudflare-relay deploy",
         "bridge:up": "node ./bin/copilot-mobile.mjs up",
         "bridge:status": "node ./bin/copilot-mobile.mjs status",
         "bridge:qr": "node ./bin/copilot-mobile.mjs qr",
         "bridge:dashboard": "node ./bin/copilot-mobile.mjs dashboard",
         "bridge:down": "node ./bin/copilot-mobile.mjs down",
+        "prepack": "pnpm build:shared && pnpm build:bridge && pnpm build:desktop",
         "test": "pnpm --filter bridge-server test",
         "test:bridge": "pnpm --filter bridge-server test",
+        "test:mobile": "pnpm --filter @copilot-mobile/mobile test",
         "typecheck": "pnpm -r typecheck",
         "clean": "pnpm -r clean"
     },
@@ -30,6 +48,15 @@
         "pnpm": ">=9.0.0"
     },
     "dependencies": {
-        "expo": "^55.0.15"
+        "@github/copilot": "^1.0.32",
+        "@github/copilot-sdk": "0.2.2",
+        "jsonwebtoken": "9.0.2",
+        "qrcode": "1.5.4",
+        "uuid": "11.1.0",
+        "ws": "8.18.2",
+        "zod": "3.24.4"
+    },
+    "devDependencies": {
+        "esbuild": "^0.25.11"
     }
 }

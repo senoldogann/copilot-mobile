@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from "react-native";
 import { BottomSheet } from "./BottomSheet";
-import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
+import { useAppTheme, type AppTheme } from "../theme/theme-context";
 import { useShallow } from "zustand/react/shallow";
 import { useConnectionStore } from "../stores/connection-store";
 import { useSessionStore } from "../stores/session-store";
@@ -22,14 +22,16 @@ import {
 import type { WorkspaceDiffPayload, WorkspaceFilePayload } from "../services/workspace-events";
 import {
     GitBranchIcon,
+    GitCommitIcon,
+    GitHubIcon,
+    GitPullRequestIcon,
+    GitPushIcon,
     FolderFilledIcon,
     FileTypeIcon,
     MoreVerticalIcon,
     RefreshIcon,
     ChevronDownIcon,
     ChevronRightIcon,
-    ArrowDownIcon,
-    ArrowUpIcon,
     AlignLeftIcon,
     DiffIcon,
     ListTreeIcon,
@@ -54,8 +56,15 @@ function dirname(path: string): string | null {
 }
 
 type ViewMode = "paragraph" | "diff" | "tree";
+const INITIAL_TREE_DEPTH = 2;
+const DIRECTORY_TREE_DEPTH = 2;
+const TREE_PAGE_SIZE = 200;
 
 function WorkspacePanelComponent({ visible, onClose }: Props) {
+    const theme = useAppTheme();
+    const styles = useMemo(() => createStyles(theme), [theme]);
+    const sheetStyles = useMemo(() => createSheetStyles(theme), [theme]);
+    const treeStyles = useMemo(() => createTreeStyles(theme), [theme]);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const sessions = useSessionStore((s) => s.sessions);
     const connectionState = useConnectionStore((s) => s.state);
@@ -87,7 +96,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         })),
     );
 
-    const [viewMode, setViewMode] = useState<ViewMode>("paragraph");
+    const [viewMode, setViewMode] = useState<ViewMode>("diff");
     const [branchMenuOpen, setBranchMenuOpen] = useState<boolean>(false);
     const [commitMenuOpen, setCommitMenuOpen] = useState<boolean>(false);
     const [changesFilter, setChangesFilter] = useState<"uncommitted" | "recent">("uncommitted");
@@ -155,6 +164,12 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     useEffect(() => {
         if (!visible) return;
 
+        setViewMode("diff");
+        setChangesFilter("uncommitted");
+        setBranchMenuOpen(false);
+        setCommitMenuOpen(false);
+        setChangesFilterMenuOpen(false);
+
         if (activeSessionId === null) {
             useWorkspaceStore.getState().resetWorkspace();
             return;
@@ -167,7 +182,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
         if (!isConnected) return;
 
-        void requestWorkspaceTree(activeSessionId, undefined, 5);
+        void requestWorkspaceTree(activeSessionId, undefined, INITIAL_TREE_DEPTH, 0, TREE_PAGE_SIZE);
         void requestWorkspaceGitSummary(activeSessionId, 10);
     }, [visible, activeSessionId, isConnected]);
 
@@ -189,7 +204,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 .setError("Reconnect to the bridge to refresh workspace changes and files.");
             return;
         }
-        void requestWorkspaceTree(activeSessionId, undefined, 5);
+        void requestWorkspaceTree(activeSessionId, undefined, INITIAL_TREE_DEPTH, 0, TREE_PAGE_SIZE);
         void requestWorkspaceGitSummary(activeSessionId, 10);
     }, [activeSessionId, isConnected]);
 
@@ -217,6 +232,22 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         setBranchMenuOpen((value) => !value);
     }, [activeSessionId, hasRepo, isConnected]);
 
+    const handleToggleCommitMenu = useCallback(() => {
+        if (activeSessionId === null || !isConnected || !hasRepo) {
+            return;
+        }
+
+        setBranchMenuOpen(false);
+        setChangesFilterMenuOpen(false);
+        setCommitMenuOpen((value) => !value);
+    }, [activeSessionId, hasRepo, isConnected]);
+
+    const handleToggleChangesFilterMenu = useCallback(() => {
+        setBranchMenuOpen(false);
+        setCommitMenuOpen(false);
+        setChangesFilterMenuOpen((value) => !value);
+    }, []);
+
     const handleSwitchBranch = useCallback((branchName: string) => {
         if (activeSessionId === null || !isConnected || workspace.isSwitchingBranch) {
             return;
@@ -226,7 +257,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         void switchWorkspaceBranch(activeSessionId, branchName);
     }, [activeSessionId, isConnected, workspace.isSwitchingBranch]);
 
-    const branchLabel = workspace.branch ?? activeContext?.branch ?? "main";
+    const hasGitContext = workspace.gitRoot !== null || activeContext?.gitRoot !== undefined;
+    const branchLabel = workspace.branch ?? activeContext?.branch ?? (hasGitContext ? "main" : "workspace");
     const rootLabel = useMemo(() => {
         const rp = workspace.workspaceRoot ?? activeContext?.workspaceRoot ?? null;
         if (rp === null) return "Workspace";
@@ -241,6 +273,9 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
     const isInitialTreeLoading =
         isConnected && activeSessionId !== null && treeRoot === null && rootTreeLoading;
+    const segmentTitleColor = theme.resolvedScheme === "light"
+        ? theme.colors.textAssistant
+        : theme.colors.textPrimary;
 
     const renderChangeRow = useCallback((change: (typeof workspace.uncommittedChanges)[number]) => {
         const name = basename(change.path);
@@ -305,11 +340,30 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                         activeSessionId !== null &&
                         isConnected
                     ) {
-                        void requestWorkspaceTree(activeSessionId, node.path, 5);
+                        void requestWorkspaceTree(activeSessionId, node.path, DIRECTORY_TREE_DEPTH, 0, TREE_PAGE_SIZE);
                     }
                 } else {
                     setViewer({ path: node.path, mode: "file" });
                 }
+            };
+
+            const handleLoadMore = () => {
+                if (
+                    !isDirectory
+                    || node.nextOffset === undefined
+                    || activeSessionId === null
+                    || !isConnected
+                ) {
+                    return;
+                }
+
+                void requestWorkspaceTree(
+                    activeSessionId,
+                    node.path,
+                    1,
+                    node.nextOffset,
+                    TREE_PAGE_SIZE
+                );
             };
 
             return (
@@ -317,7 +371,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     <Pressable
                         style={({ pressed }) => [
                             treeStyles.row,
-                            { paddingLeft: spacing.lg + depth * 16 },
+                            { paddingLeft: theme.spacing.lg + depth * 16 },
                             pressed && treeStyles.rowPressed,
                         ]}
                         onPress={handlePress}
@@ -325,15 +379,15 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                         <View style={treeStyles.chevronWrap}>
                             {isDirectory ? (
                                 isExpanded ? (
-                                    <ChevronDownIcon size={12} color={colors.textTertiary} />
+                                    <ChevronDownIcon size={12} color={theme.colors.textTertiary} />
                                 ) : (
-                                    <ChevronRightIcon size={12} color={colors.textTertiary} />
+                                    <ChevronRightIcon size={12} color={theme.colors.textTertiary} />
                                 )
                             ) : null}
                         </View>
                         <View style={treeStyles.iconWrap}>
                             {isDirectory ? (
-                                <FolderFilledIcon size={16} color={colors.textSecondary} />
+                                <FolderFilledIcon size={16} color={theme.colors.textSecondary} />
                             ) : (
                                 <FileTypeIcon name={node.name} size={16} />
                             )}
@@ -345,7 +399,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                             <Text style={treeStyles.loading}>…</Text>
                         ) : (
                             <Pressable style={treeStyles.moreBtn} hitSlop={8}>
-                                <MoreVerticalIcon size={16} color={colors.textTertiary} />
+                                <MoreVerticalIcon size={16} color={theme.colors.textTertiary} />
                             </Pressable>
                         )}
                     </Pressable>
@@ -353,6 +407,23 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                         isExpanded &&
                         node.children !== undefined &&
                         node.children.map((child) => renderTreeNode(child, depth + 1))}
+                    {isDirectory && isExpanded && node.nextOffset !== undefined && (
+                        <Pressable
+                            style={({ pressed }) => [
+                                treeStyles.loadMoreRow,
+                                { paddingLeft: theme.spacing.lg + (depth + 1) * 16 },
+                                pressed && treeStyles.rowPressed,
+                            ]}
+                            onPress={handleLoadMore}
+                        >
+                            <Text style={treeStyles.loadMoreText}>
+                                Load more
+                                {node.totalChildren !== undefined
+                                    ? ` (${Math.min(node.nextOffset, node.totalChildren)}/${node.totalChildren})`
+                                    : ""}
+                            </Text>
+                        </Pressable>
+                    )}
                 </View>
             );
         },
@@ -363,151 +434,166 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const changesContent = (
         <View style={styles.content}>
             {/* Branch + Commit pill */}
-            <View style={styles.branchRow}>
-                <Pressable
-                    style={({ pressed }) => [
-                        styles.branchPicker,
-                        pressed && styles.pressed,
-                        (!hasRepo || !isConnected || workspace.isSwitchingBranch) && styles.branchPickerDisabled,
-                    ]}
-                    onPress={handleToggleBranchMenu}
-                    disabled={!hasRepo || !isConnected || workspace.isSwitchingBranch}
-                >
-                    <View style={styles.branchLeft}>
-                        <GitBranchIcon size={15} color={colors.textSecondary} />
-                        <Text style={styles.branchName} numberOfLines={1}>
-                            {branchLabel}
-                        </Text>
-                        <ChevronDownIcon size={12} color={colors.textTertiary} />
+            <View style={[styles.branchRow, (branchMenuOpen || commitMenuOpen) && styles.rowWithOverlay]}>
+                <View style={[styles.menuAnchor, styles.branchAnchor, branchMenuOpen && styles.menuAnchorActive]}>
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.branchPicker,
+                            pressed && styles.pressed,
+                            (!hasRepo || !isConnected || workspace.isSwitchingBranch) && styles.branchPickerDisabled,
+                        ]}
+                        onPress={handleToggleBranchMenu}
+                        disabled={!hasRepo || !isConnected || workspace.isSwitchingBranch}
+                    >
+                        <View style={styles.branchLeft}>
+                            <GitBranchIcon size={15} color={theme.colors.textSecondary} />
+                            <Text style={styles.branchName} numberOfLines={1}>
+                                {branchLabel}
+                            </Text>
+                            <ChevronDownIcon size={12} color={theme.colors.textTertiary} />
+                        </View>
+                    </Pressable>
+                    {branchMenuOpen && (
+                        <View style={[styles.popover, styles.anchoredPopover, styles.branchPopover]}>
+                            {workspace.branches.length === 0 ? (
+                                <View style={styles.branchEmptyState}>
+                                    <Text style={styles.branchEmptyText}>No local branches found.</Text>
+                                </View>
+                            ) : workspace.branches.flatMap((branchItem, index) => {
+                                const rows: Array<React.ReactNode> = [
+                                    <Pressable
+                                        key={branchItem.name}
+                                        style={({ pressed }) => [
+                                            styles.popoverItem,
+                                            pressed && !branchItem.current && styles.popoverItemPressed,
+                                            branchItem.current && styles.branchPopoverItemCurrent,
+                                        ]}
+                                        onPress={() => handleSwitchBranch(branchItem.name)}
+                                        disabled={branchItem.current || workspace.isSwitchingBranch}
+                                    >
+                                        <GitBranchIcon
+                                            size={14}
+                                            color={branchItem.current ? theme.colors.textPrimary : theme.colors.textTertiary}
+                                        />
+                                        <Text style={styles.popoverLabel}>{branchItem.name}</Text>
+                                        {branchItem.current && (
+                                            <Text style={styles.branchCurrentLabel}>Current</Text>
+                                        )}
+                                    </Pressable>,
+                                ];
+
+                                if (index < workspace.branches.length - 1) {
+                                    rows.push(<View key={`${branchItem.name}_sep`} style={styles.popoverSep} />);
+                                }
+
+                                return rows;
+                            })}
+                        </View>
+                    )}
+                </View>
+
+                <View style={[styles.menuAnchor, styles.commitAnchor, commitMenuOpen && styles.menuAnchorActive]}>
+                    <View style={styles.commitGroup}>
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.commitButton,
+                                pressed && styles.pressed,
+                                !hasRepo && styles.commitButtonDisabled,
+                            ]}
+                            disabled={!hasRepo || workspace.uncommittedChanges.length === 0}
+                        >
+                            <GitHubIcon size={14} color={theme.colors.textPrimary} />
+                            <Text style={styles.commitButtonText}>Commit</Text>
+                        </Pressable>
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.commitCaret,
+                                pressed && styles.pressed,
+                            ]}
+                            onPress={handleToggleCommitMenu}
+                            disabled={!hasRepo || !isConnected}
+                        >
+                            <ChevronDownIcon size={12} color={theme.colors.textPrimary} />
+                        </Pressable>
                     </View>
-                </Pressable>
-                <View style={styles.commitGroup}>
-                    <Pressable
-                        style={({ pressed }) => [
-                            styles.commitButton,
-                            pressed && styles.pressed,
-                            !hasRepo && styles.commitButtonDisabled,
-                        ]}
-                        disabled={!hasRepo || workspace.uncommittedChanges.length === 0}
-                    >
-                        <Text style={styles.commitButtonText}>Commit</Text>
-                    </Pressable>
-                    <Pressable
-                        style={({ pressed }) => [
-                            styles.commitCaret,
-                            pressed && styles.pressed,
-                        ]}
-                        onPress={() => setCommitMenuOpen((v) => !v)}
-                    >
-                        <ChevronDownIcon size={12} color={colors.textPrimary} />
-                    </Pressable>
+
+                    {commitMenuOpen && (
+                        <View style={[styles.popover, styles.anchoredPopover, styles.commitPopover]}>
+                            <Pressable
+                                style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
+                                onPress={handlePull}
+                            >
+                                <GitPullRequestIcon size={14} color={theme.colors.textPrimary} />
+                                <Text style={styles.popoverLabel}>
+                                    {workspace.isPulling ? "Pulling…" : "Pull"}
+                                </Text>
+                            </Pressable>
+                            <View style={styles.popoverSep} />
+                            <Pressable
+                                style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
+                                onPress={handlePush}
+                            >
+                                <GitPushIcon size={14} color={theme.colors.textPrimary} />
+                                <Text style={styles.popoverLabel}>
+                                    {workspace.isPushing ? "Pushing…" : "Push"}
+                                </Text>
+                            </Pressable>
+                        </View>
+                    )}
                 </View>
             </View>
-
-            {branchMenuOpen && (
-                <View style={styles.popover}>
-                    {workspace.branches.length === 0 ? (
-                        <View style={styles.branchEmptyState}>
-                            <Text style={styles.branchEmptyText}>No local branches found.</Text>
-                        </View>
-                    ) : workspace.branches.flatMap((branchItem, index) => {
-                        const rows: Array<React.ReactNode> = [
-                            <Pressable
-                                key={branchItem.name}
-                                style={({ pressed }) => [
-                                    styles.popoverItem,
-                                    pressed && !branchItem.current && styles.popoverItemPressed,
-                                    branchItem.current && styles.branchPopoverItemCurrent,
-                                ]}
-                                onPress={() => handleSwitchBranch(branchItem.name)}
-                                disabled={branchItem.current || workspace.isSwitchingBranch}
-                            >
-                                <GitBranchIcon
-                                    size={14}
-                                    color={branchItem.current ? colors.textPrimary : colors.textTertiary}
-                                />
-                                <Text style={styles.popoverLabel}>{branchItem.name}</Text>
-                                {branchItem.current && (
-                                    <Text style={styles.branchCurrentLabel}>Current</Text>
-                                )}
-                            </Pressable>,
-                        ];
-
-                        if (index < workspace.branches.length - 1) {
-                            rows.push(<View key={`${branchItem.name}_sep`} style={styles.popoverSep} />);
-                        }
-
-                        return rows;
-                    })}
-                </View>
-            )}
-
-            {commitMenuOpen && (
-                <View style={styles.popover}>
-                    <Pressable
-                        style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
-                        onPress={handlePull}
-                    >
-                        <ArrowDownIcon size={14} color={colors.textPrimary} />
-                        <Text style={styles.popoverLabel}>
-                            {workspace.isPulling ? "Pulling…" : "Pull"}
-                        </Text>
-                    </Pressable>
-                    <View style={styles.popoverSep} />
-                    <Pressable
-                        style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
-                        onPress={handlePush}
-                    >
-                        <ArrowUpIcon size={14} color={colors.textPrimary} />
-                        <Text style={styles.popoverLabel}>
-                            {workspace.isPushing ? "Pushing…" : "Push"}
-                        </Text>
-                    </Pressable>
-                </View>
-            )}
 
             {/* Uncommitted segmented header */}
-            <View style={styles.segmentRow}>
-                <Pressable
-                    style={styles.segmentLeft}
-                    hitSlop={4}
-                    onPress={() => setChangesFilterMenuOpen((v) => !v)}
-                >
-                    <Text style={styles.segmentTitle}>
-                        {changesFilter === "uncommitted" ? "Uncommitted" : "Recent commits"}
-                    </Text>
-                    <ChevronDownIcon size={12} color={colors.textSecondary} />
-                </Pressable>
+            <View style={[styles.segmentRow, changesFilterMenuOpen && styles.rowWithOverlay]}>
+                <View style={[styles.menuAnchor, styles.segmentAnchor, changesFilterMenuOpen && styles.menuAnchorActive]}>
+                    <Pressable
+                        style={styles.segmentLeft}
+                        hitSlop={4}
+                        onPress={handleToggleChangesFilterMenu}
+                    >
+                        {changesFilter === "uncommitted" ? (
+                            <DiffIcon size={14} color={segmentTitleColor} />
+                        ) : (
+                            <GitCommitIcon size={14} color={segmentTitleColor} />
+                        )}
+                        <Text style={styles.segmentTitle}>
+                            {changesFilter === "uncommitted" ? "Uncommitted" : "Recent commits"}
+                        </Text>
+                        <ChevronDownIcon size={12} color={theme.colors.textSecondary} />
+                    </Pressable>
+
+                    {changesFilterMenuOpen && (
+                        <View style={[styles.popover, styles.anchoredPopover, styles.filterPopover]}>
+                            <Pressable
+                                style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
+                                onPress={() => { setChangesFilter("uncommitted"); setChangesFilterMenuOpen(false); }}
+                            >
+                                <DiffIcon size={14} color={theme.colors.textPrimary} />
+                                <Text style={styles.popoverLabel}>Uncommitted</Text>
+                            </Pressable>
+                            <View style={styles.popoverSep} />
+                            <Pressable
+                                style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
+                                onPress={() => { setChangesFilter("recent"); setChangesFilterMenuOpen(false); }}
+                            >
+                                <GitCommitIcon size={14} color={theme.colors.textPrimary} />
+                                <Text style={styles.popoverLabel}>Recent commits</Text>
+                            </Pressable>
+                        </View>
+                    )}
+                </View>
                 <View style={styles.segmentRight}>
                     <ViewModeBtn active={viewMode === "paragraph"} onPress={() => setViewMode("paragraph")}>
-                        <AlignLeftIcon size={14} color={viewMode === "paragraph" ? colors.textPrimary : colors.textTertiary} />
+                        <AlignLeftIcon size={14} color={viewMode === "paragraph" ? theme.colors.textPrimary : theme.colors.textTertiary} />
                     </ViewModeBtn>
                     <ViewModeBtn active={viewMode === "diff"} onPress={() => setViewMode("diff")}>
-                        <DiffIcon size={14} color={viewMode === "diff" ? colors.textPrimary : colors.textTertiary} />
+                        <DiffIcon size={14} color={viewMode === "diff" ? theme.colors.textPrimary : theme.colors.textTertiary} />
                     </ViewModeBtn>
                     <ViewModeBtn active={viewMode === "tree"} onPress={() => setViewMode("tree")}>
-                        <ListTreeIcon size={14} color={viewMode === "tree" ? colors.textPrimary : colors.textTertiary} />
+                        <ListTreeIcon size={14} color={viewMode === "tree" ? theme.colors.textPrimary : theme.colors.textTertiary} />
                     </ViewModeBtn>
                 </View>
             </View>
-
-            {changesFilterMenuOpen && (
-                <View style={styles.popover}>
-                    <Pressable
-                        style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
-                        onPress={() => { setChangesFilter("uncommitted"); setChangesFilterMenuOpen(false); }}
-                    >
-                        <Text style={styles.popoverLabel}>Uncommitted</Text>
-                    </Pressable>
-                    <View style={styles.popoverSep} />
-                    <Pressable
-                        style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
-                        onPress={() => { setChangesFilter("recent"); setChangesFilterMenuOpen(false); }}
-                    >
-                        <Text style={styles.popoverLabel}>Recent commits</Text>
-                    </Pressable>
-                </View>
-            )}
 
             {workspace.operationMessage !== null && (
                 <Banner tone="success" text={workspace.operationMessage} />
@@ -536,7 +622,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                         {workspace.recentCommits.map((commit) => (
                             <View key={commit.hash} style={styles.changeRow}>
                                 <View style={styles.changeIconWrap}>
-                                    <GitBranchIcon size={14} color={colors.textTertiary} />
+                                    <GitCommitIcon size={14} color={theme.colors.textSecondary} />
                                 </View>
                                 <View style={styles.changeText}>
                                     <Text style={styles.changeName} numberOfLines={1}>
@@ -554,8 +640,12 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 <EmptyState title="Working tree clean" text="No uncommitted changes in this branch." />
             ) : viewMode === "tree" ? (
                 <View style={styles.changesList}>
-                    {renderChangesAsTree(workspace.uncommittedChanges, (path) =>
-                        setViewer({ path, mode: "diff" })
+                    {renderChangesAsTree(
+                        workspace.uncommittedChanges,
+                        (path) => setViewer({ path, mode: "diff" }),
+                        styles,
+                        treeStyles,
+                        theme,
                     )}
                 </View>
             ) : (
@@ -572,7 +662,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             <View style={styles.filesHeader}>
                 <Pressable style={styles.sortBtn} hitSlop={4}>
                     <Text style={styles.sortLabel}>Name</Text>
-                    <ChevronDownIcon size={12} color={colors.textSecondary} />
+                    <ChevronDownIcon size={12} color={theme.colors.textSecondary} />
                 </Pressable>
                 <Pressable
                     style={[styles.refreshBtn, !canRefresh && styles.refreshBtnDisabled]}
@@ -580,7 +670,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     disabled={!canRefresh}
                     hitSlop={6}
                 >
-                    <RefreshIcon size={15} color={colors.textSecondary} />
+                    <RefreshIcon size={15} color={theme.colors.textSecondary} />
                 </Pressable>
             </View>
 
@@ -599,7 +689,14 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             ) : treeRoot === null ? (
                 <EmptyState text="Open a workspace to load files" />
             ) : (
-                <View style={treeStyles.tree}>{renderTreeNode(treeRoot, 0)}</View>
+                <View style={treeStyles.tree}>
+                    {workspace.treeTruncated && (
+                        <Text style={styles.inlineTruncatedNotice}>
+                            Large folders now load in pages. Expand a folder or tap Load more to continue browsing.
+                        </Text>
+                    )}
+                    {renderTreeNode(treeRoot, 0)}
+                </View>
             )}
         </View>
     );
@@ -614,7 +711,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 style={({ pressed }) => [styles.inlineBack, pressed && { opacity: 0.6 }]}
                 onPress={() => setViewer(null)}
             >
-                <ChevronRightIcon size={14} color={colors.textSecondary} />
+                <ChevronRightIcon size={14} color={theme.colors.textSecondary} />
                 <Text style={styles.inlineBackLabel}>Back</Text>
                 <Text style={styles.inlineBackFile} numberOfLines={1}>
                     {basename(viewer.path)}
@@ -623,7 +720,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             {/* Content */}
             {inlineLoad.status === "loading" && (
                 <View style={styles.inlineCentered}>
-                    <ActivityIndicator color={colors.textSecondary} size="small" />
+                    <ActivityIndicator color={theme.colors.textSecondary} size="small" />
                     <Text style={styles.inlineLoadingText}>Loading…</Text>
                 </View>
             )}
@@ -639,7 +736,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     )}
                     {viewer.mode === "diff"
                         ? inlineLoad.body.split("\n").map((line, idx) => {
-                            const { color, bg } = classifyDiffLine(line);
+                            const { color, bg } = classifyDiffLine(line, theme);
                             return (
                                 <Text
                                     key={idx}
@@ -709,7 +806,10 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 // Değişen dosyaları klasör ağacı olarak grupla — tree view modu için.
 function renderChangesAsTree(
     changes: ReadonlyArray<{ path: string; status: string; additions?: number | undefined; deletions?: number | undefined }>,
-    onPick: (path: string) => void
+    onPick: (path: string) => void,
+    styles: ReturnType<typeof createStyles>,
+    treeStyles: ReturnType<typeof createTreeStyles>,
+    theme: AppTheme,
 ): React.ReactNode {
     const grouped = new Map<string, Array<typeof changes[number]>>();
     for (const c of changes) {
@@ -722,7 +822,7 @@ function renderChangesAsTree(
     return dirs.map((dir) => (
         <View key={dir}>
             <View style={styles.treeDirLabel}>
-                <FolderFilledIcon size={14} color={colors.textSecondary} />
+                <FolderFilledIcon size={14} color={theme.colors.textSecondary} />
                 <Text style={styles.treeDirText} numberOfLines={1}>{dir}</Text>
             </View>
             {(grouped.get(dir) ?? []).map((change) => {
@@ -768,6 +868,9 @@ function TabButton({
     active: boolean;
     onPress: () => void;
 }) {
+    const theme = useAppTheme();
+    const sheetStyles = useMemo(() => createSheetStyles(theme), [theme]);
+
     return (
         <Pressable
             style={({ pressed }) => [
@@ -793,6 +896,9 @@ function ViewModeBtn({
     onPress: () => void;
     children: React.ReactNode;
 }) {
+    const theme = useAppTheme();
+    const styles = useMemo(() => createStyles(theme), [theme]);
+
     return (
         <Pressable
             style={({ pressed }) => [
@@ -809,6 +915,9 @@ function ViewModeBtn({
 }
 
 function EmptyState({ title, text }: { title?: string; text: string }) {
+    const theme = useAppTheme();
+    const styles = useMemo(() => createStyles(theme), [theme]);
+
     return (
         <View style={styles.emptyState}>
             {title !== undefined && <Text style={styles.emptyStateTitle}>{title}</Text>}
@@ -818,6 +927,9 @@ function EmptyState({ title, text }: { title?: string; text: string }) {
 }
 
 function Banner({ tone, text }: { tone: "success" | "error"; text: string }) {
+    const theme = useAppTheme();
+    const styles = useMemo(() => createStyles(theme), [theme]);
+
     return (
         <View style={[styles.banner, tone === "success" ? styles.bannerSuccess : styles.bannerError]}>
             <Text
@@ -834,58 +946,65 @@ function Banner({ tone, text }: { tone: "success" | "error"; text: string }) {
 
 export const WorkspacePanel = React.memo(WorkspacePanelComponent);
 
-function classifyDiffLine(line: string): { color: string; bg: string | null } {
-    if (line.startsWith("+++") || line.startsWith("---")) return { color: colors.textTertiary, bg: null };
-    if (line.startsWith("@@")) return { color: colors.textSecondary, bg: null };
+function classifyDiffLine(line: string, theme: AppTheme): { color: string; bg: string | null } {
+    if (line.startsWith("+++") || line.startsWith("---")) return { color: theme.colors.textTertiary, bg: null };
+    if (line.startsWith("@@")) return { color: theme.colors.textSecondary, bg: null };
     if (line.startsWith("+")) return { color: "#3fb950", bg: "rgba(63,185,80,0.10)" };
     if (line.startsWith("-")) return { color: "#f85149", bg: "rgba(248,81,73,0.10)" };
-    return { color: colors.textPrimary, bg: null };
+    return { color: theme.colors.textPrimary, bg: null };
 }
 
 // ---------- Styles ----------
-const sheetStyles = StyleSheet.create({
+function createSheetStyles(theme: AppTheme) {
+return StyleSheet.create({
     tabBar: {
         flexDirection: "row",
-        gap: spacing.sm,
-        paddingHorizontal: spacing.lg,
-        paddingTop: spacing.sm,
-        paddingBottom: spacing.sm,
+        gap: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.lg,
+        paddingTop: theme.spacing.sm,
+        paddingBottom: theme.spacing.sm,
         borderBottomWidth: 1,
-        borderBottomColor: colors.borderMuted,
+        borderBottomColor: theme.colors.borderMuted,
     },
     tabButton: {
         flex: 1,
         paddingVertical: 10,
         alignItems: "center",
         justifyContent: "center",
-        borderRadius: borderRadius.full,
-        backgroundColor: colors.bgTertiary,
+        borderRadius: theme.borderRadius.full,
+        backgroundColor: theme.colors.bgTertiary,
     },
     tabButtonActive: {
-        backgroundColor: colors.bgElevated,
+        backgroundColor: theme.colors.bgElevated,
         borderWidth: 1,
-        borderColor: colors.borderMuted,
+        borderColor: theme.colors.borderMuted,
     },
     tabButtonPressed: { opacity: 0.85 },
     tabLabel: {
-        fontSize: fontSize.sm,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textTertiary,
         fontWeight: "600",
     },
-    tabLabelActive: { color: colors.textPrimary },
+    tabLabelActive: { color: theme.colors.textPrimary },
 });
+}
 
-const treeStyles = StyleSheet.create({
-    tree: { gap: 0, paddingBottom: spacing.sm },
+function createTreeStyles(theme: AppTheme) {
+const emphasisTextColor = theme.resolvedScheme === "light"
+    ? theme.colors.textAssistant
+    : theme.colors.textPrimary;
+
+return StyleSheet.create({
+    tree: { gap: 0, paddingBottom: theme.spacing.sm },
     row: {
         minHeight: 36,
         flexDirection: "row",
         alignItems: "center",
         gap: 8,
-        paddingRight: spacing.md,
-        borderRadius: borderRadius.sm,
+        paddingRight: theme.spacing.md,
+        borderRadius: theme.borderRadius.sm,
     },
-    rowPressed: { backgroundColor: colors.bgTertiary },
+    rowPressed: { backgroundColor: theme.colors.bgTertiary },
     chevronWrap: {
         width: 14,
         alignItems: "center",
@@ -894,30 +1013,66 @@ const treeStyles = StyleSheet.create({
     iconWrap: { width: 18, alignItems: "center", justifyContent: "center" },
     fileName: {
         flex: 1,
-        fontSize: fontSize.sm,
-        color: colors.textPrimary,
+        fontSize: theme.fontSize.sm,
+        color: emphasisTextColor,
         fontWeight: "500",
     },
-    loading: { fontSize: fontSize.xs, color: colors.textTertiary, paddingHorizontal: 8 },
+    loading: { fontSize: theme.fontSize.xs, color: theme.colors.textTertiary, paddingHorizontal: 8 },
     moreBtn: {
         width: 28,
         height: 28,
         alignItems: "center",
         justifyContent: "center",
     },
+    loadMoreRow: {
+        minHeight: 32,
+        justifyContent: "center",
+        borderRadius: theme.borderRadius.sm,
+        paddingRight: theme.spacing.md,
+    },
+    loadMoreText: {
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textSecondary,
+        fontWeight: "600",
+    },
 });
+}
 
-const styles = StyleSheet.create({
-    content: { gap: spacing.sm },
+function createStyles(theme: AppTheme) {
+const emphasizedLabelColor = theme.resolvedScheme === "light"
+    ? theme.colors.textAssistant
+    : theme.colors.textPrimary;
+const supportingLabelColor = theme.resolvedScheme === "light"
+    ? theme.colors.textSecondary
+    : theme.colors.textTertiary;
+
+return StyleSheet.create({
+    content: { gap: theme.spacing.sm },
     pressed: { opacity: 0.8 },
+    rowWithOverlay: { zIndex: 30 },
+    menuAnchor: {
+        position: "relative",
+    },
+    menuAnchorActive: {
+        zIndex: 40,
+    },
+    branchAnchor: {
+        flex: 1,
+    },
+    commitAnchor: {
+        flexShrink: 0,
+    },
+    segmentAnchor: {
+        alignSelf: "flex-start",
+    },
 
     // Branch / Commit header row
     branchRow: {
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
-        gap: spacing.sm,
-        paddingVertical: spacing.xs,
+        gap: theme.spacing.sm,
+        paddingVertical: theme.spacing.xs,
     },
     branchPicker: {
         flex: 1,
@@ -927,73 +1082,93 @@ const styles = StyleSheet.create({
     branchPickerDisabled: { opacity: 0.55 },
     branchLeft: { flexDirection: "row", alignItems: "center", gap: 8, flex: 1 },
     branchName: {
-        fontSize: fontSize.sm,
+        fontSize: theme.fontSize.sm,
         fontWeight: "600",
-        color: colors.textPrimary,
+        color: theme.colors.textPrimary,
     },
     commitGroup: {
         flexDirection: "row",
         alignItems: "stretch",
-        borderRadius: borderRadius.full,
+        borderRadius: theme.borderRadius.full,
         overflow: "hidden",
-        backgroundColor: colors.bgElevated,
+        backgroundColor: theme.colors.bgElevated,
         borderWidth: 1,
-        borderColor: colors.borderMuted,
+        borderColor: theme.colors.borderMuted,
     },
     commitButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
         paddingHorizontal: 18,
         paddingVertical: 9,
-        alignItems: "center",
         justifyContent: "center",
     },
     commitButtonDisabled: { opacity: 0.55 },
     commitButtonText: {
-        fontSize: fontSize.sm,
+        fontSize: theme.fontSize.sm,
         fontWeight: "600",
-        color: colors.textPrimary,
+        color: theme.colors.textPrimary,
     },
     commitCaret: {
         paddingHorizontal: 10,
         alignItems: "center",
         justifyContent: "center",
         borderLeftWidth: 1,
-        borderLeftColor: colors.borderMuted,
+        borderLeftColor: theme.colors.borderMuted,
     },
 
     // Pull/Push popover
     popover: {
-        alignSelf: "flex-start",
         minWidth: 150,
         paddingVertical: 6,
-        borderRadius: borderRadius.md,
-        backgroundColor: colors.bgElevated,
+        borderRadius: theme.borderRadius.md,
+        backgroundColor: theme.colors.bgElevated,
         borderWidth: 1,
-        borderColor: colors.borderMuted,
-        marginTop: -spacing.xs,
+        borderColor: theme.colors.borderMuted,
+        shadowColor: "#000000",
+        shadowOpacity: 0.2,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 8,
+    },
+    anchoredPopover: {
+        position: "absolute",
+        top: "100%",
+        marginTop: 6,
+    },
+    branchPopover: {
+        left: 0,
+        minWidth: 220,
+    },
+    commitPopover: {
+        right: 0,
+    },
+    filterPopover: {
+        left: 0,
     },
     popoverItem: {
         flexDirection: "row",
         alignItems: "center",
         gap: 10,
         paddingVertical: 9,
-        paddingHorizontal: spacing.md,
+        paddingHorizontal: theme.spacing.md,
     },
     branchPopoverItemCurrent: { opacity: 0.72 },
-    popoverItemPressed: { backgroundColor: colors.bgTertiary },
-    popoverLabel: { fontSize: fontSize.sm, color: colors.textPrimary, fontWeight: "500" },
-    popoverSep: { height: 1, backgroundColor: colors.borderMuted, marginHorizontal: spacing.sm },
+    popoverItemPressed: { backgroundColor: theme.colors.bgTertiary },
+    popoverLabel: { fontSize: theme.fontSize.sm, color: theme.colors.textPrimary, fontWeight: "500" },
+    popoverSep: { height: 1, backgroundColor: theme.colors.borderMuted, marginHorizontal: theme.spacing.sm },
     branchCurrentLabel: {
         marginLeft: "auto",
-        fontSize: fontSize.xs,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
     },
     branchEmptyState: {
-        paddingHorizontal: spacing.md,
-        paddingVertical: spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.sm,
     },
     branchEmptyText: {
-        fontSize: fontSize.sm,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textTertiary,
     },
 
     // Segmented "Uncommitted ▾" header
@@ -1001,14 +1176,14 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
-        paddingTop: spacing.sm,
+        paddingTop: theme.spacing.sm,
         paddingBottom: 4,
     },
     segmentLeft: { flexDirection: "row", alignItems: "center", gap: 6 },
     segmentTitle: {
-        fontSize: fontSize.sm,
+        fontSize: theme.fontSize.sm,
         fontWeight: "600",
-        color: colors.textSecondary,
+        color: emphasizedLabelColor,
         textTransform: "none",
     },
     segmentRight: { flexDirection: "row", alignItems: "center", gap: 4 },
@@ -1017,9 +1192,9 @@ const styles = StyleSheet.create({
         height: 28,
         alignItems: "center",
         justifyContent: "center",
-        borderRadius: borderRadius.sm,
+        borderRadius: theme.borderRadius.sm,
     },
-    viewModeBtnActive: { backgroundColor: colors.bgElevated },
+    viewModeBtnActive: { backgroundColor: theme.colors.bgElevated },
 
     // Change rows
     changesList: { gap: 2 },
@@ -1044,8 +1219,8 @@ const styles = StyleSheet.create({
         paddingBottom: 2,
     },
     treeDirText: {
-        fontSize: fontSize.xs,
-        color: colors.textSecondary,
+        fontSize: theme.fontSize.xs,
+        color: supportingLabelColor,
         fontWeight: "600",
     },
     changeIconWrap: {
@@ -1055,29 +1230,29 @@ const styles = StyleSheet.create({
     },
     changeText: { flex: 1, gap: 2 },
     changeName: {
-        fontSize: fontSize.sm,
-        color: colors.textPrimary,
+        fontSize: theme.fontSize.sm,
+        color: emphasizedLabelColor,
         fontWeight: "600",
     },
-    changePath: { fontSize: fontSize.xs, color: colors.textTertiary },
+    changePath: { fontSize: theme.fontSize.xs, color: supportingLabelColor },
     changeRight: { flexDirection: "row", alignItems: "center", gap: 6 },
     diffStats: { flexDirection: "row", alignItems: "center", gap: 6 },
     diffAdd: {
-        fontSize: fontSize.xs,
+        fontSize: theme.fontSize.xs,
         fontWeight: "600",
-        color: colors.success,
+        color: theme.colors.success,
         fontVariant: ["tabular-nums"],
     },
     diffDel: {
-        fontSize: fontSize.xs,
+        fontSize: theme.fontSize.xs,
         fontWeight: "600",
-        color: colors.error,
+        color: theme.colors.error,
         fontVariant: ["tabular-nums"],
     },
     newBadge: {
         paddingHorizontal: 8,
         paddingVertical: 3,
-        borderRadius: borderRadius.full,
+        borderRadius: theme.borderRadius.full,
         backgroundColor: "#1b3f2a",
         borderWidth: 1,
         borderColor: "#2d5c3f",
@@ -1085,7 +1260,7 @@ const styles = StyleSheet.create({
     newBadgeText: {
         fontSize: 10,
         fontWeight: "700",
-        color: colors.success,
+        color: theme.colors.success,
         letterSpacing: 0.3,
     },
 
@@ -1094,30 +1269,30 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         justifyContent: "space-between",
-        paddingVertical: spacing.xs,
+        paddingVertical: theme.spacing.xs,
         paddingHorizontal: 2,
     },
     sortBtn: { flexDirection: "row", alignItems: "center", gap: 6 },
     sortLabel: {
-        fontSize: fontSize.sm,
+        fontSize: theme.fontSize.sm,
         fontWeight: "600",
-        color: colors.textSecondary,
+        color: emphasizedLabelColor,
     },
     refreshBtn: {
         width: 32,
         height: 32,
-        borderRadius: borderRadius.full,
+        borderRadius: theme.borderRadius.full,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: colors.bgTertiary,
+        backgroundColor: theme.colors.bgTertiary,
     },
     refreshBtnDisabled: { opacity: 0.5 },
 
     // Banners + empty states
     banner: {
-        paddingHorizontal: spacing.md,
+        paddingHorizontal: theme.spacing.md,
         paddingVertical: 10,
-        borderRadius: borderRadius.md,
+        borderRadius: theme.borderRadius.md,
         borderWidth: 1,
     },
     bannerSuccess: {
@@ -1128,25 +1303,25 @@ const styles = StyleSheet.create({
         backgroundColor: "#3a1b1b",
         borderColor: "#5c2626",
     },
-    bannerText: { fontSize: fontSize.sm, lineHeight: 18 },
-    bannerTextSuccess: { color: colors.success },
-    bannerTextError: { color: colors.error },
+    bannerText: { fontSize: theme.fontSize.sm, lineHeight: 18 },
+    bannerTextSuccess: { color: theme.colors.success },
+    bannerTextError: { color: theme.colors.error },
 
     emptyState: {
-        paddingVertical: spacing.xl,
-        paddingHorizontal: spacing.lg,
+        paddingVertical: theme.spacing.xl,
+        paddingHorizontal: theme.spacing.lg,
         alignItems: "center",
         gap: 6,
     },
     emptyStateTitle: {
-        fontSize: fontSize.sm,
-        color: colors.textPrimary,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textPrimary,
         fontWeight: "600",
         textAlign: "center",
     },
     emptyStateText: {
-        fontSize: fontSize.sm,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textTertiary,
         textAlign: "center",
     },
 
@@ -1158,19 +1333,19 @@ const styles = StyleSheet.create({
         flexDirection: "row",
         alignItems: "center",
         gap: 8,
-        paddingVertical: spacing.sm,
+        paddingVertical: theme.spacing.sm,
         paddingHorizontal: 4,
         borderBottomWidth: 1,
-        borderBottomColor: colors.borderMuted,
-        marginBottom: spacing.sm,
+        borderBottomColor: theme.colors.borderMuted,
+        marginBottom: theme.spacing.sm,
     },
     inlineBackLabel: {
-        fontSize: fontSize.sm,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textTertiary,
     },
     inlineBackFile: {
-        fontSize: fontSize.sm,
-        color: colors.textPrimary,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textPrimary,
         fontWeight: "600",
         flex: 1,
     },
@@ -1178,25 +1353,25 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: "center",
         justifyContent: "center",
-        paddingVertical: spacing.xl,
+        paddingVertical: theme.spacing.xl,
     },
     inlineLoadingText: {
-        fontSize: fontSize.sm,
-        color: colors.textTertiary,
-        marginTop: spacing.sm,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textTertiary,
+        marginTop: theme.spacing.sm,
     },
     inlineErrorText: {
-        fontSize: fontSize.sm,
-        color: colors.error,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.error,
         textAlign: "center",
-        paddingHorizontal: spacing.md,
+        paddingHorizontal: theme.spacing.md,
     },
     inlineTruncatedNotice: {
-        fontSize: fontSize.xs,
-        color: colors.warning,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.warning,
         fontWeight: "600",
-        paddingHorizontal: spacing.lg,
-        paddingBottom: spacing.sm,
+        paddingHorizontal: theme.spacing.lg,
+        paddingBottom: theme.spacing.sm,
     },
     diffLine: {
         flexDirection: "row",
@@ -1204,12 +1379,12 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontFamily: "Courier",
         lineHeight: 20,
-        color: colors.textPrimary,
+        color: theme.colors.textPrimary,
     },
     lineNum: {
         width: 36,
         fontSize: 11,
-        color: colors.textTertiary,
+        color: theme.colors.textTertiary,
         textAlign: "right",
         paddingRight: 8,
         fontFamily: "Courier",
@@ -1222,12 +1397,13 @@ const styles = StyleSheet.create({
         fontSize: 11,
         fontFamily: "Courier",
         lineHeight: 20,
-        backgroundColor: colors.bg,
+        backgroundColor: theme.colors.bg,
     },
     codeText: {
         fontSize: 11,
         fontFamily: "Courier",
         lineHeight: 20,
-        color: colors.textPrimary,
+        color: theme.colors.textPrimary,
     },
 });
+}

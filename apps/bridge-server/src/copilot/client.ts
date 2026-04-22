@@ -44,12 +44,19 @@ import type {
 } from "@copilot-mobile/shared";
 import { MODEL_UNKNOWN } from "@copilot-mobile/shared";
 import type { SessionMetadata } from "@github/copilot-sdk";
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
+import { statSync } from "node:fs";
+import path from "node:path";
+
+const COMMON_COPILOT_CLI_PATHS: ReadonlyArray<string> = [
+    "/opt/homebrew/bin/copilot",
+    "/usr/local/bin/copilot",
+];
 
 /** Detect git repository root starting from `dir`. Falls back to `dir` itself. */
 function detectGitRoot(dir: string): string {
     try {
-        return execSync("git rev-parse --show-toplevel", {
+        return execFileSync("git", ["rev-parse", "--show-toplevel"], {
             cwd: dir,
             encoding: "utf8",
             stdio: ["ignore", "pipe", "ignore"],
@@ -59,8 +66,71 @@ function detectGitRoot(dir: string): string {
     }
 }
 
-const PROCESS_CWD = process.cwd();
+const PROCESS_CWD = path.resolve(process.env["COPILOT_MOBILE_WORKSPACE_ROOT"] ?? process.cwd());
 const WORKSPACE_ROOT = detectGitRoot(PROCESS_CWD);
+
+function resolveRequestedWorkspaceRoot(workspaceRoot: string | undefined): string {
+    const candidatePath = path.resolve(workspaceRoot ?? PROCESS_CWD);
+    const stats = statSync(candidatePath, { throwIfNoEntry: false });
+
+    if (stats === undefined || !stats.isDirectory()) {
+        throw new Error(`Workspace directory does not exist: ${candidatePath}`);
+    }
+
+    return candidatePath;
+}
+
+function resolveExplicitCopilotCliPath(): string | undefined {
+    const configuredPath = process.env["COPILOT_CLI_PATH"];
+    if (configuredPath === undefined || configuredPath.trim().length === 0) {
+        return undefined;
+    }
+
+    const resolvedPath = path.resolve(configuredPath.trim());
+    const stats = statSync(resolvedPath, { throwIfNoEntry: false });
+    if (stats === undefined || !stats.isFile()) {
+        throw new Error(`Configured Copilot CLI binary does not exist: ${resolvedPath}`);
+    }
+
+    return resolvedPath;
+}
+
+function resolveSystemCopilotCliPath(): string | undefined {
+    for (const candidatePath of COMMON_COPILOT_CLI_PATHS) {
+        const stats = statSync(candidatePath, { throwIfNoEntry: false });
+        if (stats !== undefined && stats.isFile()) {
+            return candidatePath;
+        }
+    }
+
+    try {
+        const resolvedPath = execFileSync("which", ["copilot"], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+        }).trim();
+        if (resolvedPath.length === 0) {
+            return undefined;
+        }
+
+        const stats = statSync(resolvedPath, { throwIfNoEntry: false });
+        if (stats === undefined || !stats.isFile()) {
+            return undefined;
+        }
+
+        return resolvedPath;
+    } catch {
+        return undefined;
+    }
+}
+
+function resolvePreferredCopilotCliPath(): string | undefined {
+    const explicitPath = resolveExplicitCopilotCliPath();
+    if (explicitPath !== undefined) {
+        return explicitPath;
+    }
+
+    return resolveSystemCopilotCliPath();
+}
 
 type SessionRecord = {
     session: AdaptedCopilotSession;
@@ -97,7 +167,7 @@ function adaptSessionContext(metadata: SessionMetadata): SessionInfo["context"] 
 
     const sessionCwd = context.cwd;
     const detectedGitRoot = detectGitRoot(sessionCwd);
-    const workspaceRoot = context.gitRoot ?? detectedGitRoot;
+    const workspaceRoot = sessionCwd;
     const gitRoot = context.gitRoot ?? (detectedGitRoot !== sessionCwd ? detectedGitRoot : undefined);
     const repository = typeof context.repository === "string"
         ? normalizeRepositoryLabel(context.repository)
@@ -139,6 +209,20 @@ function adaptSessionInfoFromMetadata(metadata: SessionMetadata): SessionInfo {
         status: "idle",
         ...(metadata.summary !== undefined ? { summary: metadata.summary } : {}),
         ...(context !== undefined ? { context } : {}),
+    };
+}
+
+function buildSessionContextFromWorkingDirectory(
+    workingDirectory: string
+): NonNullable<SessionInfo["context"]> {
+    const detectedGitRoot = detectGitRoot(workingDirectory);
+    const workspaceRoot = workingDirectory;
+    const gitRoot = detectedGitRoot !== workingDirectory ? detectedGitRoot : undefined;
+
+    return {
+        sessionCwd: workingDirectory,
+        workspaceRoot,
+        ...(gitRoot !== undefined ? { gitRoot } : {}),
     };
 }
 
@@ -664,7 +748,16 @@ function adaptPermissionRequest(req: SDKPermissionRequest): AdaptedPermissionReq
 }
 
 export function createCopilotAdapter(): AdaptedCopilotClient {
-    const client = new CopilotClient({ cwd: WORKSPACE_ROOT });
+    const cliPath = resolvePreferredCopilotCliPath();
+    if (cliPath !== undefined) {
+        console.log(`[copilot] Using CLI binary: ${cliPath}`);
+    } else {
+        console.warn("[copilot] No external Copilot CLI binary detected. Falling back to the bundled SDK CLI.");
+    }
+    const client = new CopilotClient({
+        cwd: WORKSPACE_ROOT,
+        ...(cliPath !== undefined ? { cliPath } : {}),
+    });
     const sessions = new Map<string, SessionRecord>();
     let startPromise: Promise<void> | null = null;
 
@@ -681,6 +774,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
     function wrapSDKSession(
         sdkSession: CopilotSession,
         config: SessionConfig,
+        workingDirectory: string,
         permissionProxy: PermissionProxy,
         inputProxy: InputProxy,
         stateRef: SessionStateRef
@@ -693,11 +787,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             createdAt: now,
             lastActiveAt: now,
             status: "active",
-            context: {
-                sessionCwd: PROCESS_CWD,
-                workspaceRoot: WORKSPACE_ROOT,
-                ...(WORKSPACE_ROOT !== PROCESS_CWD ? { gitRoot: WORKSPACE_ROOT } : {}),
-            },
+            ...{ context: buildSessionContextFromWorkingDirectory(workingDirectory) },
         };
 
         const unsubscribes: Array<() => void> = [];
@@ -967,7 +1057,15 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                 return { kind: "denied-interactively-by-user" as const };
             }
             const adapted = adaptPermissionRequest(request);
-            const approved = await permissionProxy.handler(adapted);
+            let approved: boolean;
+            try {
+                approved = await permissionProxy.handler(adapted);
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                throw new Error(
+                    `Permission request handler failed for kind=${adapted.kind} requestId=${adapted.id}: ${message}`
+                );
+            }
             return approved
                 ? { kind: "approved" as const }
                 : { kind: "denied-interactively-by-user" as const };
@@ -981,11 +1079,20 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             if (inputProxy.handler === null) {
                 return { answer: "", wasFreeform: true };
             }
-            const value = await inputProxy.handler({
+            const adaptedRequest = {
                 question: request.question,
                 ...(request.choices !== undefined ? { choices: request.choices } : {}),
                 ...(request.allowFreeform !== undefined ? { allowFreeform: request.allowFreeform } : {}),
-            });
+            };
+            let value: string;
+            try {
+                value = await inputProxy.handler(adaptedRequest);
+            } catch (error: unknown) {
+                const message = error instanceof Error ? error.message : String(error);
+                throw new Error(
+                    `User input handler failed for question="${request.question}": ${message}`
+                );
+            }
             return { answer: value, wasFreeform: true };
         };
     }
@@ -1019,11 +1126,12 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                 agentMode: config.agentMode,
                 permissionLevel: config.permissionLevel,
             };
+            const workingDirectory = resolveRequestedWorkspaceRoot(config.workspaceRoot);
 
             const sdkConfig: SDKSessionConfig = {
                 model: config.model,
                 streaming: config.streaming,
-                workingDirectory: PROCESS_CWD,
+                workingDirectory,
                 onPermissionRequest: createSDKPermissionHandler(permissionProxy),
                 onUserInputRequest: createSDKUserInputHandler(inputProxy),
                 customAgents: [ASK_AGENT_CONFIG],
@@ -1037,7 +1145,14 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             }
 
             const sdkSession = await client.createSession(sdkConfig);
-            const session = wrapSDKSession(sdkSession, config, permissionProxy, inputProxy, stateRef);
+            const session = wrapSDKSession(
+                sdkSession,
+                config,
+                workingDirectory,
+                permissionProxy,
+                inputProxy,
+                stateRef
+            );
             await session.applyState({
                 agentMode: config.agentMode,
                 permissionLevel: config.permissionLevel,
@@ -1070,16 +1185,24 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                 permissionLevel: config.permissionLevel,
             };
 
+            const resumeWorkingDirectory = metadata?.context?.cwd ?? PROCESS_CWD;
             const resumeConfig: ResumeSessionConfig = {
                 onPermissionRequest: createSDKPermissionHandler(permissionProxy),
                 onUserInputRequest: createSDKUserInputHandler(inputProxy),
-                workingDirectory: metadata?.context?.cwd ?? PROCESS_CWD,
+                workingDirectory: resumeWorkingDirectory,
                 customAgents: [ASK_AGENT_CONFIG],
                 hooks: buildSessionHooks(stateRef),
             };
 
             const sdkSession = await client.resumeSession(sessionId, resumeConfig);
-            const session = wrapSDKSession(sdkSession, config, permissionProxy, inputProxy, stateRef);
+            const session = wrapSDKSession(
+                sdkSession,
+                config,
+                resumeWorkingDirectory,
+                permissionProxy,
+                inputProxy,
+                stateRef
+            );
             const record = sessions.get(session.id);
 
             if (record !== undefined && metadata !== undefined) {

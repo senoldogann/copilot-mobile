@@ -33,17 +33,18 @@ export function getOrCreateJWTSecret(): Buffer {
 
     const secret = randomBytes(32);
     writeFileSync(secretPath, secret, { mode: 0o600 });
+    chmodSync(secretPath, 0o600);
     return secret;
 }
 
-// Rotation sonras\u0131 atomik yaz\u0131m: \u00f6nce tmp dosyaya yaz, sonra rename.
-// Restart sonras\u0131 yeni secret kaybolmas\u0131n.
+// Persist atomically during rotation so a restart cannot lose the latest secret.
 export function persistJWTSecret(secret: Buffer): void {
     const configDir = getConfigDir();
     const secretPath = join(configDir, JWT_SECRET_FILENAME);
     const tmpPath = `${secretPath}.tmp-${process.pid}-${Date.now()}`;
     writeFileSync(tmpPath, secret, { mode: 0o600 });
     renameSync(tmpPath, secretPath);
+    chmodSync(secretPath, 0o600);
 }
 
 // --- TLS Certificate ---

@@ -12,8 +12,9 @@ import type {
 } from "@copilot-mobile/shared";
 
 const execFileAsync = promisify(execFile);
-const MAX_TREE_ENTRIES_PER_DIRECTORY = 250;
-const MAX_WORKSPACE_TREE_DEPTH = 5;
+const MAX_TREE_ENTRIES_PER_DIRECTORY = 1000;
+const DEFAULT_TREE_PAGE_SIZE = 200;
+const MAX_WORKSPACE_TREE_DEPTH = 7;
 const MAX_WORKSPACE_COMMIT_LIMIT = 50;
 const MAX_WORKSPACE_RESOLVE_MATCHES = 10;
 const GIT_OPERATION_TIMEOUT_MS = 30_000;
@@ -43,6 +44,19 @@ function toPosixRelativePath(rootPath: string, absolutePath: string): string {
     }
 
     return rel.split(sep).join("/");
+}
+
+function mapGitPathToWorkspacePath(
+    workspaceRoot: string,
+    gitRoot: string,
+    gitPath: string
+): string | null {
+    const absolutePath = resolve(gitRoot, gitPath);
+    if (!isWithinRoot(workspaceRoot, absolutePath)) {
+        return null;
+    }
+
+    return toPosixRelativePath(workspaceRoot, absolutePath);
 }
 
 function isWithinRoot(rootPath: string, candidatePath: string): boolean {
@@ -302,7 +316,10 @@ async function runGit(cwd: string, args: ReadonlyArray<string>): Promise<GitComm
 async function buildTreeNode(
     rootPath: string,
     absolutePath: string,
-    depthRemaining: number
+    depthRemaining: number,
+    requestedAbsolutePath: string,
+    requestedOffset: number,
+    pageSize: number
 ): Promise<{ node: WorkspaceTreeNode; truncated: boolean }> {
     const stats = await lstat(absolutePath);
     const relativePath = toPosixRelativePath(rootPath, absolutePath);
@@ -318,6 +335,7 @@ async function buildTreeNode(
                     path: relativePath,
                     type: "directory",
                     modifiedAt: stats.mtimeMs,
+                    totalChildren: 0,
                 },
                 truncated: true,
             };
@@ -330,14 +348,16 @@ async function buildTreeNode(
             return left.name.localeCompare(right.name);
         });
 
+        const filteredEntries = entries.filter((entry) => entry.name !== ".git");
+        const currentOffset = absolutePath === requestedAbsolutePath ? requestedOffset : 0;
+        const boundedOffset = Math.min(Math.max(0, currentOffset), filteredEntries.length);
+        const pagedEntries = filteredEntries.slice(boundedOffset, boundedOffset + pageSize);
+        const hasMoreChildren = boundedOffset + pagedEntries.length < filteredEntries.length;
+
         const children: Array<WorkspaceTreeNode> = [];
         let truncated = false;
 
-        for (const entry of entries.slice(0, MAX_TREE_ENTRIES_PER_DIRECTORY)) {
-            if (entry.name === ".git") {
-                continue;
-            }
-
+        for (const entry of pagedEntries) {
             const childPath = resolve(absolutePath, entry.name);
             if (!isWithinRoot(rootPath, childPath)) {
                 continue;
@@ -348,7 +368,14 @@ async function buildTreeNode(
             const childName = entry.name;
 
             if (childStats.isDirectory()) {
-                const childResult = await buildTreeNode(rootPath, childPath, depthRemaining - 1);
+                const childResult = await buildTreeNode(
+                    rootPath,
+                    childPath,
+                    depthRemaining - 1,
+                    requestedAbsolutePath,
+                    requestedOffset,
+                    pageSize
+                );
                 children.push(childResult.node);
                 truncated ||= childResult.truncated;
                 continue;
@@ -363,7 +390,7 @@ async function buildTreeNode(
             });
         }
 
-        truncated ||= entries.length > MAX_TREE_ENTRIES_PER_DIRECTORY;
+        truncated ||= hasMoreChildren;
 
         return {
             node: {
@@ -371,6 +398,8 @@ async function buildTreeNode(
                 path: relativePath,
                 type: "directory",
                 modifiedAt: stats.mtimeMs,
+                totalChildren: filteredEntries.length,
+                ...(hasMoreChildren ? { nextOffset: boundedOffset + pagedEntries.length } : {}),
                 children,
             },
             truncated,
@@ -493,7 +522,9 @@ function parseGitBranches(stdout: string, currentBranch: string | undefined): Ar
 export async function buildWorkspaceTree(
     rootPath: string,
     requestedWorkspaceRelativePath = ".",
-    maxDepth = 3
+    maxDepth = 3,
+    offset = 0,
+    pageSize = DEFAULT_TREE_PAGE_SIZE
 ): Promise<{
     workspaceRoot: string;
     requestedWorkspaceRelativePath: string;
@@ -501,12 +532,23 @@ export async function buildWorkspaceTree(
     truncated: boolean;
 }> {
     const normalizedDepth = Math.min(Math.max(0, maxDepth), MAX_WORKSPACE_TREE_DEPTH);
+    const normalizedPageSize = Math.min(
+        Math.max(1, pageSize),
+        MAX_TREE_ENTRIES_PER_DIRECTORY
+    );
     const absolutePath = resolve(rootPath, requestedWorkspaceRelativePath);
     if (!isWithinRoot(rootPath, absolutePath)) {
         throw new Error(`Requested path is outside the workspace root: ${requestedWorkspaceRelativePath}`);
     }
 
-    const tree = await buildTreeNode(rootPath, absolutePath, normalizedDepth);
+    const tree = await buildTreeNode(
+        rootPath,
+        absolutePath,
+        normalizedDepth,
+        absolutePath,
+        offset,
+        normalizedPageSize
+    );
     return {
         workspaceRoot: resolve(rootPath),
         requestedWorkspaceRelativePath: toPosixRelativePath(rootPath, absolutePath),
@@ -565,6 +607,7 @@ export async function buildWorkspaceGitSummary(
         };
     }
     const gitRoot = resolve(topLevelResult.stdout.trim());
+    const workspaceScoped = workspaceRoot !== gitRoot;
 
     const statusResult = await runGit(gitRoot, ["status", "--porcelain=v1", "--untracked-files=all", "--renames"]);
     if (!statusResult.success) {
@@ -612,12 +655,32 @@ export async function buildWorkspaceGitSummary(
             .map(parseGitStatusLine)
             .filter((entry): entry is GitFileChange => entry !== null)
             .map((change) => {
-                const stats = numstatMap.get(change.path);
-                if (stats !== undefined) {
-                    return { ...change, additions: stats.additions, deletions: stats.deletions };
+                if (!workspaceScoped) {
+                    const stats = numstatMap.get(change.path);
+                    if (stats !== undefined) {
+                        return { ...change, additions: stats.additions, deletions: stats.deletions };
+                    }
+                    return change;
                 }
-                return change;
-            }),
+
+                const workspaceRelativePath = mapGitPathToWorkspacePath(workspaceRoot, gitRoot, change.path);
+                if (workspaceRelativePath === null) {
+                    return null;
+                }
+
+                const workspaceOriginalPath = change.originalPath !== undefined
+                    ? mapGitPathToWorkspacePath(workspaceRoot, gitRoot, change.originalPath)
+                    : undefined;
+                const stats = numstatMap.get(change.path);
+
+                return {
+                    ...change,
+                    path: workspaceRelativePath,
+                    ...(workspaceOriginalPath !== undefined ? { originalPath: workspaceOriginalPath } : {}),
+                    ...(stats !== undefined ? { additions: stats.additions, deletions: stats.deletions } : {}),
+                };
+            })
+            .filter((change): change is GitFileChange => change !== null),
         recentCommits: parseGitLog(logResult.stdout),
         truncated: false,
     };

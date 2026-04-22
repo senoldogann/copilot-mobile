@@ -158,16 +158,13 @@ export function PaperclipIcon({ size = 16, color = "#a0a3a2" }: { size?: number;
 export function AgentIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <G stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" fill="none">
-                <Path d="M9 6.5V5a3 3 0 0 1 6 0v1.5" />
-                <Path d="M7.5 8.5A2.5 2.5 0 0 1 10 6h4a2.5 2.5 0 0 1 2.5 2.5V14A3.5 3.5 0 0 1 13 17.5h-2A3.5 3.5 0 0 1 7.5 14V8.5Z" />
-                <Circle cx="10" cy="11" r="0.9" fill={color} stroke="none" />
-                <Circle cx="14" cy="11" r="0.9" fill={color} stroke="none" />
-                <Path d="M10 14.2c.8.5 3.2.5 4 0" />
-                <Path d="M12 17.5V20" />
-                <Path d="M9 20h6" />
-                <Path d="M5.5 10H4" />
-                <Path d="M20 10h-1.5" />
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M12 8V4H8" />
+                <Path d="M4 10a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z" />
+                <Path d="M2 14h2" />
+                <Path d="M20 14h2" />
+                <Path d="M9 13v2" />
+                <Path d="M15 13v2" />
             </G>
         </Svg>
     );
@@ -183,6 +180,44 @@ export function ArrowUpIcon({ size = 16, color = "#ffffff" }: { size?: number; c
                 strokeLinecap="round"
                 strokeLinejoin="round"
             />
+        </Svg>
+    );
+}
+
+export function GitHubIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M12 2C6.48 2 2 6.58 2 12.24C2 16.76 4.87 20.59 8.84 21.94C9.34 22.03 9.52 21.72 9.52 21.46C9.52 21.22 9.51 20.44 9.5 19.41C6.73 20.03 6.14 18.19 6.14 18.19C5.68 16.98 5.03 16.66 5.03 16.66C4.12 16.02 5.1 16.04 5.1 16.04C6.11 16.11 6.64 17.11 6.64 17.11C7.53 18.69 8.97 18.23 9.54 17.95C9.63 17.28 9.89 16.82 10.18 16.56C7.97 16.3 5.65 15.42 5.65 11.48C5.65 10.36 6.04 9.45 6.68 8.72C6.58 8.45 6.23 7.35 6.78 5.86C6.78 5.86 7.62 5.58 9.5 6.89C10.3 6.66 11.15 6.54 12 6.54C12.85 6.54 13.7 6.66 14.5 6.89C16.38 5.58 17.22 5.86 17.22 5.86C17.77 7.35 17.42 8.45 17.32 8.72C17.96 9.45 18.35 10.36 18.35 11.48C18.35 15.43 16.02 16.3 13.81 16.56C14.17 16.89 14.5 17.54 14.5 18.54C14.5 19.96 14.49 21.11 14.49 21.46C14.49 21.72 14.67 22.04 15.18 21.94C19.14 20.58 22 16.76 22 12.24C22 6.58 17.52 2 12 2Z"
+                fill={color}
+            />
+        </Svg>
+    );
+}
+
+export function GitPullRequestIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Circle cx="6" cy="5" r="2" />
+                <Circle cx="18" cy="7" r="2" />
+                <Circle cx="18" cy="19" r="2" />
+                <Path d="M6 7v10a4 4 0 0 0 4 4h6" />
+                <Path d="M18 9v8" />
+                <Path d="M10 7h6" />
+            </G>
+        </Svg>
+    );
+}
+
+export function GitPushIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M12 20V6" />
+                <Path d="m7 11 5-5 5 5" />
+                <Path d="M5 20h14" />
+            </G>
         </Svg>
     );
 }
@@ -233,6 +268,27 @@ export function SlidersIcon({ size = 15, color = "#a0a3a2" }: { size?: number; c
     );
 }
 
+export function SettingsIcon({ size = 15, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M12 15.5A3.5 3.5 0 1 0 12 8.5a3.5 3.5 0 0 0 0 7Z"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+            <Path
+                d="M19.4 15a1 1 0 0 0 .2 1.1l.1.1a2 2 0 0 1-2.8 2.8l-.1-.1a1 1 0 0 0-1.1-.2 1 1 0 0 0-.6.9V20a2 2 0 0 1-4 0v-.1a1 1 0 0 0-.6-.9 1 1 0 0 0-1.1.2l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1 1 0 0 0 .2-1.1 1 1 0 0 0-.9-.6H4a2 2 0 0 1 0-4h.1a1 1 0 0 0 .9-.6 1 1 0 0 0-.2-1.1l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1 1 0 0 0 1.1.2 1 1 0 0 0 .6-.9V4a2 2 0 0 1 4 0v.1a1 1 0 0 0 .6.9 1 1 0 0 0 1.1-.2l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1 1 0 0 0-.2 1.1 1 1 0 0 0 .9.6H20a2 2 0 0 1 0 4h-.1a1 1 0 0 0-.9.6Z"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </Svg>
+    );
+}
+
 export function GitBranchIcon({ size = 13, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -241,6 +297,17 @@ export function GitBranchIcon({ size = 13, color = "#a0a3a2" }: { size?: number;
                 <Circle cx="6" cy="21" r="2" />
                 <Circle cx="18" cy="9" r="2" />
                 <Path d="M6 5v14M18 11c0 3-3 5-6 5h-1a4 4 0 0 0-4 4" />
+            </G>
+        </Svg>
+    );
+}
+
+export function GitCommitIcon({ size = 13, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M12 5v3M12 16v3M8 12H5M19 12h-3M9 12h6" />
+                <Circle cx="12" cy="12" r="3" />
             </G>
         </Svg>
     );
@@ -345,12 +412,15 @@ export function SparklesIcon({ size = 28, color = "#a371f7" }: { size?: number; 
 export function BrainIcon({ size = 16, color = "#a371f7" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <G stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" fill="none">
-                <Path d="M10.1 4.3C8.7 3.5 7 4 6.2 5.2c-1.3.1-2.3 1.1-2.3 2.4 0 .7.3 1.4.8 1.8-.5.5-.8 1.2-.8 2 0 1.2.9 2.3 2.2 2.5.2 1.5 1.4 2.6 2.9 2.6.5 0 1-.1 1.4-.3.6 1.1 1.8 1.8 3.1 1.8" />
-                <Path d="M13.9 4.3c1.4-.8 3.1-.3 3.9.9 1.3.1 2.3 1.1 2.3 2.4 0 .7-.3 1.4-.8 1.8.5.5.8 1.2.8 2 0 1.2-.9 2.3-2.2 2.5-.2 1.5-1.4 2.6-2.9 2.6-.5 0-1-.1-1.4-.3-.6 1.1-1.8 1.8-3.1 1.8" />
-                <Path d="M12 5.5v12.8" />
-                <Path d="M9.4 7.7c.8.1 1.4.7 1.6 1.4M8.7 11c1 .1 1.8.8 2.1 1.7M9.5 15c.7.1 1.3.5 1.7 1.1" />
-                <Path d="M14.6 7.7c-.8.1-1.4.7-1.6 1.4M15.3 11c-1 .1-1.8.8-2.1 1.7M14.5 15c-.7.1-1.3.5-1.7 1.1" />
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M12 18V5" />
+                <Path d="M15 13a4.17 4.17 0 0 1-3-4 4.17 4.17 0 0 1-3 4" />
+                <Path d="M17.598 6.5A3 3 0 1 0 12 5a3 3 0 1 0-5.598 1.5" />
+                <Path d="M17.997 5.125a4 4 0 0 1 2.526 5.77" />
+                <Path d="M18 18a4 4 0 0 0 2-7.464" />
+                <Path d="M19.967 17.483A4 4 0 1 1 12 18a4 4 0 1 1-7.967-.517" />
+                <Path d="M6 18a4 4 0 0 1-2-7.464" />
+                <Path d="M6.003 5.125a4 4 0 0 0-2.526 5.77" />
             </G>
         </Svg>
     );

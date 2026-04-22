@@ -20,6 +20,7 @@ const sessionConfigSchema = z.object({
     streaming: z.boolean(),
     agentMode: z.enum(["agent", "plan", "ask"]),
     permissionLevel: z.enum(["default", "bypass", "autopilot"]),
+    workspaceRoot: z.string().min(1).optional(),
 });
 
 const sessionContextSchema = z.object({
@@ -31,6 +32,9 @@ const sessionContextSchema = z.object({
 });
 
 const transportModeSchema = z.enum(["direct", "relay"]);
+const notificationProviderSchema = z.enum(["expo"]);
+const notificationPlatformSchema = z.enum(["ios", "android"]);
+const notificationPresenceStateSchema = z.enum(["active", "inactive", "background"]);
 
 let workspaceTreeNodeSchema: z.ZodType<import("./protocol").WorkspaceTreeNode>;
 workspaceTreeNodeSchema = z.lazy(() => z.object({
@@ -39,6 +43,8 @@ workspaceTreeNodeSchema = z.lazy(() => z.object({
     type: z.enum(["file", "directory", "symlink"]),
     size: z.number().int().nonnegative().optional(),
     modifiedAt: z.number().nonnegative().optional(),
+    nextOffset: z.number().int().nonnegative().optional(),
+    totalChildren: z.number().int().nonnegative().optional(),
     children: z.array(workspaceTreeNodeSchema).readonly().optional(),
 })) as z.ZodType<import("./protocol").WorkspaceTreeNode>;
 
@@ -453,6 +459,7 @@ const workspaceTreeSchema = baseBridgeMessageSchema.extend({
         context: sessionContextSchema,
         workspaceRoot: z.string().min(1),
         requestedWorkspaceRelativePath: z.string(),
+        offset: z.number().int().nonnegative(),
         tree: workspaceTreeNodeSchema,
         truncated: z.boolean(),
     }),
@@ -526,6 +533,22 @@ const workspaceDiffResponseSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceSearchResponseSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.search.response"),
+    payload: z.object({
+        requestKey: z.string().min(1),
+        query: z.string(),
+        matches: z.array(
+            z.object({
+                path: z.string().min(1),
+                displayPath: z.string().min(1),
+                name: z.string().min(1),
+            })
+        ).readonly(),
+        error: z.string().optional(),
+    }),
+});
+
 const skillsListResponseSchema = baseBridgeMessageSchema.extend({
     type: z.literal("skills.list.response"),
     payload: z.object({
@@ -571,6 +594,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     workspaceResolveResponseSchema,
     workspaceFileResponseSchema,
     workspaceDiffResponseSchema,
+    workspaceSearchResponseSchema,
     skillsListResponseSchema,
 ]);
 
@@ -596,7 +620,13 @@ const authResumeSchema = baseBridgeMessageSchema.extend({
 
 const sessionCreateSchema = baseBridgeMessageSchema.extend({
     type: z.literal("session.create"),
-    payload: z.object({ config: sessionConfigSchema }),
+    payload: z.object({
+        config: sessionConfigSchema,
+        initialMessage: z.object({
+            prompt: z.string().min(1),
+            attachments: z.array(sessionMessageAttachmentSchema).optional(),
+        }).optional(),
+    }),
 });
 
 const sessionResumeSchema = baseBridgeMessageSchema.extend({
@@ -672,12 +702,37 @@ const capabilitiesRequestSchema = baseBridgeMessageSchema.extend({
     payload: z.object({}).strict(),
 });
 
+const notificationDeviceRegisterSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("notification.device.register"),
+    payload: z.object({
+        provider: notificationProviderSchema,
+        pushToken: z.string().min(1),
+        platform: notificationPlatformSchema,
+        appVersion: z.string().min(1).optional(),
+    }),
+});
+
+const notificationDeviceUnregisterSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("notification.device.unregister"),
+    payload: z.object({}).strict(),
+});
+
+const notificationPresenceUpdateSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("notification.presence.update"),
+    payload: z.object({
+        state: notificationPresenceStateSchema,
+        timestamp: z.number().int().nonnegative(),
+    }),
+});
+
 const workspaceTreeRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.tree.request"),
     payload: z.object({
         sessionId: z.string().min(1),
         workspaceRelativePath: z.string().optional(),
         maxDepth: z.number().int().positive().optional(),
+        offset: z.number().int().nonnegative().optional(),
+        pageSize: z.number().int().positive().optional(),
     }),
 });
 
@@ -736,6 +791,15 @@ const workspaceDiffRequestSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceSearchRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.search.request"),
+    payload: z.object({
+        requestKey: z.string().min(1),
+        query: z.string(),
+        limit: z.number().int().positive().optional(),
+    }),
+});
+
 const skillsListRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("skills.list.request"),
     payload: z.object({}).strict(),
@@ -757,6 +821,10 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     permissionLevelUpdateSchema,
     modelsRequestSchema,
     capabilitiesRequestSchema,
+    notificationDeviceRegisterSchema,
+    notificationDeviceUnregisterSchema,
+    notificationPresenceUpdateSchema,
+    workspaceSearchRequestSchema,
     workspaceTreeRequestSchema,
     workspaceGitSummaryRequestSchema,
     workspacePullSchema,

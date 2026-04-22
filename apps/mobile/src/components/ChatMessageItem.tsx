@@ -11,11 +11,11 @@ import {
     ActivityIndicator,
 } from "react-native";
 import type { SessionMessageAttachment } from "@copilot-mobile/shared";
-import type { ChatItem } from "../stores/session-store";
+import type { ChatItem } from "../stores/session-store-types";
 import { ThinkingBubble } from "./ThinkingBubble";
 import { ToolCard } from "./ToolCard";
 import { FileContentViewer } from "./FileContentViewer";
-import { colors, spacing, fontSize, borderRadius } from "../theme/colors";
+import { useThemedStyles, type AppTheme } from "../theme/theme-context";
 type Props = {
     item: ChatItem;
 };
@@ -106,8 +106,9 @@ function parseFilePaths(text: string): ReadonlyArray<MarkdownSegment> {
 
 // Render inline markdown segments
 function InlineMarkdown({ segments }: { segments: ReadonlyArray<MarkdownSegment> }) {
+    const mdStyles = useThemedStyles(createMarkdownStyles);
     return (
-        <Text selectable style={mdStyles.inlineText}>
+        <Text style={mdStyles.inlineText}>
             {segments.map((seg, i) => {
                 switch (seg.kind) {
                     case "bold":
@@ -145,6 +146,7 @@ const FileViewerContext = React.createContext<(path: string) => void>(() => unde
 // File link — colored, tappable to open content viewer
 function FileLink({ path }: { path: string }) {
     const openFile = React.useContext(FileViewerContext);
+    const mdStyles = useThemedStyles(createMarkdownStyles);
     return (
         <Text style={mdStyles.fileLink} onPress={() => openFile(path)}>
             {path}
@@ -165,7 +167,42 @@ type MarkdownBlock =
     | { kind: "table"; headers: ReadonlyArray<string>; rows: ReadonlyArray<ReadonlyArray<string>> }
     | { kind: "hr" };
 
+const MAX_MARKDOWN_CACHE_ENTRIES = 200;
+const markdownBlockCache = new Map<string, ReadonlyArray<MarkdownBlock>>();
+
+function readMarkdownCache(content: string): ReadonlyArray<MarkdownBlock> | null {
+    const cached = markdownBlockCache.get(content);
+    if (cached === undefined) {
+        return null;
+    }
+
+    markdownBlockCache.delete(content);
+    markdownBlockCache.set(content, cached);
+    return cached;
+}
+
+function writeMarkdownCache(content: string, blocks: ReadonlyArray<MarkdownBlock>): void {
+    if (markdownBlockCache.has(content)) {
+        markdownBlockCache.delete(content);
+    }
+
+    markdownBlockCache.set(content, blocks);
+    if (markdownBlockCache.size <= MAX_MARKDOWN_CACHE_ENTRIES) {
+        return;
+    }
+
+    const oldestKey = markdownBlockCache.keys().next().value;
+    if (typeof oldestKey === "string") {
+        markdownBlockCache.delete(oldestKey);
+    }
+}
+
 function parseMarkdown(content: string): ReadonlyArray<MarkdownBlock> {
+    const cached = readMarkdownCache(content);
+    if (cached !== null) {
+        return cached;
+    }
+
     const lines = content.split("\n");
     const blocks: Array<MarkdownBlock> = [];
     let i = 0;
@@ -265,6 +302,7 @@ function parseMarkdown(content: string): ReadonlyArray<MarkdownBlock> {
         i += 1;
     }
 
+    writeMarkdownCache(content, blocks);
     return blocks;
 }
 
@@ -276,11 +314,13 @@ function MarkdownContent({
     content: string;
     isStreaming: boolean;
 }) {
+    const mdStyles = useThemedStyles(createMarkdownStyles);
+    const styles = useThemedStyles(createStyles);
     // Markdown ayrıştırmasını her renderda tekrar çalıştırmamak için memoize et
     const blocks = useMemo(() => parseMarkdown(content), [content]);
 
     return (
-        <View style={mdStyles.container}>
+        <View style={mdStyles.container} pointerEvents="box-none">
             {blocks.map((block, i) => {
                 switch (block.kind) {
                     case "heading":
@@ -293,7 +333,6 @@ function MarkdownContent({
                                     block.level === 2 && mdStyles.h2,
                                     block.level === 3 && mdStyles.h3,
                                 ]}
-                                selectable
                             >
                                 {block.text}
                             </Text>
@@ -306,8 +345,14 @@ function MarkdownContent({
                                         {block.language}
                                     </Text>
                                 )}
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                    <Text style={mdStyles.codeText} selectable>
+                                <ScrollView
+                                    horizontal
+                                    showsHorizontalScrollIndicator={false}
+                                    directionalLockEnabled
+                                    nestedScrollEnabled
+                                    canCancelContentTouches
+                                >
+                                    <Text style={mdStyles.codeText}>
                                         {block.code}
                                     </Text>
                                 </ScrollView>
@@ -351,6 +396,9 @@ function MarkdownContent({
                                 horizontal
                                 showsHorizontalScrollIndicator={false}
                                 style={mdStyles.tableScroll}
+                                directionalLockEnabled
+                                nestedScrollEnabled
+                                canCancelContentTouches
                             >
                                 <View style={mdStyles.table}>
                                     <View style={mdStyles.tableHeaderRow}>
@@ -403,6 +451,7 @@ function UserBubble({
     attachments?: ReadonlyArray<SessionMessageAttachment>;
     deliveryState: Extract<ChatItem, { type: "user" }>["deliveryState"];
 }) {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.userRow}>
             <View style={styles.userBubble}>
@@ -420,7 +469,7 @@ function UserBubble({
                         ))}
                     </View>
                 )}
-                <Text style={styles.userText} selectable>
+                <Text style={styles.userText}>
                     {content}
                 </Text>
             </View>
@@ -442,9 +491,10 @@ function AssistantBubble({
     content: string;
     isStreaming: boolean;
 }) {
+    const styles = useThemedStyles(createStyles);
     return (
         <View style={styles.assistantRow}>
-            <View style={styles.assistantBubble}>
+            <View style={styles.assistantBubble} pointerEvents="box-none">
                 <MarkdownContent content={content} isStreaming={isStreaming} />
             </View>
         </View>
@@ -492,88 +542,88 @@ function ChatMessageItemComponent({ item }: Props) {
 export const ChatMessageItem = React.memo(ChatMessageItemComponent);
 
 // --- Markdown stilleri ---
-const mdStyles = StyleSheet.create({
+const createMarkdownStyles = (theme: AppTheme) => StyleSheet.create({
     container: {
         gap: 6,
     },
     inlineText: {
-        color: colors.textPrimary,
+        color: theme.colors.textAssistant,
     },
     paragraph: {
         marginBottom: 2,
     },
     text: {
-        fontSize: fontSize.base,
+        fontSize: theme.fontSize.base,
         lineHeight: 22,
-        color: colors.textPrimary,
+        color: theme.colors.textAssistant,
     },
     bold: {
         fontWeight: "700",
-        color: colors.textPrimary,
+        color: theme.colors.textAssistant,
     },
     italic: {
         fontStyle: "italic",
-        color: colors.textPrimary,
+        color: theme.colors.textAssistant,
     },
     inlineCode: {
         fontFamily: "monospace",
-        fontSize: fontSize.md,
-        color: colors.codeInline,
-        backgroundColor: colors.bgElevated,
+        fontSize: theme.fontSize.md,
+        color: theme.colors.codeInline,
+        backgroundColor: theme.colors.bgElevated,
         paddingHorizontal: 4,
         borderRadius: 3,
     },
     fileLink: {
-        color: colors.textLink,
+        color: theme.colors.textLink,
         textDecorationLine: "underline",
         fontFamily: "monospace",
-        fontSize: fontSize.md,
+        fontSize: theme.fontSize.md,
     },
     heading: {
         fontWeight: "700",
-        color: colors.textPrimary,
-        marginTop: spacing.sm,
-        marginBottom: spacing.xs,
+        color: theme.colors.textAssistant,
+        marginTop: theme.spacing.sm,
+        marginBottom: theme.spacing.xs,
     },
     h1: {
-        fontSize: fontSize.xxl,
+        fontSize: theme.fontSize.xxl,
     },
     h2: {
-        fontSize: fontSize.xl,
+        fontSize: theme.fontSize.xl,
     },
     h3: {
-        fontSize: fontSize.lg,
+        fontSize: theme.fontSize.lg,
     },
     codeBlock: {
-        backgroundColor: colors.codeBg,
-        borderRadius: borderRadius.md,
+        backgroundColor: theme.colors.codeBg,
+        borderRadius: theme.borderRadius.md,
         borderWidth: 1,
-        borderColor: colors.codeBorder,
-        padding: spacing.md,
-        marginVertical: spacing.xs,
+        borderColor: theme.colors.codeBorder,
+        padding: theme.spacing.md,
+        marginVertical: theme.spacing.xs,
     },
     codeLanguage: {
-        fontSize: fontSize.xs,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
         marginBottom: 6,
         textTransform: "uppercase",
         letterSpacing: 0.5,
     },
     codeText: {
         fontFamily: "monospace",
-        fontSize: fontSize.sm,
+        fontSize: theme.fontSize.sm,
         lineHeight: 18,
-        color: colors.codeText,
+        color: theme.colors.codeText,
     },
     listItem: {
         flexDirection: "row",
         alignItems: "flex-start",
-        gap: spacing.sm,
+        gap: theme.spacing.sm,
         marginVertical: 2,
     },
     numberedBullet: {
-        fontSize: fontSize.base,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.base,
+        color: theme.colors.textTertiary,
         lineHeight: 22,
         width: 18,
         textAlign: "right",
@@ -586,57 +636,57 @@ const mdStyles = StyleSheet.create({
     },
     table: {
         borderWidth: 1,
-        borderColor: colors.border,
-        borderRadius: borderRadius.sm,
+        borderColor: theme.colors.border,
+        borderRadius: theme.borderRadius.sm,
         overflow: "hidden",
     },
     tableHeaderRow: {
         flexDirection: "row",
-        backgroundColor: colors.bgElevated,
+        backgroundColor: theme.colors.bgElevated,
         borderBottomWidth: 1,
-        borderBottomColor: colors.border,
+        borderBottomColor: theme.colors.border,
     },
     tableRow: {
         flexDirection: "row",
         borderBottomWidth: 1,
-        borderBottomColor: colors.borderMuted,
+        borderBottomColor: theme.colors.borderMuted,
     },
     tableCell: {
         minWidth: 80,
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRightWidth: 1,
-        borderRightColor: colors.borderMuted,
+        borderRightColor: theme.colors.borderMuted,
     },
     tableHeaderText: {
-        fontSize: fontSize.sm,
+        fontSize: theme.fontSize.sm,
         fontWeight: "600",
-        color: colors.textPrimary,
+        color: theme.colors.textAssistant,
     },
     tableCellText: {
-        fontSize: fontSize.sm,
-        color: colors.textPrimary,
+        fontSize: theme.fontSize.sm,
+        color: theme.colors.textAssistant,
     },
     hr: {
         height: 1,
-        backgroundColor: colors.border,
-        marginVertical: spacing.sm,
+        backgroundColor: theme.colors.border,
+        marginVertical: theme.spacing.sm,
     },
 });
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => StyleSheet.create({
     // Copilot ikonu
     copilotIcon: {
         width: 24,
         height: 24,
         borderRadius: 12,
-        backgroundColor: colors.copilotPurpleMuted,
+        backgroundColor: theme.colors.copilotPurpleMuted,
         justifyContent: "center",
         alignItems: "center",
     },
     copilotIconText: {
         fontSize: 13,
-        color: colors.copilotPurple,
+        color: theme.colors.copilotPurple,
     },
 
     // Kullanıcı avatarı
@@ -644,86 +694,89 @@ const styles = StyleSheet.create({
         width: 24,
         height: 24,
         borderRadius: 12,
-        backgroundColor: colors.bgElevated,
+        backgroundColor: theme.colors.bgElevated,
         justifyContent: "center",
         alignItems: "center",
     },
     userAvatarText: {
         fontSize: 12,
         fontWeight: "700",
-        color: colors.textLink,
+        color: theme.colors.textLink,
     },
 
     // Kullanıcı mesajı
     userRow: {
-        paddingHorizontal: spacing.md,
-        marginVertical: spacing.xs,
+        paddingHorizontal: theme.spacing.md,
+        marginVertical: theme.spacing.xs,
+        alignItems: "flex-end",
     },
     userBubble: {
-        backgroundColor: colors.bgTertiary,
-        borderRadius: borderRadius.lg,
-        paddingVertical: spacing.md,
-        paddingHorizontal: spacing.lg,
+        backgroundColor: theme.colors.bgTertiary,
+        borderRadius: theme.borderRadius.lg,
+        paddingVertical: theme.spacing.md,
+        paddingHorizontal: theme.spacing.lg,
+        alignSelf: "flex-end",
+        maxWidth: "86%",
     },
     userHeader: {
         flexDirection: "row",
         alignItems: "center",
-        gap: spacing.sm,
-        marginBottom: spacing.sm,
+        gap: theme.spacing.sm,
+        marginBottom: theme.spacing.sm,
     },
     userLabel: {
-        fontSize: fontSize.md,
+        fontSize: theme.fontSize.md,
         fontWeight: "600",
-        color: colors.textPrimary,
+        color: theme.colors.textPrimary,
     },
     userAttachmentsRow: {
         flexDirection: "row",
         flexWrap: "wrap",
-        gap: spacing.xs,
-        marginBottom: spacing.xs,
+        gap: theme.spacing.xs,
+        marginBottom: theme.spacing.xs,
     },
     userAttachmentChip: {
         maxWidth: 180,
-        backgroundColor: colors.bgElevated,
+        backgroundColor: theme.colors.bgElevated,
         borderWidth: 1,
-        borderColor: colors.borderMuted,
-        borderRadius: borderRadius.full,
-        paddingHorizontal: spacing.sm,
+        borderColor: theme.colors.borderMuted,
+        borderRadius: theme.borderRadius.full,
+        paddingHorizontal: theme.spacing.sm,
         paddingVertical: 6,
     },
     userAttachmentText: {
-        fontSize: fontSize.xs,
-        color: colors.textSecondary,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textSecondary,
     },
     userText: {
-        fontSize: fontSize.base,
+        fontSize: theme.fontSize.base,
         lineHeight: 22,
-        color: colors.textPrimary,
+        color: theme.colors.textPrimary,
     },
     userMetaText: {
-        marginTop: spacing.xs,
-        marginHorizontal: spacing.sm,
-        fontSize: fontSize.xs,
-        color: colors.textTertiary,
+        marginTop: theme.spacing.xs,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
+        alignSelf: "flex-end",
     },
     userErrorText: {
-        marginTop: spacing.xs,
-        marginHorizontal: spacing.sm,
-        fontSize: fontSize.xs,
-        color: colors.error,
+        marginTop: theme.spacing.xs,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.error,
         fontWeight: "600",
+        alignSelf: "flex-end",
     },
 
     // Asistan mesajı
     assistantRow: {
-        paddingHorizontal: spacing.md,
-        marginVertical: spacing.xs,
+        paddingHorizontal: theme.spacing.md,
+        marginVertical: theme.spacing.xs,
     },
     assistantBubble: {
-        paddingVertical: spacing.sm,
-        paddingHorizontal: spacing.lg,
+        paddingVertical: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.lg,
     },
     cursor: {
-        color: colors.accent,
+        color: theme.colors.accent,
     },
 });

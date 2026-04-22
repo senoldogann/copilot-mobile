@@ -7,6 +7,7 @@ import process from "node:process";
 
 const DEFAULT_BRIDGE_PORT = 9876;
 const REQUIRED_PUBLIC_URL_ENV = "COPILOT_MOBILE_PUBLIC_WS_URL";
+const ALLOW_INSECURE_DIRECT_WS_ENV = "COPILOT_MOBILE_ALLOW_INSECURE_DIRECT_WS";
 const MANAGEMENT_STATUS_PATH = "/__copilot_mobile/status";
 const MANAGEMENT_QR_PATH = "/__copilot_mobile/qr";
 
@@ -154,6 +155,7 @@ async function main() {
         env: {
             ...process.env,
             [REQUIRED_PUBLIC_URL_ENV]: bridgeUrl,
+            [ALLOW_INSECURE_DIRECT_WS_ENV]: "1",
         },
         stdio: "inherit",
     });

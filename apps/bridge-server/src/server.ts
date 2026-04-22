@@ -9,7 +9,9 @@ import { createRelayAccessToken, getRequiredRelaySecret } from "./auth/relay-tok
 import { DEFAULT_WS_PORT } from "@copilot-mobile/shared";
 
 const REQUIRED_PUBLIC_URL_ENV = "COPILOT_MOBILE_PUBLIC_WS_URL";
+const REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV = "COPILOT_MOBILE_PUBLIC_CERT_FINGERPRINT";
 const RELAY_BASE_URL_ENV = "COPILOT_MOBILE_RELAY_URL";
+const ALLOW_INSECURE_DIRECT_WS_ENV = "COPILOT_MOBILE_ALLOW_INSECURE_DIRECT_WS";
 
 function isDirectHostname(hostname: string): boolean {
     const normalized = hostname.trim().toLowerCase();
@@ -45,14 +47,20 @@ function isAllowedPublicWebSocketUrl(parsedUrl: URL): boolean {
         return true;
     }
 
-    return parsedUrl.protocol === "ws:" && isDirectHostname(parsedUrl.hostname);
+    return parsedUrl.protocol === "ws:"
+        && isDirectHostname(parsedUrl.hostname)
+        && process.env[ALLOW_INSECURE_DIRECT_WS_ENV] === "1";
+}
+
+function isInsecureDirectWebSocketUrl(parsedUrl: URL): boolean {
+    return parsedUrl.protocol === "ws:";
 }
 
 function getRequiredPublicWebSocketUrl(): string {
     const publicWebSocketUrl = process.env[REQUIRED_PUBLIC_URL_ENV];
     if (typeof publicWebSocketUrl !== "string" || publicWebSocketUrl.trim().length === 0) {
         throw new Error(
-            `Missing required ${REQUIRED_PUBLIC_URL_ENV}. Prepare a public relay or reverse-proxy wss:// URL, or use a private-network ws:// development URL before starting the bridge.`
+            `Missing required ${REQUIRED_PUBLIC_URL_ENV}. Prepare a public relay or reverse-proxy wss:// URL, or opt into insecure private-network ws:// development with ${ALLOW_INSECURE_DIRECT_WS_ENV}=1 before starting the bridge.`
         );
     }
 
@@ -66,12 +74,37 @@ function getRequiredPublicWebSocketUrl(): string {
     }
 
     if (isAllowedPublicWebSocketUrl(parsedUrl)) {
+        if (isInsecureDirectWebSocketUrl(parsedUrl)) {
+            console.warn(
+                `[security] Insecure direct ws:// mode enabled for private-network development only via ${ALLOW_INSECURE_DIRECT_WS_ENV}=1.`
+            );
+            console.warn(
+                `[security] Do not expose this mode through public IPs, tunnels, reverse proxies, or production daemon installs.`
+            );
+        }
         return publicWebSocketUrl;
     }
 
     throw new Error(
-        `${REQUIRED_PUBLIC_URL_ENV} must use wss://, or ws:// only for localhost/private-network development URLs. Received: ${publicWebSocketUrl}`
+        `${REQUIRED_PUBLIC_URL_ENV} must use wss://, or ws:// only for localhost/private-network development URLs when ${ALLOW_INSECURE_DIRECT_WS_ENV}=1. Received: ${publicWebSocketUrl}`
     );
+}
+
+function getRequiredPublicCertFingerprint(publicWebSocketUrl: string): string | null {
+    const parsedUrl = new URL(publicWebSocketUrl);
+
+    if (parsedUrl.protocol === "ws:") {
+        return null;
+    }
+
+    const rawFingerprint = process.env[REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV];
+    if (typeof rawFingerprint !== "string" || rawFingerprint.trim().length === 0) {
+        throw new Error(
+            `${REQUIRED_PUBLIC_CERT_FINGERPRINT_ENV} is required for direct wss:// pairing so the mobile client can pin the presented certificate.`
+        );
+    }
+
+    return rawFingerprint.trim().toLowerCase();
 }
 
 function getOptionalRelayBaseUrl(): string | null {
@@ -144,6 +177,9 @@ async function main(): Promise<void> {
         ? resolveRelayRuntimeConfig(relayBaseUrl)
         : null;
     const publicWebSocketUrl = relayConfig?.mobileSocketUrl ?? getRequiredPublicWebSocketUrl();
+    const publicCertFingerprint = relayConfig !== null
+        ? null
+        : getRequiredPublicCertFingerprint(publicWebSocketUrl);
 
     // Create Copilot SDK adapter
     const copilotClient = createCopilotAdapter();
@@ -173,11 +209,12 @@ async function main(): Promise<void> {
         publicWebSocketUrl,
         relayConfig !== null
             ? {
+                publicCertFingerprint,
                 companionId: relayConfig.companionId,
-                relayMobileAccessToken: relayConfig.mobileAccessToken,
+                getRelayMobileAccessToken: () => relayConfig.mobileAccessToken,
                 getRelayStatus: () => relayProxy?.getStatus() ?? null,
             }
-            : undefined
+            : { publicCertFingerprint }
     );
     await wsServer.start();
     relayProxy?.start();

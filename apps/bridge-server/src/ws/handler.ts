@@ -16,10 +16,26 @@ import {
 } from "../auth/jwt.js";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
 import { checkMessageRateLimit, checkReplayProtection } from "../utils/rate-limit.js";
+import { searchWorkspaceDirectories } from "../utils/workspace-search.js";
 import type { createSessionManager } from "../copilot/session-manager.js";
 
 type SessionManager = ReturnType<typeof createSessionManager>;
 type SendFn = (message: ServerMessage) => void;
+type NotificationHandlers = {
+    registerNotificationDevice: (input: {
+        deviceId: string;
+        provider: "expo";
+        pushToken: string;
+        platform: "ios" | "android";
+        appVersion?: string;
+    }) => void;
+    unregisterNotificationDevice: (deviceId: string) => void;
+    updateNotificationPresence: (input: {
+        deviceId: string;
+        state: "active" | "inactive" | "background";
+        timestamp: number;
+    }) => void;
+};
 
 type ClientState = {
     authenticated: boolean;
@@ -36,7 +52,12 @@ export function createMessageHandler(
     send: SendFn,
     messageBuffer: ReadonlyArray<ServerMessage> = [],
     certFingerprint: string | null,
-    onAuthenticated?: (preserveReplayBuffer: boolean) => void
+    onAuthenticated?: (
+        authMethod: "pair" | "resume",
+        preserveReplayBuffer: boolean,
+        deviceId: string
+    ) => void,
+    notificationHandlers?: NotificationHandlers
 ) {
     const state: ClientState = {
         authenticated: false,
@@ -105,6 +126,14 @@ export function createMessageHandler(
         });
     }
 
+    function requireDeviceId(): string {
+        if (!state.authenticated || state.deviceId === null) {
+            throw new Error("Authenticated device ID is unavailable");
+        }
+
+        return state.deviceId;
+    }
+
     function getSessionTokenExpiresAt(issuedAt: number): number {
         return issuedAt + (SESSION_TOKEN_TTL_SECONDS * 1000);
     }
@@ -160,7 +189,7 @@ export function createMessageHandler(
         state.transportMode = transportMode;
 
         sendAuthenticatedMessage("pair", 0);
-        onAuthenticated?.(false);
+        onAuthenticated?.("pair", false, deviceId);
         sessionManager.emitCapabilitiesState();
 
         console.log("[pairing] Device paired:", { deviceId, transportMode });
@@ -206,7 +235,7 @@ export function createMessageHandler(
 
         const missedMessages = messageBuffer.filter((message) => message.seq > payload.lastSeenSeq);
         sendAuthenticatedMessage("resume", missedMessages.length);
-        onAuthenticated?.(true);
+        onAuthenticated?.("resume", true, verifiedDeviceId);
 
         for (const message of missedMessages) {
             send(message);
@@ -260,7 +289,8 @@ export function createMessageHandler(
                 return;
             }
 
-            if (state.deviceId !== null && !unauthenticatedAllowed) {
+            const rateLimitedMessage = message.type === "message.send";
+            if (state.deviceId !== null && rateLimitedMessage) {
                 if (!checkMessageRateLimit(state.deviceId)) {
                     sendError("RATE_LIMIT", "Too many messages, slow down", false);
                     return;
@@ -282,10 +312,14 @@ export function createMessageHandler(
                     return;
 
                 case "session.create":
-                    return sessionManager.createSession(message.payload.config);
+                    return sessionManager.createSession(
+                        message.payload.config,
+                        requireDeviceId(),
+                        message.payload.initialMessage
+                    );
 
                 case "session.resume":
-                    return sessionManager.resumeSession(message.payload.sessionId);
+                    return sessionManager.resumeSession(message.payload.sessionId, requireDeviceId());
 
                 case "session.list":
                     return sessionManager.listSessions();
@@ -297,7 +331,8 @@ export function createMessageHandler(
                     return sessionManager.sendMessage(
                         message.payload.sessionId,
                         message.payload.content,
-                        message.payload.attachments
+                        message.payload.attachments,
+                        requireDeviceId()
                     );
 
                 case "message.abort":
@@ -346,12 +381,68 @@ export function createMessageHandler(
                     sessionManager.emitCapabilitiesState();
                     return;
 
+                case "notification.device.register":
+                    notificationHandlers?.registerNotificationDevice({
+                        deviceId: requireDeviceId(),
+                        provider: message.payload.provider,
+                        pushToken: message.payload.pushToken,
+                        platform: message.payload.platform,
+                        ...(message.payload.appVersion !== undefined
+                            ? { appVersion: message.payload.appVersion }
+                            : {}),
+                    });
+                    return;
+
+                case "notification.device.unregister":
+                    notificationHandlers?.unregisterNotificationDevice(requireDeviceId());
+                    return;
+
+                case "notification.presence.update":
+                    notificationHandlers?.updateNotificationPresence({
+                        deviceId: requireDeviceId(),
+                        state: message.payload.state,
+                        timestamp: message.payload.timestamp,
+                    });
+                    return;
+
+                case "workspace.search.request": {
+                    try {
+                        const matches = await searchWorkspaceDirectories(
+                            message.payload.query,
+                            message.payload.limit
+                        );
+                        send({
+                            ...makeBase(),
+                            type: "workspace.search.response",
+                            payload: {
+                                requestKey: message.payload.requestKey,
+                                query: message.payload.query,
+                                matches,
+                            },
+                        });
+                    } catch (error) {
+                        send({
+                            ...makeBase(),
+                            type: "workspace.search.response",
+                            payload: {
+                                requestKey: message.payload.requestKey,
+                                query: message.payload.query,
+                                matches: [],
+                                error: error instanceof Error ? error.message : String(error),
+                            },
+                        });
+                    }
+                    return;
+                }
+
                 case "workspace.tree.request": {
-                    const maxDepth = Math.min(message.payload.maxDepth ?? 3, 5);
+                    const maxDepth = Math.min(message.payload.maxDepth ?? 3, 7);
                     return sessionManager.listWorkspaceTree(
                         message.payload.sessionId,
                         message.payload.workspaceRelativePath,
-                        maxDepth
+                        maxDepth,
+                        message.payload.offset ?? 0,
+                        message.payload.pageSize ?? 200
                     );
                 }
 

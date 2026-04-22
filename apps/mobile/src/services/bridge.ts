@@ -1,20 +1,28 @@
 // Bridge service — combines WebSocket client and message dispatcher
 // All bridge communication goes through this module
 
+import type { AppStateStatus } from "react-native";
 import type {
     AgentMode,
+    NotificationPresenceState,
     PermissionLevel,
     QRPayload,
     SessionConfig,
     ClientMessage,
+    SessionMessageInput,
     SessionMessageAttachment,
 } from "@copilot-mobile/shared";
 import { createWSClient } from "./ws-client";
 import type { ConnectionState, ResumeOptions } from "./ws-client";
 import { handleServerMessage } from "./message-handler";
-import { useConnectionStore } from "../stores/connection-store";
-import { useSessionStore } from "../stores/session-store";
-import { useWorkspaceStore } from "../stores/workspace-store";
+import {
+    getBridgeConnectionState,
+    getBridgeSessionState,
+    getBridgeWorkspaceState,
+    setBridgeConnectionError,
+    setBridgeConnectionState,
+    setBridgeServerInfo,
+} from "./bridge-state";
 import {
     dispatchWorkspaceDiffResponse,
     dispatchWorkspaceFileResponse,
@@ -22,17 +30,116 @@ import {
     onWorkspaceDiffResponse,
     onWorkspaceFileResponse,
     onWorkspaceResolveResponse,
+    onWorkspaceSearchResponse,
 } from "./workspace-events";
 import {
     clearCredentials,
     loadCredentials,
     saveCredentials,
 } from "./credentials";
+import { getAppVisibilityState } from "./app-visibility";
+import {
+    clearBridgeRemotePushRegistration,
+    hasBridgeRemotePushRegistration,
+    isBridgeRemotePushCurrent,
+    markBridgeRemotePushRegistered,
+    resolveRemotePushAvailability,
+} from "./notifications";
 
 export { onWorkspaceFileResponse, onWorkspaceDiffResponse, onWorkspaceResolveResponse };
 
+export type WorkspaceDirectorySearchMatch = {
+    path: string;
+    displayPath: string;
+    name: string;
+};
+
 let client: ReturnType<typeof createWSClient> | null = null;
 const STALE_DIRECT_CREDENTIAL_GRACE_MS = 3_000;
+const NOTIFICATION_UNREGISTER_TIMEOUT_MS = 1_500;
+
+function mapPresenceState(nextAppState: AppStateStatus): NotificationPresenceState {
+    if (nextAppState === "active") {
+        return "active";
+    }
+
+    if (nextAppState === "background") {
+        return "background";
+    }
+
+    return "inactive";
+}
+
+async function syncRemoteNotificationRegistrationInternal(
+    c: ReturnType<typeof createWSClient>,
+    options: {
+        allowPrompt: boolean;
+        force: boolean;
+    }
+): Promise<void> {
+    if (c.getState() !== "authenticated") {
+        return;
+    }
+
+    const availability = await resolveRemotePushAvailability({
+        allowPrompt: options.allowPrompt,
+    });
+
+    if (availability.kind === "ready") {
+        if (!options.force && isBridgeRemotePushCurrent(availability.registration.pushToken)) {
+            return;
+        }
+
+        try {
+            await c.sendMessage("notification.device.register", {
+                provider: availability.registration.provider,
+                pushToken: availability.registration.pushToken,
+                platform: availability.registration.platform,
+                ...(availability.registration.appVersion !== undefined
+                    ? { appVersion: availability.registration.appVersion }
+                    : {}),
+            });
+            markBridgeRemotePushRegistered(availability.registration.pushToken);
+        } catch (error) {
+            setBridgeConnectionError(
+                `Failed to register remote notifications: ${error instanceof Error ? error.message : String(error)}`
+            );
+        }
+        return;
+    }
+
+    if (availability.kind === "permission_denied" && hasBridgeRemotePushRegistration()) {
+        try {
+            await c.sendMessage("notification.device.unregister", {});
+        } catch (error) {
+            console.warn("[Bridge] notification.device.unregister failed", { error });
+        } finally {
+            clearBridgeRemotePushRegistration();
+        }
+    }
+}
+
+async function unregisterRemoteNotificationsBeforeDisconnect(
+    c: ReturnType<typeof createWSClient>
+): Promise<void> {
+    if (c.getState() !== "authenticated" || !hasBridgeRemotePushRegistration()) {
+        clearBridgeRemotePushRegistration();
+        return;
+    }
+
+    try {
+        await Promise.race([
+            c.sendMessage("notification.device.unregister", {}),
+            new Promise<void>((resolve) => {
+                setTimeout(resolve, NOTIFICATION_UNREGISTER_TIMEOUT_MS);
+            }),
+        ]);
+    } catch (error) {
+        console.warn("[Bridge] notification.device.unregister failed during disconnect", { error });
+    } finally {
+        clearBridgeRemotePushRegistration();
+    }
+}
 
 function getClient(): ReturnType<typeof createWSClient> {
     if (client === null) {
@@ -55,25 +162,19 @@ function getClient(): ReturnType<typeof createWSClient> {
                     }
                 }
 
-                const sessionStore = useSessionStore.getState();
+                const sessionStore = getBridgeSessionState();
                 const activeSessionId = sessionStore.activeSessionId;
 
                 if (message.type === "permission.request") {
-                    if (message.payload.sessionId !== activeSessionId) {
-                        // Not the active session — auto-deny
-                        void nextClient.sendMessage("permission.respond", {
-                            requestId: message.payload.requestId,
-                            approved: false,
-                        });
-                        return;
-                    }
-
                     const { permissionLevel, autoApproveReads } = sessionStore;
                     const kind = message.payload.kind;
                     const shouldAutoApprove =
+                        message.payload.sessionId === activeSessionId
+                        && (
                         permissionLevel === "bypass"
                         || permissionLevel === "autopilot"
-                        || (autoApproveReads && kind === "read");
+                        || (autoApproveReads && kind === "read")
+                        );
 
                     if (shouldAutoApprove) {
                         void nextClient.sendMessage("permission.respond", {
@@ -84,32 +185,26 @@ function getClient(): ReturnType<typeof createWSClient> {
                     }
                 }
 
-                if (
-                    message.type === "user_input.request"
-                    && message.payload.sessionId !== activeSessionId
-                ) {
-                    void nextClient.sendMessage("user_input.respond", {
-                        requestId: message.payload.requestId,
-                        value: "",
-                    });
-                    return;
-                }
-
                 handleServerMessage(message);
                 if (message.type === "session.history") {
                     nextClient.flushPending();
                 }
             },
             onStateChange: (state: ConnectionState) => {
-                useConnectionStore.getState().setState(state);
+                setBridgeConnectionState(state);
                 if (state !== "authenticated") {
                     return;
                 }
 
-                const activeSessionId = useSessionStore.getState().activeSessionId;
+                const activeSessionId = getBridgeSessionState().activeSessionId;
                 const resolvedClient = client ?? nextClient;
+                void syncRemoteNotificationRegistrationInternal(resolvedClient, {
+                    allowPrompt: false,
+                    force: true,
+                });
+                void reportNotificationPresence(getAppVisibilityState());
                 if (activeSessionId !== null) {
-                    useSessionStore.getState().setSessionLoading(true);
+                    getBridgeSessionState().setSessionLoading(true);
                     void resolvedClient.sendMessage("session.resume", { sessionId: activeSessionId });
                     return;
                 }
@@ -117,7 +212,7 @@ function getClient(): ReturnType<typeof createWSClient> {
                 resolvedClient.flushPending();
             },
             onError: (error: string) => {
-                useConnectionStore.getState().setError(error);
+                setBridgeConnectionError(error);
             },
         });
         client = nextClient;
@@ -128,21 +223,42 @@ function getClient(): ReturnType<typeof createWSClient> {
 // Connect with QR code
 export function connectWithQR(qrPayload: QRPayload): void {
     const c = getClient();
-    const connStore = useConnectionStore.getState();
+    const connStore = getBridgeConnectionState();
     connStore.setError(null);
-    connStore.setServerInfo(qrPayload.url, qrPayload.certFingerprint);
+    setBridgeServerInfo(qrPayload.url, qrPayload.certFingerprint);
     c.connectWithQR(qrPayload);
 }
 
 // Create new session
 export async function createSession(config: SessionConfig): Promise<void> {
     const c = getClient();
-    useConnectionStore.getState().setError(null);
+    setBridgeConnectionError(null);
     try {
         await c.sendMessage("session.create", { config });
     } catch (error) {
-        useSessionStore.getState().setSessionLoading(false);
-        useConnectionStore.getState().setError(
+        getBridgeSessionState().setSessionLoading(false);
+        setBridgeConnectionError(
+            `Failed to create session: ${error instanceof Error ? error.message : String(error)}`
+        );
+        throw error;
+    }
+}
+
+export async function createSessionWithInitialMessage(
+    config: SessionConfig,
+    initialMessage: SessionMessageInput
+): Promise<void> {
+    const c = getClient();
+    setBridgeConnectionError(null);
+    try {
+        await c.sendMessage("session.create", {
+            config,
+            initialMessage,
+        });
+    } catch (error) {
+        getBridgeSessionState().setSessionLoading(false);
+        getBridgeSessionState().setAssistantTyping(false);
+        setBridgeConnectionError(
             `Failed to create session: ${error instanceof Error ? error.message : String(error)}`
         );
         throw error;
@@ -164,8 +280,8 @@ async function sendMessageWithoutLocalEcho(
                 : { sessionId, content }
         );
     } catch (error) {
-        useSessionStore.getState().setAssistantTyping(false);
-        useConnectionStore.getState().setError(
+        getBridgeSessionState().setAssistantTyping(false);
+        setBridgeConnectionError(
             `Failed to send message: ${error instanceof Error ? error.message : String(error)}`
         );
         throw error;
@@ -178,7 +294,7 @@ export async function sendMessage(
     content: string,
     attachments?: ReadonlyArray<SessionMessageAttachment>
 ): Promise<void> {
-    const sessionStore = useSessionStore.getState();
+    const sessionStore = getBridgeSessionState();
     const itemId = sessionStore.addUserMessage(content, attachments);
     sessionStore.setAssistantTyping(true);
     try {
@@ -194,14 +310,14 @@ export async function sendQueuedMessage(
     content: string,
     attachments?: ReadonlyArray<SessionMessageAttachment>
 ): Promise<void> {
-    const sessionStore = useSessionStore.getState();
+    const sessionStore = getBridgeSessionState();
     sessionStore.setAssistantTyping(true);
     await sendMessageWithoutLocalEcho(sessionId, content, attachments);
 }
 
 export async function syncSessionPreferences(sessionId: string): Promise<void> {
     const c = getClient();
-    const sessionStore = useSessionStore.getState();
+    const sessionStore = getBridgeSessionState();
 
     try {
         await c.sendMessage("session.mode.update", {
@@ -213,7 +329,7 @@ export async function syncSessionPreferences(sessionId: string): Promise<void> {
             permissionLevel: sessionStore.permissionLevel,
         });
     } catch (error) {
-        useConnectionStore.getState().setError(
+        setBridgeConnectionError(
             `Failed to restore session behavior: ${error instanceof Error ? error.message : String(error)}`
         );
     }
@@ -224,8 +340,8 @@ export async function abortMessage(sessionId: string): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("message.abort", { sessionId });
-    } catch {
-        // Connection dropped; abort is moot without a live session
+    } catch (error) {
+        console.warn("[Bridge] message.abort failed", { sessionId, error });
     }
 }
 
@@ -234,21 +350,22 @@ export async function respondPermission(requestId: string, approved: boolean): P
     const c = getClient();
     try {
         await c.sendMessage("permission.respond", { requestId, approved });
-        useSessionStore.getState().resolvePermissionPrompt(requestId);
-    } catch {
-        useConnectionStore.getState().setError("Failed to send permission response");
+        getBridgeSessionState().resolvePermissionPrompt(requestId);
+    } catch (error) {
+        setBridgeConnectionError("Failed to send permission response");
+        console.warn("[Bridge] permission.respond failed", { requestId, approved, error });
     }
 }
 
 // Respond to user input request
 export async function respondUserInput(requestId: string, value: string): Promise<void> {
     const c = getClient();
-    const sessionStore = useSessionStore.getState();
-    sessionStore.setUserInputPrompt(null);
     try {
         await c.sendMessage("user_input.respond", { requestId, value });
-    } catch {
-        useConnectionStore.getState().setError("Failed to send input response");
+        getBridgeSessionState().resolveUserInputPrompt(requestId);
+    } catch (error) {
+        setBridgeConnectionError("Failed to send input response");
+        console.warn("[Bridge] user_input.respond failed", { requestId, error });
     }
 }
 
@@ -257,7 +374,7 @@ export async function updateSettings(settings: { autoApproveReads: boolean }): P
     try {
         await c.sendMessage("settings.update", settings);
     } catch {
-        useConnectionStore.getState().setError("Failed to update settings");
+        setBridgeConnectionError("Failed to update settings");
     }
 }
 
@@ -269,7 +386,7 @@ export async function updateSessionMode(sessionId: string, agentMode: AgentMode)
             agentMode,
         });
     } catch {
-        useConnectionStore.getState().setError("Failed to update agent mode");
+        setBridgeConnectionError("Failed to update agent mode");
     }
 }
 
@@ -284,7 +401,7 @@ export async function updatePermissionLevel(
             permissionLevel,
         });
     } catch {
-        useConnectionStore.getState().setError("Failed to update permission level");
+        setBridgeConnectionError("Failed to update permission level");
     }
 }
 
@@ -293,8 +410,8 @@ export async function listSessions(): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("session.list", {});
-    } catch {
-        // Connection dropped before response; will retry on reconnect
+    } catch (error) {
+        console.warn("[Bridge] session.list failed", { error });
     }
 }
 
@@ -303,19 +420,21 @@ export async function deleteSession(sessionId: string): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("session.delete", { sessionId });
-    } catch {
-        useConnectionStore.getState().setError("Failed to delete session");
+    } catch (error) {
+        setBridgeConnectionError("Failed to delete session");
+        throw error;
     }
 }
 
 // Resume session
 export async function resumeSession(sessionId: string): Promise<void> {
     const c = getClient();
-    useConnectionStore.getState().setError(null);
+    setBridgeConnectionError(null);
     try {
         await c.sendMessage("session.resume", { sessionId });
-    } catch {
-        useConnectionStore.getState().setError("Failed to resume session");
+    } catch (error) {
+        setBridgeConnectionError("Failed to resume session");
+        throw error;
     }
 }
 
@@ -324,8 +443,8 @@ export async function listModels(): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("models.request", {});
-    } catch {
-        // Connection dropped before response; will retry on reconnect
+    } catch (error) {
+        console.warn("[Bridge] models.request failed", { error });
     }
 }
 
@@ -334,8 +453,41 @@ export async function requestCapabilities(): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("capabilities.request", {});
-    } catch {
-        // Connection dropped before response; will retry on reconnect
+    } catch (error) {
+        console.warn("[Bridge] capabilities.request failed", { error });
+    }
+}
+
+export async function syncRemoteNotificationRegistration(
+    options: {
+        allowPrompt: boolean;
+        force: boolean;
+    }
+): Promise<void> {
+    const c = client;
+    if (c === null) {
+        return;
+    }
+
+    await syncRemoteNotificationRegistrationInternal(c, options);
+}
+
+export async function reportNotificationPresence(nextAppState: AppStateStatus): Promise<void> {
+    const c = client;
+    if (c === null || c.getState() !== "authenticated") {
+        return;
+    }
+
+    try {
+        await c.sendMessage("notification.presence.update", {
+            state: mapPresenceState(nextAppState),
+            timestamp: Date.now(),
+        });
+    } catch (error) {
+        console.warn("[Bridge] notification.presence.update failed", {
+            state: nextAppState,
+            error,
+        });
     }
 }
 
@@ -344,8 +496,8 @@ export async function requestSkillsList(): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("skills.list.request", {});
-    } catch {
-        // Connection dropped before response; will retry on reconnect
+    } catch (error) {
+        console.warn("[Bridge] skills.list.request failed", { error });
     }
 }
 
@@ -353,16 +505,20 @@ export async function requestSkillsList(): Promise<void> {
 export async function requestWorkspaceTree(
     sessionId: string,
     workspaceRelativePath?: string,
-    maxDepth?: number
+    maxDepth?: number,
+    offset?: number,
+    pageSize?: number
 ): Promise<void> {
     const c = getClient();
-    const workspaceStore = useWorkspaceStore.getState();
+    const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setTreeLoading(workspaceRelativePath ?? "__root__", true);
     try {
         await c.sendMessage("workspace.tree.request", {
             sessionId,
             ...(workspaceRelativePath !== undefined ? { workspaceRelativePath } : {}),
             ...(maxDepth !== undefined ? { maxDepth } : {}),
+            ...(offset !== undefined ? { offset } : {}),
+            ...(pageSize !== undefined ? { pageSize } : {}),
         });
     } catch (error) {
         workspaceStore.setTreeLoading(workspaceRelativePath ?? "__root__", false);
@@ -378,7 +534,7 @@ export async function requestWorkspaceGitSummary(
     commitLimit?: number
 ): Promise<void> {
     const c = getClient();
-    const workspaceStore = useWorkspaceStore.getState();
+    const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setGitLoading(true);
     try {
         await c.sendMessage("workspace.git.request", {
@@ -396,7 +552,7 @@ export async function requestWorkspaceGitSummary(
 // Workspace pull — triggers repository pull if backend supports it
 export async function pullWorkspace(sessionId: string): Promise<void> {
     const c = getClient();
-    const workspaceStore = useWorkspaceStore.getState();
+    const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setWorkspaceOperationState("pull", true);
     try {
         await c.sendMessage("workspace.pull", { sessionId });
@@ -411,7 +567,7 @@ export async function pullWorkspace(sessionId: string): Promise<void> {
 // Workspace push — triggers repository push if backend supports it
 export async function pushWorkspace(sessionId: string): Promise<void> {
     const c = getClient();
-    const workspaceStore = useWorkspaceStore.getState();
+    const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setWorkspaceOperationState("push", true);
     try {
         await c.sendMessage("workspace.push", { sessionId });
@@ -426,7 +582,7 @@ export async function pushWorkspace(sessionId: string): Promise<void> {
 // Workspace branch switch — switches to an existing local branch
 export async function switchWorkspaceBranch(sessionId: string, branchName: string): Promise<void> {
     const c = getClient();
-    const workspaceStore = useWorkspaceStore.getState();
+    const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setBranchSwitching(true);
     try {
         await c.sendMessage("workspace.branch.switch", {
@@ -453,10 +609,21 @@ export function resumeBridgeConnection(): boolean {
 
 // Load persisted credentials after app restart and resume with auth.resume.
 export async function tryResumeFromStoredCredentials(options: ResumeOptions): Promise<boolean> {
+    const initialConnectionState = getBridgeConnectionState();
+    if (initialConnectionState.state !== "disconnected") {
+        return false;
+    }
+
     const creds = await loadCredentials();
     if (creds === null) {
         return false;
     }
+
+    const currentConnectionState = getBridgeConnectionState();
+    if (currentConnectionState.state !== "disconnected") {
+        return false;
+    }
+
     const c = getClient();
     c.seedStoredCredentials({
         deviceCredential: creds.deviceCredential,
@@ -465,7 +632,7 @@ export async function tryResumeFromStoredCredentials(options: ResumeOptions): Pr
         transportMode: creds.transportMode,
         relayAccessToken: creds.relayAccessToken,
     });
-    const connStore = useConnectionStore.getState();
+    const connStore = getBridgeConnectionState();
     connStore.setServerInfo(creds.serverUrl, creds.certFingerprint);
     connStore.setDeviceId(creds.deviceId);
     const didStartResume = c.resume(options);
@@ -477,7 +644,7 @@ export async function tryResumeFromStoredCredentials(options: ResumeOptions): Pr
         && !options.reportErrors
     ) {
         setTimeout(() => {
-            const currentConnection = useConnectionStore.getState();
+            const currentConnection = getBridgeConnectionState();
             if (
                 currentConnection.state === "disconnected"
                 && currentConnection.serverUrl === creds.serverUrl
@@ -549,14 +716,62 @@ export async function requestWorkspaceResolve(
     }
 }
 
+export async function searchWorkspaceDirectories(
+    query: string,
+    limit: number
+): Promise<ReadonlyArray<WorkspaceDirectorySearchMatch>> {
+    const c = getClient();
+    const requestKey = `workspace-search-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const connectionState = getBridgeConnectionState();
+
+    if (connectionState.state !== "authenticated") {
+        throw new Error("Connect to the bridge before searching for workspaces.");
+    }
+
+    return new Promise<ReadonlyArray<WorkspaceDirectorySearchMatch>>((resolve, reject) => {
+        const unsubscribe = onWorkspaceSearchResponse(requestKey, (payload) => {
+            clearTimeout(timeoutId);
+            unsubscribe();
+
+            if (payload.error !== undefined) {
+                reject(new Error(payload.error));
+                return;
+            }
+
+            resolve(payload.matches);
+        });
+
+        const timeoutId = setTimeout(() => {
+            unsubscribe();
+            reject(new Error("Workspace search timed out."));
+        }, 8000);
+
+        void c.sendMessage("workspace.search.request", {
+            requestKey,
+            query,
+            limit,
+        }).catch((error) => {
+            clearTimeout(timeoutId);
+            unsubscribe();
+            reject(error);
+        });
+    });
+}
+
 // Disconnect
 export function disconnect(): void {
-    if (client !== null) {
-        client.disconnect();
+    const existingClient = client;
+    void (async () => {
+        if (existingClient !== null) {
+            await unregisterRemoteNotificationsBeforeDisconnect(existingClient);
+            existingClient.disconnect();
+        } else {
+            clearBridgeRemotePushRegistration();
+        }
         client = null;
-    }
-    useConnectionStore.getState().reset();
-    useSessionStore.getState().reset();
-    // Kal\u0131c\u0131 kimlik bilgilerini de temizle: QR'\u0131 tekrar taramak gerekecek.
-    void clearCredentials();
+        getBridgeConnectionState().reset();
+        getBridgeSessionState().reset();
+        // Kal\u0131c\u0131 kimlik bilgilerini de temizle: QR'\u0131 tekrar taramak gerekecek.
+        await clearCredentials();
+    })();
 }

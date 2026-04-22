@@ -27,6 +27,7 @@ export type SessionConfig = {
     streaming: boolean;
     agentMode: AgentMode;
     permissionLevel: PermissionLevel;
+    workspaceRoot?: string;
 };
 
 export type SessionMessageAttachment = {
@@ -46,6 +47,12 @@ export type ToolExecutionStatus = "running" | "completed" | "failed" | "no_resul
 
 export type TransportMode = "direct" | "relay";
 
+export type NotificationProvider = "expo";
+
+export type NotificationPlatform = "ios" | "android";
+
+export type NotificationPresenceState = "active" | "inactive" | "background";
+
 export type SessionContext = {
     sessionCwd: string;
     workspaceRoot: string;
@@ -60,6 +67,8 @@ export type WorkspaceTreeNode = {
     type: "file" | "directory" | "symlink";
     size?: number | undefined;
     modifiedAt?: number | undefined;
+    nextOffset?: number | undefined;
+    totalChildren?: number | undefined;
     children?: ReadonlyArray<WorkspaceTreeNode> | undefined;
 };
 
@@ -98,6 +107,12 @@ export type GitBranchSummary = {
 
 export type WorkspaceOperation = "pull" | "push";
 
+export type WorkspaceSearchMatch = {
+    path: string;
+    displayPath: string;
+    name: string;
+};
+
 export type SessionInfo = {
     id: string;
     model: string;
@@ -115,6 +130,8 @@ export type WorkspaceTreeRequestMessage = BaseBridgeMessage & {
         sessionId: string;
         workspaceRelativePath?: string;
         maxDepth?: number;
+        offset?: number;
+        pageSize?: number;
     };
 };
 
@@ -125,6 +142,7 @@ export type WorkspaceTreeMessage = BaseBridgeMessage & {
         context: SessionContext;
         workspaceRoot: string;
         requestedWorkspaceRelativePath: string;
+        offset: number;
         tree: WorkspaceTreeNode;
         truncated: boolean;
     };
@@ -240,6 +258,25 @@ export type WorkspaceDiffResponseMessage = BaseBridgeMessage & {
         sessionId: string;
         workspaceRelativePath: string;
         diff: string;
+        error?: string;
+    };
+};
+
+export type WorkspaceSearchRequestMessage = BaseBridgeMessage & {
+    type: "workspace.search.request";
+    payload: {
+        requestKey: string;
+        query: string;
+        limit?: number;
+    };
+};
+
+export type WorkspaceSearchResponseMessage = BaseBridgeMessage & {
+    type: "workspace.search.response";
+    payload: {
+        requestKey: string;
+        query: string;
+        matches: ReadonlyArray<WorkspaceSearchMatch>;
         error?: string;
     };
 };
@@ -631,6 +668,7 @@ export type ServerMessage =
     | WorkspaceResolveResponseMessage
     | WorkspaceFileResponseMessage
     | WorkspaceDiffResponseMessage
+    | WorkspaceSearchResponseMessage
     | SkillsListResponseMessage;
 
 // --- Client → Server Messages (Discriminated Union) ---
@@ -652,7 +690,10 @@ export type AuthResumeMessage = BaseBridgeMessage & {
 
 export type SessionCreateMessage = BaseBridgeMessage & {
     type: "session.create";
-    payload: { config: SessionConfig };
+    payload: {
+        config: SessionConfig;
+        initialMessage?: SessionMessageInput;
+    };
 };
 
 export type SessionResumeMessage = BaseBridgeMessage & {
@@ -725,6 +766,29 @@ export type CapabilitiesRequestMessage = BaseBridgeMessage & {
     payload: Record<string, never>;
 };
 
+export type NotificationDeviceRegisterMessage = BaseBridgeMessage & {
+    type: "notification.device.register";
+    payload: {
+        provider: NotificationProvider;
+        pushToken: string;
+        platform: NotificationPlatform;
+        appVersion?: string;
+    };
+};
+
+export type NotificationDeviceUnregisterMessage = BaseBridgeMessage & {
+    type: "notification.device.unregister";
+    payload: Record<string, never>;
+};
+
+export type NotificationPresenceUpdateMessage = BaseBridgeMessage & {
+    type: "notification.presence.update";
+    payload: {
+        state: NotificationPresenceState;
+        timestamp: number;
+    };
+};
+
 export type SkillsListRequestMessage = BaseBridgeMessage & {
     type: "skills.list.request";
     payload: Record<string, never>;
@@ -751,7 +815,11 @@ export type ClientMessage =
     | PermissionLevelUpdateMessage
     | ModelsRequestMessage
     | CapabilitiesRequestMessage
+    | NotificationDeviceRegisterMessage
+    | NotificationDeviceUnregisterMessage
+    | NotificationPresenceUpdateMessage
     | SkillsListRequestMessage
+    | WorkspaceSearchRequestMessage
     | WorkspaceTreeRequestMessage
     | WorkspaceGitSummaryRequestMessage
     | WorkspaceOperationRequestMessage

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useRef } from "react";
 import { View, Text, Animated, StyleSheet } from "react-native";
-import { colors, spacing, fontSize } from "../theme/colors";
+import { useThemedStyles, type AppTheme } from "../theme/theme-context";
 
 type Props = {
     active: boolean;
@@ -11,6 +11,7 @@ type Props = {
 
 // Each dot: when active — bounce + bright pulse; when inactive — static dim dot
 function Dot({ delay, active }: { delay: number; active: boolean }) {
+    const styles = useThemedStyles(createStyles);
     const anim = useRef(new Animated.Value(0)).current;
 
     useEffect(() => {
@@ -53,6 +54,7 @@ function Dot({ delay, active }: { delay: number; active: boolean }) {
 }
 
 export function ActivityDots({ active, intent }: Props) {
+    const styles = useThemedStyles(createStyles);
     if (!active) {
         return null;
     }
@@ -71,12 +73,12 @@ export function ActivityDots({ active, intent }: Props) {
     );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => StyleSheet.create({
     container: {
         flexDirection: "row",
         alignItems: "center",
-        gap: spacing.sm,
-        paddingHorizontal: spacing.lg,
+        gap: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.lg,
         paddingVertical: 10,
     },
     dotsRow: {
@@ -89,11 +91,11 @@ const styles = StyleSheet.create({
         width: 5,
         height: 5,
         borderRadius: 2.5,
-        backgroundColor: colors.accent,
+        backgroundColor: theme.colors.accent,
     },
     intent: {
-        fontSize: fontSize.xs,
-        color: colors.textTertiary,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
         flexShrink: 1,
     },
 });

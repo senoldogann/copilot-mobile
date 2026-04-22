@@ -143,16 +143,100 @@ function replaceTreeNode(
     };
 }
 
+function mergeTreeChildren(
+    existingChildren: ReadonlyArray<WorkspaceTreeNode>,
+    nextChildren: ReadonlyArray<WorkspaceTreeNode>
+): Array<WorkspaceTreeNode> {
+    const merged = new Map<string, WorkspaceTreeNode>();
+
+    for (const child of existingChildren) {
+        merged.set(child.path, child);
+    }
+
+    for (const child of nextChildren) {
+        merged.set(child.path, child);
+    }
+
+    return Array.from(merged.values());
+}
+
+function mergePagedTreeNode(
+    existingNode: WorkspaceTreeNode,
+    nextNode: WorkspaceTreeNode,
+    offset: number
+): WorkspaceTreeNode {
+    if (offset === 0 || existingNode.children === undefined || nextNode.children === undefined) {
+        return nextNode;
+    }
+
+    return {
+        ...nextNode,
+        children: mergeTreeChildren(existingNode.children, nextNode.children),
+    };
+}
+
 function mergeWorkspaceTree(
     currentTree: WorkspaceTreeNode | null,
     requestedWorkspaceRelativePath: string,
-    nextTree: WorkspaceTreeNode
+    nextTree: WorkspaceTreeNode,
+    offset: number
 ): WorkspaceTreeNode {
     if (currentTree === null || currentTree.path === requestedWorkspaceRelativePath) {
-        return nextTree;
+        if (currentTree === null) {
+            return nextTree;
+        }
+
+        return mergePagedTreeNode(currentTree, nextTree, offset);
     }
 
-    return replaceTreeNode(currentTree, requestedWorkspaceRelativePath, nextTree);
+    const existingTarget = findTreeNode(currentTree, requestedWorkspaceRelativePath);
+    if (existingTarget === null) {
+        return replaceTreeNode(currentTree, requestedWorkspaceRelativePath, nextTree);
+    }
+
+    return replaceTreeNode(
+        currentTree,
+        requestedWorkspaceRelativePath,
+        mergePagedTreeNode(existingTarget, nextTree, offset)
+    );
+}
+
+function findTreeNode(
+    node: WorkspaceTreeNode,
+    targetPath: string
+): WorkspaceTreeNode | null {
+    if (node.path === targetPath) {
+        return node;
+    }
+
+    if (node.children === undefined || node.children.length === 0) {
+        return null;
+    }
+
+    for (const child of node.children) {
+        const found = findTreeNode(child, targetPath);
+        if (found !== null) {
+            return found;
+        }
+    }
+
+    return null;
+}
+
+function treeHasPendingChildren(node: WorkspaceTreeNode | null): boolean {
+    if (node === null) {
+        return false;
+    }
+
+    if (node.nextOffset !== undefined) {
+        return true;
+    }
+
+    if (node.children === undefined) {
+        return false;
+    }
+
+    return node.children.some((child) => treeHasPendingChildren(child));
 }
 
 function setPathFlag(
@@ -213,29 +297,34 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         }),
 
     setWorkspaceTree: (payload) =>
-        set((state) => ({
-            sessionId: payload.sessionId,
-            context: payload.context,
-            workspaceRoot: payload.workspaceRoot,
-            requestedWorkspaceRelativePath: payload.requestedWorkspaceRelativePath,
-            tree: mergeWorkspaceTree(
+        set((state) => {
+            const mergedTree = mergeWorkspaceTree(
                 state.tree,
                 payload.requestedWorkspaceRelativePath,
-                payload.tree
-            ),
-            treeTruncated: payload.truncated,
-            expandedPaths: {
-                ...state.expandedPaths,
-                [payload.workspaceRoot]: true,
-                [payload.requestedWorkspaceRelativePath]: true,
-            },
-            loadingTreePaths: setPathFlag(
-                state.loadingTreePaths,
-                payload.requestedWorkspaceRelativePath,
-                false
-            ),
-            error: null,
-        })),
+                payload.tree,
+                payload.offset
+            );
+
+            return {
+                sessionId: payload.sessionId,
+                context: payload.context,
+                workspaceRoot: payload.workspaceRoot,
+                requestedWorkspaceRelativePath: payload.requestedWorkspaceRelativePath,
+                tree: mergedTree,
+                treeTruncated: treeHasPendingChildren(mergedTree) || payload.truncated,
+                expandedPaths: {
+                    ...state.expandedPaths,
+                    [payload.workspaceRoot]: true,
+                    [payload.requestedWorkspaceRelativePath]: true,
+                },
+                loadingTreePaths: setPathFlag(
+                    state.loadingTreePaths,
+                    payload.requestedWorkspaceRelativePath,
+                    false
+                ),
+                error: null,
+            };
+        }),
 
     setWorkspaceGitSummary: (payload) =>
         set((state) => ({

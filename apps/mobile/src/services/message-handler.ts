@@ -2,10 +2,11 @@
 
 import type { ServerMessage, SessionHistoryItem } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
-import type { ChatItem } from "../stores/session-store";
 import { useSessionStore } from "../stores/session-store";
+import type { AgentTodo, ChatItem, TodoItemStatus } from "../stores/session-store-types";
 import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
+import { useWorkspaceDirectoryStore } from "../stores/workspace-directory-store";
 import {
     armBackgroundCompletion,
     appendBackgroundCompletionPreview,
@@ -17,27 +18,45 @@ import {
     dispatchWorkspaceDiffResponse,
     dispatchWorkspaceFileResponse,
     dispatchWorkspaceResolveResponse,
+    dispatchWorkspaceSearchResponse,
 } from "./workspace-events";
 
+let transientConnectionErrorTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleTransientConnectionErrorClear(expectedMessage: string): void {
+    if (transientConnectionErrorTimer !== null) {
+        clearTimeout(transientConnectionErrorTimer);
+        transientConnectionErrorTimer = null;
+    }
+
+    transientConnectionErrorTimer = setTimeout(() => {
+        const connectionStore = useConnectionStore.getState();
+        if (connectionStore.error === expectedMessage) {
+            connectionStore.setError(null);
+        }
+        transientConnectionErrorTimer = null;
+    }, 4000);
+}
+
+function isNonFatalProtocolError(code: string): boolean {
+    return code === "RATE_LIMIT" || code === "VALIDATION_ERROR" || code === "INVALID_JSON";
+}
+
 function collectPermissionDetails(metadata: Record<string, unknown>): Array<string> {
-    const details: Array<string> = [];
+    const keys = ["intention", "path", "url"] as const;
 
-    const intention = metadata["intention"];
-    if (typeof intention === "string" && intention.trim().length > 0) {
-        details.push(intention.trim());
+    return keys
+        .map((key) => metadata[key])
+        .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+        .map((value) => value.trim());
+}
+
+function rememberWorkspaceDirectory(workspaceRoot: string | undefined): void {
+    if (workspaceRoot === undefined || workspaceRoot.length === 0) {
+        return;
     }
 
-    const path = metadata["path"];
-    if (typeof path === "string" && path.trim().length > 0) {
-        details.push(path.trim());
-    }
-
-    const url = metadata["url"];
-    if (typeof url === "string" && url.trim().length > 0) {
-        details.push(url.trim());
-    }
-
-    return details;
+    useWorkspaceDirectoryStore.getState().addDirectory(workspaceRoot);
 }
 
 function mapHistoryItemToChatItem(item: SessionHistoryItem): ChatItem {
@@ -86,6 +105,17 @@ function mergeHistoryIntoExistingItems(
 ): Array<ChatItem> {
     const matchedIndexes = new Set<number>();
     const mergedItems: Array<ChatItem> = [];
+    let currentCursor = 0;
+
+    function appendPendingCurrentItemsBefore(targetIndex: number): void {
+        while (currentCursor < targetIndex) {
+            const item = currentItems[currentCursor];
+            if (item !== undefined && !matchedIndexes.has(currentCursor)) {
+                mergedItems.push(item);
+            }
+            currentCursor += 1;
+        }
+    }
 
     function areAttachmentsEquivalent(
         left: SessionHistoryItem & { type: "user" },
@@ -173,6 +203,7 @@ function mergeHistoryIntoExistingItems(
             if (existingIndex === -1) {
                 mergedItems.push(mapHistoryItemToChatItem(historyItem));
             } else {
+                appendPendingCurrentItemsBefore(existingIndex);
                 matchedIndexes.add(existingIndex);
                 const matchedItem = currentItems[existingIndex];
                 if (
@@ -201,6 +232,7 @@ function mergeHistoryIntoExistingItems(
 
         const existingItem = currentItems[existingIndex];
         if (existingItem !== undefined && existingItem.type === "tool") {
+            appendPendingCurrentItemsBefore(existingIndex);
             matchedIndexes.add(existingIndex);
             mergedItems.push({
                 ...existingItem,
@@ -222,6 +254,10 @@ function mergeHistoryIntoExistingItems(
     }
 
     for (const [index, item] of currentItems.entries()) {
+        if (index < currentCursor) {
+            continue;
+        }
+
         if (!matchedIndexes.has(index)) {
             mergedItems.push(item);
         }
@@ -233,19 +269,14 @@ function mergeHistoryIntoExistingItems(
 function formatToolArguments(
     args: Record<string, unknown> | undefined
 ): string | undefined {
-    if (args === undefined) {
-        return undefined;
-    }
-
-    const keys = Object.keys(args);
-    if (keys.length === 0) {
+    if (args === undefined || Object.keys(args).length === 0) {
         return undefined;
     }
 
     return JSON.stringify(args, null, 2);
 }
 
-// Derleme zamanı exhaustiveness kontrolü — runtime'da çökme yerine uyarı verir
+// Compile-time exhaustiveness check that falls back to a warning at runtime.
 function assertExhaustive(_value: never, type: string): void {
     console.warn("Unknown server message:", type);
 }
@@ -257,12 +288,12 @@ function isTodoWriteToolName(name: string): boolean {
     return TODO_WRITE_TOOL_NAMES.has(name) || name.toLowerCase().includes("todowrite");
 }
 
-function parseTodoWriteArguments(args: Record<string, unknown>): ReadonlyArray<import("../stores/session-store").AgentTodo> | null {
+function parseTodoWriteArguments(args: Record<string, unknown>): ReadonlyArray<AgentTodo> | null {
     // Claude Code format: { todos: [{ id, content, status, priority }] }
     const raw = args["todos"] ?? args["items"] ?? args["todo_list"];
     if (!Array.isArray(raw) || raw.length === 0) return null;
 
-    const todos: Array<import("../stores/session-store").AgentTodo> = [];
+    const todos: Array<AgentTodo> = [];
     for (const item of raw) {
         if (typeof item !== "object" || item === null) continue;
         const entry = item as Record<string, unknown>;
@@ -270,7 +301,7 @@ function parseTodoWriteArguments(args: Record<string, unknown>): ReadonlyArray<i
         const content = String(entry["content"] ?? entry["description"] ?? entry["task"] ?? entry["title"] ?? "");
         if (content.length === 0) continue;
         const rawStatus = String(entry["status"] ?? "pending").toLowerCase();
-        const status: import("../stores/session-store").TodoItemStatus =
+        const status: TodoItemStatus =
             rawStatus === "completed" || rawStatus === "done" ? "completed"
                 : rawStatus === "in_progress" || rawStatus === "in progress" ? "in_progress"
                     : "pending";
@@ -284,13 +315,40 @@ function parseTodoWriteArguments(args: Record<string, unknown>): ReadonlyArray<i
     return todos.length > 0 ? todos : null;
 }
 
+function restoreCachedConversationForMissingSession(missingSessionId: string): boolean {
+    const connectionStore = useConnectionStore.getState();
+    const sessionStore = useSessionStore.getState();
+    const chatHistoryStore = useChatHistoryStore.getState();
+    const linkedConversation = chatHistoryStore.conversations.find(
+        (conversation) => conversation.sessionId === missingSessionId
+    );
+
+    if (linkedConversation === undefined) {
+        return false;
+    }
+
+    clearBackgroundCompletion(missingSessionId);
+    sessionStore.setSessionLoading(false);
+    sessionStore.setAssistantTyping(false);
+    sessionStore.clearPermissionPrompts();
+    sessionStore.setUserInputPrompt(null);
+    sessionStore.setPlanExitPrompt(null);
+    chatHistoryStore.setActiveConversation(linkedConversation.id);
+    sessionStore.replaceChatItems(
+        chatHistoryStore.getConversationItems(linkedConversation.id)
+    );
+    sessionStore.removeSession(missingSessionId);
+    connectionStore.setError(null);
+    return true;
+}
+
 export function handleServerMessage(message: ServerMessage): void {
     const connectionStore = useConnectionStore.getState();
     const sessionStore = useSessionStore.getState();
 
-    // Aktif oturum kontrolü — çapraz oturum veri karışmasını engeller
+    // Guard against cross-session state updates.
     const isActiveSession = (sessionId: string | undefined): boolean => {
-        if (sessionId === undefined) return true; // Bazı mesajlarda sessionId yoktur
+        if (sessionId === undefined) return true; // Some message types do not include sessionId.
         const { activeSessionId } = useSessionStore.getState();
         return activeSessionId !== null && activeSessionId === sessionId;
     };
@@ -324,11 +382,21 @@ export function handleServerMessage(message: ServerMessage): void {
             // Link active conversation to this session.
             const chatHistoryStore = useChatHistoryStore.getState();
             const activeConvId = chatHistoryStore.activeConversationId;
+            const workspaceRoot = message.payload.session.context?.workspaceRoot ?? null;
+            rememberWorkspaceDirectory(message.payload.session.context?.workspaceRoot);
             if (activeConvId !== null) {
                 chatHistoryStore.linkConversationToSession(
                     activeConvId,
-                    message.payload.session.id
+                    message.payload.session.id,
+                    workspaceRoot
                 );
+                chatHistoryStore.markConversationSynced(activeConvId, Date.now());
+            } else {
+                const conversationId = chatHistoryStore.createConversation(
+                    message.payload.session.id,
+                    workspaceRoot
+                );
+                chatHistoryStore.setActiveConversation(conversationId);
             }
             break;
         }
@@ -346,8 +414,16 @@ export function handleServerMessage(message: ServerMessage): void {
             const linkedConversation = chatHistoryStore.conversations.find(
                 (item) => item.sessionId === message.payload.session.id
             );
-            if (linkedConversation !== undefined) {
-                chatHistoryStore.setActiveConversation(linkedConversation.id);
+            const workspaceRoot = message.payload.session.context?.workspaceRoot ?? null;
+            rememberWorkspaceDirectory(message.payload.session.context?.workspaceRoot);
+            const conversationId = linkedConversation?.id
+                ?? chatHistoryStore.createConversation(message.payload.session.id, workspaceRoot);
+
+            chatHistoryStore.setActiveConversation(conversationId);
+            chatHistoryStore.markConversationSynced(conversationId, Date.now());
+            const localItems = chatHistoryStore.getConversationItems(conversationId);
+            if (localItems.length > 0) {
+                sessionStore.replaceChatItems(localItems);
             }
             break;
         }
@@ -362,6 +438,9 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "session.list": {
             sessionStore.setSessions(message.payload.sessions);
+            for (const session of message.payload.sessions) {
+                rememberWorkspaceDirectory(session.context?.workspaceRoot);
+            }
             break;
         }
 
@@ -461,8 +540,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "permission.request": {
-            if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.enqueuePermissionPrompt({
+            sessionStore.receivePermissionPrompt({
                 sessionId: message.payload.sessionId,
                 requestId: message.payload.requestId,
                 kind: message.payload.kind,
@@ -475,8 +553,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "user_input.request": {
-            if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.setUserInputPrompt({
+            sessionStore.receiveUserInputPrompt({
                 sessionId: message.payload.sessionId,
                 requestId: message.payload.requestId,
                 prompt: message.payload.prompt,
@@ -494,6 +571,28 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "error": {
+            if (
+                message.payload.code === "SESSION_NOT_FOUND"
+                && sessionStore.activeSessionId !== null
+                && restoreCachedConversationForMissingSession(sessionStore.activeSessionId)
+            ) {
+                break;
+            }
+
+            if (
+                message.payload.code === "SESSION_NOT_FOUND"
+                && sessionStore.activeSessionId === null
+            ) {
+                clearBackgroundCompletion();
+                sessionStore.setSessionLoading(false);
+                sessionStore.setAssistantTyping(false);
+                sessionStore.clearPermissionPrompts();
+                sessionStore.setUserInputPrompt(null);
+                sessionStore.setPlanExitPrompt(null);
+                connectionStore.setError(null);
+                break;
+            }
+
             if (isWorkspaceLoadError(message.payload.code)) {
                 const workspaceStore = useWorkspaceStore.getState();
                 workspaceStore.clearRequestLoadingState();
@@ -501,16 +600,22 @@ export function handleServerMessage(message: ServerMessage): void {
                 break;
             }
 
+            if (isNonFatalProtocolError(message.payload.code)) {
+                const errorMessage = `[${message.payload.code}] ${message.payload.message}`;
+                connectionStore.setError(errorMessage);
+                scheduleTransientConnectionErrorClear(errorMessage);
+                break;
+            }
+
             clearBackgroundCompletion();
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
-            // Hata durumunda açık dialog'ları temizle — ekranda takılı kalmasın
+            // Clear open dialogs after a fatal error so they do not stay stuck onscreen.
             sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
             sessionStore.setPlanExitPrompt(null);
-            connectionStore.setError(
-                `[${message.payload.code}] ${message.payload.message}`
-            );
+            const errorMessage = `[${message.payload.code}] ${message.payload.message}`;
+            connectionStore.setError(errorMessage);
             break;
         }
 
@@ -548,6 +653,11 @@ export function handleServerMessage(message: ServerMessage): void {
             // Bridge is the source of truth for "agent is working" so the stop button
             // is restored after reconnect/restart if a turn is still in progress.
             if (message.payload.busy !== undefined) {
+                if (message.payload.busy) {
+                    armBackgroundCompletion(message.payload.sessionId);
+                } else {
+                    notifyIfBackgroundCompletion(message.payload.sessionId);
+                }
                 sessionStore.setAssistantTyping(message.payload.busy);
             }
             break;
@@ -555,6 +665,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "session.error": {
             clearBackgroundCompletion(message.payload.sessionId);
+            sessionStore.clearSessionPrompts(message.payload.sessionId);
             if (sessionStore.activeSessionId === message.payload.sessionId) {
                 sessionStore.setActiveSession(null);
             }
@@ -593,8 +704,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "plan.exit.request": {
-            if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.setPlanExitPrompt({
+            sessionStore.receivePlanExitPrompt({
                 sessionId: message.payload.sessionId,
                 requestId: message.payload.requestId,
                 summary: message.payload.summary,
@@ -689,6 +799,16 @@ export function handleServerMessage(message: ServerMessage): void {
                     ? { resolvedWorkspaceRelativePath }
                     : {}),
                 ...(matches !== undefined ? { matches } : {}),
+                ...(error !== undefined ? { error } : {}),
+            });
+            break;
+        }
+
+        case "workspace.search.response": {
+            const { requestKey, query, matches, error } = message.payload;
+            dispatchWorkspaceSearchResponse(requestKey, {
+                query,
+                matches,
                 ...(error !== undefined ? { error } : {}),
             });
             break;
