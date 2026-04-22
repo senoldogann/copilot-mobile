@@ -533,8 +533,9 @@ function normalizeSessionHistory(
 ): Array<SessionHistoryItem> {
     const items: Array<SessionHistoryItem> = [];
     const toolIndexByRequestId = new Map<string, number>();
+    const thinkingIndexByReasoningId = new Map<string, number>();
 
-    function insertBeforeTrailingAssistant(item: SessionHistoryItem): void {
+    function insertBeforeTrailingAssistant(item: SessionHistoryItem): number {
         let insertIndex = items.length;
 
         while (insertIndex > 0) {
@@ -547,10 +548,57 @@ function normalizeSessionHistory(
 
         if (insertIndex === items.length) {
             items.push(item);
-            return;
+            return items.length - 1;
+        }
+
+        for (const [reasoningId, existingIndex] of thinkingIndexByReasoningId.entries()) {
+            if (existingIndex >= insertIndex) {
+                thinkingIndexByReasoningId.set(reasoningId, existingIndex + 1);
+            }
         }
 
         items.splice(insertIndex, 0, item);
+        return insertIndex;
+    }
+
+    function readReasoningId(event: SessionEvent): string {
+        const data = event.data as Record<string, unknown>;
+        const reasoningId = data["reasoningId"];
+        if (typeof reasoningId === "string" && reasoningId.trim().length > 0) {
+            return reasoningId.trim();
+        }
+
+        return event.id;
+    }
+
+    function appendThinkingHistory(
+        reasoningId: string,
+        timestamp: number,
+        content: string,
+        mode: "replace" | "append"
+    ): void {
+        const existingIndex = thinkingIndexByReasoningId.get(reasoningId);
+        if (existingIndex !== undefined) {
+            const existingItem = items[existingIndex];
+            if (existingItem !== undefined && existingItem.type === "thinking") {
+                items[existingIndex] = {
+                    ...existingItem,
+                    timestamp,
+                    content: mode === "replace"
+                        ? content
+                        : `${existingItem.content}${content}`,
+                };
+                return;
+            }
+        }
+
+        const nextIndex = insertBeforeTrailingAssistant({
+            id: reasoningId,
+            timestamp,
+            type: "thinking",
+            content,
+        });
+        thinkingIndexByReasoningId.set(reasoningId, nextIndex);
     }
 
     for (const event of events) {
@@ -585,12 +633,21 @@ function normalizeSessionHistory(
                 break;
 
             case "assistant.reasoning":
-                insertBeforeTrailingAssistant({
-                    id: event.data.reasoningId,
+                appendThinkingHistory(
+                    readReasoningId(event),
                     timestamp,
-                    type: "thinking",
-                    content: event.data.content,
-                });
+                    event.data.content,
+                    "replace"
+                );
+                break;
+
+            case "assistant.reasoning_delta":
+                appendThinkingHistory(
+                    readReasoningId(event),
+                    timestamp,
+                    event.data.deltaContent,
+                    "append"
+                );
                 break;
 
             case "assistant.message":

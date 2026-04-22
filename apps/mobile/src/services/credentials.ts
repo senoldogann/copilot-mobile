@@ -1,6 +1,7 @@
 // Persistent pairing credentials used to resume without scanning QR again.
 
 import * as SecureStore from "expo-secure-store";
+import { Directory, File, Paths } from "expo-file-system";
 import type { TransportMode } from "@copilot-mobile/shared";
 
 type SecureStoreKeyPair = {
@@ -44,6 +45,8 @@ const KEY_ONBOARDING_COMPLETED: SecureStoreKeyPair = {
     primary: "code_companion_onboarding_completed",
     legacy: "copilot_mobile_onboarding_completed",
 };
+const LOCAL_STATE_DIRECTORY_NAME = "code-companion";
+const ONBOARDING_STATE_FILE_NAME = "onboarding-state.json";
 
 export type StoredCredentials = {
     deviceCredential: string;
@@ -75,6 +78,55 @@ export type StoredSessionPreferences = {
     permissionLevel: string;
     autoApproveReads: boolean;
 };
+
+function getLocalStateDirectoryUri(): string {
+    return new Directory(Paths.document, LOCAL_STATE_DIRECTORY_NAME).uri;
+}
+
+function getOnboardingStateFileUri(): string {
+    return new File(getLocalStateDirectoryUri(), ONBOARDING_STATE_FILE_NAME).uri;
+}
+
+async function ensureLocalStateDirectory(): Promise<void> {
+    const directory = new Directory(getLocalStateDirectoryUri());
+    if (directory.exists) {
+        return;
+    }
+
+    await directory.create({ intermediates: true, idempotent: true });
+}
+
+async function writeOnboardingStateFile(completed: boolean): Promise<void> {
+    const file = new File(getOnboardingStateFileUri());
+
+    if (!completed) {
+        if (file.exists) {
+            await file.delete();
+        }
+        return;
+    }
+
+    await ensureLocalStateDirectory();
+    if (!file.exists) {
+        await file.create({ intermediates: true, overwrite: true });
+    }
+    await file.write(JSON.stringify({ completed: true }));
+}
+
+async function readOnboardingStateFile(): Promise<boolean> {
+    const file = new File(getOnboardingStateFileUri());
+    if (!file.exists) {
+        return false;
+    }
+
+    try {
+        const raw = await file.text();
+        const parsed = JSON.parse(raw) as { completed?: unknown };
+        return parsed.completed === true;
+    } catch {
+        return false;
+    }
+}
 
 async function setItem(key: SecureStoreKeyPair, value: string): Promise<void> {
     await SecureStore.setItemAsync(key.primary, value);
@@ -208,14 +260,10 @@ export async function loadSessionPreferences(): Promise<StoredSessionPreferences
 }
 
 export async function saveOnboardingCompleted(completed: boolean): Promise<void> {
-    if (!completed) {
-        await removeItem(KEY_ONBOARDING_COMPLETED);
-        return;
-    }
-
-    await setItem(KEY_ONBOARDING_COMPLETED, "1");
+    await writeOnboardingStateFile(completed);
+    await removeItem(KEY_ONBOARDING_COMPLETED);
 }
 
 export async function loadOnboardingCompleted(): Promise<boolean> {
-    return (await getItem(KEY_ONBOARDING_COMPLETED)) === "1";
+    return readOnboardingStateFile();
 }

@@ -670,6 +670,37 @@ export function getCurrentTurnItems(
     return items.slice(lastUserMessageIndex + 1);
 }
 
+export function getActiveAgentItems(
+    items: ReadonlyArray<ChatItem>,
+    isAssistantTyping: boolean
+): ReadonlyArray<ChatItem> {
+    const currentTurnItems = getCurrentTurnItems(items);
+    if (!isAssistantTyping) {
+        return currentTurnItems;
+    }
+
+    const lastAgentAnchorIndex = [...items]
+        .map((item, index) => ({ item, index }))
+        .reverse()
+        .find(({ item }) =>
+            item.type === "tool" && (item.status === "running" || isSubagentToolName(item.toolName))
+        )
+        ?.index ?? -1;
+
+    if (lastAgentAnchorIndex === -1) {
+        return currentTurnItems;
+    }
+
+    const previousUserIndex = [...items]
+        .map((item, index) => ({ item, index }))
+        .slice(0, lastAgentAnchorIndex + 1)
+        .reverse()
+        .find(({ item }) => item.type === "user")
+        ?.index ?? -1;
+
+    return items.slice(previousUserIndex + 1);
+}
+
 export function deriveAgentTodosFromItems(
     items: ReadonlyArray<ChatItem>
 ): ReadonlyArray<AgentTodo> {

@@ -261,7 +261,7 @@ function createStyles(theme: AppTheme) {
         },
         versionText: {
             color: theme.colors.textPrimary,
-            fontSize: 26,
+            fontSize: 18,
             fontWeight: "800",
             letterSpacing: 0.2,
         },

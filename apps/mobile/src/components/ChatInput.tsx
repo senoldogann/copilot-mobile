@@ -572,7 +572,166 @@ function pathMatchesQuery(path: string, query: string): boolean {
     return fileName.includes(query);
 }
 
-export function ChatInput({
+type ToolbarSendControlsProps = {
+    canSend: boolean;
+    isTyping: boolean;
+    isAbortPending: boolean;
+    onAbort: () => void;
+    onDefaultSend: () => void;
+    onDirectSend: () => void;
+    onToggleSendMenu: () => void;
+    onSelectSendMode: (mode: SendMode) => void;
+    showSendMenu: boolean;
+};
+
+function areToolbarSendControlsEqual(
+    previousProps: ToolbarSendControlsProps,
+    nextProps: ToolbarSendControlsProps
+): boolean {
+    return previousProps.canSend === nextProps.canSend
+        && previousProps.isTyping === nextProps.isTyping
+        && previousProps.isAbortPending === nextProps.isAbortPending
+        && previousProps.onAbort === nextProps.onAbort
+        && previousProps.onDefaultSend === nextProps.onDefaultSend
+        && previousProps.onDirectSend === nextProps.onDirectSend
+        && previousProps.onToggleSendMenu === nextProps.onToggleSendMenu
+        && previousProps.onSelectSendMode === nextProps.onSelectSendMode
+        && previousProps.showSendMenu === nextProps.showSendMenu;
+}
+
+const ToolbarSendControls = React.memo(function ToolbarSendControls({
+    canSend,
+    isTyping,
+    isAbortPending,
+    onAbort,
+    onDefaultSend,
+    onDirectSend,
+    onToggleSendMenu,
+    onSelectSendMode,
+    showSendMenu,
+}: ToolbarSendControlsProps) {
+    const theme = useAppTheme();
+    const styles = useThemedStyles(createStyles);
+    const toolbarStyles = useThemedStyles(createToolbarStyles);
+
+    if (isTyping) {
+        return (
+            <View style={toolbarStyles.sendControlWrap}>
+                <Pressable
+                    style={[
+                        styles.abortButton,
+                        isAbortPending && styles.abortButtonPending,
+                    ]}
+                    onPress={onAbort}
+                    disabled={isAbortPending}
+                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    accessibilityLabel={isAbortPending ? "Stopping request" : "Stop request"}
+                >
+                    <View style={styles.abortIcon} />
+                </Pressable>
+
+                {canSend ? (
+                    <View style={toolbarStyles.sendGroup}>
+                        <Pressable
+                            style={styles.sendButton}
+                            onPress={onDefaultSend}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            accessibilityLabel="Send message"
+                        >
+                            <ArrowUpIcon size={16} color={theme.colors.textOnAccent} />
+                        </Pressable>
+                        <Pressable
+                            style={toolbarStyles.sendMenuButton}
+                            onPress={onToggleSendMenu}
+                            hitSlop={4}
+                            accessibilityLabel="Send options"
+                        >
+                            <ChevronDownIcon size={12} color={theme.colors.textPrimary} />
+                        </Pressable>
+                    </View>
+                ) : (
+                    <View style={[styles.sendButton, styles.sendButtonDisabled]}>
+                        <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
+                    </View>
+                )}
+
+                <SendModeMenu
+                    visible={showSendMenu && canSend}
+                    onSelect={onSelectSendMode}
+                />
+            </View>
+        );
+    }
+
+    if (canSend) {
+        return (
+            <Pressable
+                style={styles.sendButton}
+                onPress={onDirectSend}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Send message"
+            >
+                <ArrowUpIcon size={16} color={theme.colors.textOnAccent} />
+            </Pressable>
+        );
+    }
+
+    return (
+        <View style={[styles.sendButton, styles.sendButtonDisabled]}>
+            <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
+        </View>
+    );
+}, areToolbarSendControlsEqual);
+
+function areQueuedDraftListsEqual(
+    previousDrafts: ReadonlyArray<ChatInputProps["queuedDrafts"][number]>,
+    nextDrafts: ReadonlyArray<ChatInputProps["queuedDrafts"][number]>
+): boolean {
+    if (previousDrafts.length !== nextDrafts.length) {
+        return false;
+    }
+
+    return previousDrafts.every((draft, index) => {
+        const nextDraft = nextDrafts[index];
+        return nextDraft !== undefined
+            && nextDraft.id === draft.id
+            && nextDraft.sessionId === draft.sessionId
+            && nextDraft.content === draft.content
+            && nextDraft.images.length === draft.images.length;
+    });
+}
+
+function areChatInputPropsEqual(
+    previousProps: ChatInputProps,
+    nextProps: ChatInputProps
+): boolean {
+    const previousEditingDraft = previousProps.editingDraft;
+    const nextEditingDraft = nextProps.editingDraft;
+
+    const editingDraftsEqual = previousEditingDraft === nextEditingDraft
+        || (
+            previousEditingDraft !== null
+            && nextEditingDraft !== null
+            && previousEditingDraft.id === nextEditingDraft.id
+            && previousEditingDraft.content === nextEditingDraft.content
+            && previousEditingDraft.sessionId === nextEditingDraft.sessionId
+            && previousEditingDraft.images.length === nextEditingDraft.images.length
+        );
+
+    return previousProps.onSend === nextProps.onSend
+        && previousProps.onAbort === nextProps.onAbort
+        && previousProps.isTyping === nextProps.isTyping
+        && previousProps.isAbortPending === nextProps.isAbortPending
+        && previousProps.disabled === nextProps.disabled
+        && previousProps.onEditingDraftConsumed === nextProps.onEditingDraftConsumed
+        && previousProps.onEditQueuedDraft === nextProps.onEditQueuedDraft
+        && previousProps.onRemoveQueuedDraft === nextProps.onRemoveQueuedDraft
+        && previousProps.onSteerQueuedDraft === nextProps.onSteerQueuedDraft
+        && editingDraftsEqual
+        && areQueuedDraftListsEqual(previousProps.queuedDrafts, nextProps.queuedDrafts);
+}
+
+function ChatInputComponent({
     onSend,
     onAbort,
     isTyping,
@@ -672,6 +831,14 @@ export function ChatInput({
             handleSend("send");
         }
     }, [isTyping, handleSend]);
+
+    const handleDirectSend = useCallback(() => {
+        handleSend("send");
+    }, [handleSend]);
+
+    const handleToggleSendMenu = useCallback(() => {
+        setShowSendMenu((previous) => !previous);
+    }, []);
 
     // Autocomplete tokeni: @file veya /command.
     const activeToken = useMemo<AutocompleteToken>(
@@ -1154,65 +1321,17 @@ export function ChatInput({
                     )}
 
                     {/* Send / Abort / Queue */}
-                    {isTyping ? (
-                        <View style={toolbarStyles.sendControlWrap}>
-                            <Pressable
-                                style={[
-                                    styles.abortButton,
-                                    isAbortPending && styles.abortButtonPending,
-                                ]}
-                                onPress={onAbort}
-                                disabled={isAbortPending}
-                                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                accessibilityLabel={isAbortPending ? "Stopping request" : "Stop request"}
-                            >
-                                <View style={styles.abortIcon} />
-                            </Pressable>
-
-                            {canSend ? (
-                                <View style={toolbarStyles.sendGroup}>
-                                    <Pressable
-                                        style={styles.sendButton}
-                                        onPress={handleDefaultSend}
-                                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                                        accessibilityLabel="Send message"
-                                    >
-                                        <ArrowUpIcon size={16} color={theme.colors.textOnAccent} />
-                                    </Pressable>
-                                    <Pressable
-                                        style={toolbarStyles.sendMenuButton}
-                                        onPress={() => setShowSendMenu((prev) => !prev)}
-                                        hitSlop={4}
-                                        accessibilityLabel="Send options"
-                                    >
-                                        <ChevronDownIcon size={12} color={theme.colors.textPrimary} />
-                                    </Pressable>
-                                </View>
-                            ) : (
-                                <View style={[styles.sendButton, styles.sendButtonDisabled]}>
-                                    <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
-                                </View>
-                            )}
-
-                            <SendModeMenu
-                                visible={showSendMenu && canSend}
-                                onSelect={handleSendModeSelect}
-                            />
-                        </View>
-                    ) : canSend ? (
-                        <Pressable
-                            style={styles.sendButton}
-                            onPress={() => handleSend("send")}
-                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                            accessibilityLabel="Send message"
-                        >
-                            <ArrowUpIcon size={16} color={theme.colors.textOnAccent} />
-                        </Pressable>
-                    ) : (
-                        <View style={[styles.sendButton, styles.sendButtonDisabled]}>
-                            <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
-                        </View>
-                    )}
+                    <ToolbarSendControls
+                        canSend={canSend}
+                        isTyping={isTyping}
+                        isAbortPending={isAbortPending}
+                        onAbort={onAbort}
+                        onDefaultSend={handleDefaultSend}
+                        onDirectSend={handleDirectSend}
+                        onToggleSendMenu={handleToggleSendMenu}
+                        onSelectSendMode={handleSendModeSelect}
+                        showSendMenu={showSendMenu}
+                    />
                 </View>
             </View>
 
@@ -1333,3 +1452,5 @@ export function ChatInput({
         </View>
     );
 }
+
+export const ChatInput = React.memo(ChatInputComponent, areChatInputPropsEqual);

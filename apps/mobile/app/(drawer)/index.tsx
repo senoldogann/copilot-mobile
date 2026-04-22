@@ -22,7 +22,7 @@ import type { DrawerNavigationProp } from "@react-navigation/drawer";
 import type { ParamListBase } from "@react-navigation/native";
 import { GitBranchIcon, DiffIcon, MoreVerticalIcon, ChevronDownIcon, CirclePlusIcon, SettingsIcon, WifiOffIcon } from "../../src/components/ProviderIcon";
 import { useSessionStore } from "../../src/stores/session-store";
-import type { ChatItem } from "../../src/stores/session-store-types";
+import type { AgentTodo, ChatItem } from "../../src/stores/session-store-types";
 import { useWorkspaceStore } from "../../src/stores/workspace-store";
 import { WorkspacePanel } from "../../src/components/WorkspacePanel";
 import { useConnectionStore } from "../../src/stores/connection-store";
@@ -54,7 +54,7 @@ import {
 import { startDraftConversation } from "../../src/services/new-chat";
 import {
     deriveAgentTodosFromItems,
-    getCurrentTurnItems,
+    getActiveAgentItems,
     getSubagentDisplayName,
     isSubagentToolName,
 } from "../../src/utils/tool-introspection";
@@ -81,9 +81,11 @@ function buildSubagentRuns(
             title: getSubagentDisplayName(item),
             status: item.status === "failed"
                 ? "failed"
-                : item.status === "completed" || item.status === "no_results"
-                    ? "completed"
-                    : "running",
+                : isAssistantTyping
+                    ? "running"
+                    : item.status === "completed" || item.status === "no_results"
+                        ? "completed"
+                        : "running",
         });
     }
 
@@ -95,6 +97,41 @@ function buildSubagentRuns(
     }
 
     return [];
+}
+
+function areSubagentRunsEqual(
+    left: ReadonlyArray<SubagentRun>,
+    right: ReadonlyArray<SubagentRun>
+): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((run, index) => {
+        const candidate = right[index];
+        return candidate !== undefined
+            && candidate.requestId === run.requestId
+            && candidate.title === run.title
+            && candidate.status === run.status;
+    });
+}
+
+function areAgentTodosEqual(
+    left: ReadonlyArray<AgentTodo>,
+    right: ReadonlyArray<AgentTodo>
+): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((todo, index) => {
+        const candidate = right[index];
+        return candidate !== undefined
+            && candidate.id === todo.id
+            && candidate.content === todo.content
+            && candidate.status === todo.status
+            && candidate.priority === todo.priority;
+    });
 }
 
 // Özel başlık — GitHub Copilot mobil stili üst bar
@@ -332,6 +369,8 @@ export default function ChatScreen() {
     const prevSessionIdRef = useRef<string | null>(null);
     const persistChatItemsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const persistInteractionRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(null);
+    const stableSubagentRunsRef = useRef<ReadonlyArray<SubagentRun>>([]);
+    const stableAgentTodosRef = useRef<ReadonlyArray<AgentTodo>>([]);
 
     // Store'lardan state
     const chatItems = useSessionStore((s) => s.chatItems);
@@ -362,39 +401,47 @@ export default function ChatScreen() {
         connectionState === "connecting" || connectionState === "connected";
     const inputDisabled = !isConnected || isSessionLoading;
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
-    const currentTurnItems = useMemo(
-        () => getCurrentTurnItems(chatItems),
-        [chatItems],
+    const activeAgentItems = useMemo(
+        () => getActiveAgentItems(chatItems, isTyping),
+        [chatItems, isTyping],
     );
     const subagentRunsSignature = useMemo(() => (
-        currentTurnItems
+        activeAgentItems
             .filter((item): item is Extract<ChatItem, { type: "tool" }> =>
                 item.type === "tool" && isSubagentToolName(item.toolName)
             )
             .map((item) => `${item.requestId}:${item.status}:${item.toolName}:${item.argumentsText ?? ""}`)
             .join("|")
-    ), [currentTurnItems]);
-    const subagentRuns = useMemo(
-        () => buildSubagentRuns(currentTurnItems, isTyping),
+    ), [activeAgentItems]);
+    const nextSubagentRuns = useMemo(
+        () => buildSubagentRuns(activeAgentItems, isTyping),
         [isTyping, subagentRunsSignature],
     );
+    if (!areSubagentRunsEqual(stableSubagentRunsRef.current, nextSubagentRuns)) {
+        stableSubagentRunsRef.current = nextSubagentRuns;
+    }
+    const subagentRuns = stableSubagentRunsRef.current;
     const hasRunningToolInCurrentTurn = useMemo(
-        () => currentTurnItems.some((item) => item.type === "tool" && item.status === "running"),
-        [currentTurnItems],
+        () => activeAgentItems.some((item) => item.type === "tool" && item.status === "running"),
+        [activeAgentItems],
     );
-    const visibleAgentTodos = useMemo(() => {
+    const nextVisibleAgentTodos = useMemo(() => {
         const hasActiveTurn = isTyping || hasRunningToolInCurrentTurn;
         if (!hasActiveTurn) {
             return [];
         }
 
-        const derivedTodos = deriveAgentTodosFromItems(currentTurnItems);
+        const derivedTodos = deriveAgentTodosFromItems(activeAgentItems);
         if (derivedTodos.length > 0) {
             return derivedTodos;
         }
 
         return agentTodos;
-    }, [agentTodos, currentTurnItems, hasRunningToolInCurrentTurn, isTyping]);
+    }, [activeAgentItems, agentTodos, hasRunningToolInCurrentTurn, isTyping]);
+    if (!areAgentTodosEqual(stableAgentTodosRef.current, nextVisibleAgentTodos)) {
+        stableAgentTodosRef.current = nextVisibleAgentTodos;
+    }
+    const visibleAgentTodos = stableAgentTodosRef.current;
 
     useEffect(() => {
         if (permissionPrompt !== null || userInputPrompt !== null || planExitPrompt !== null) {

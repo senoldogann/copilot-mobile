@@ -13,10 +13,12 @@ import { createCopilotAdapter } from "../../src/copilot/client.js";
 import { generatePairingToken, clearPairingToken } from "../../src/auth/pairing.js";
 import { clearRateLimitState } from "../../src/utils/rate-limit.js";
 import { resetSeq } from "../../src/utils/message.js";
-import type { AdaptedCopilotClient } from "@copilot-mobile/shared";
+import type { AdaptedCopilotClient, ModelInfo } from "@copilot-mobile/shared";
 
 const E2E_PORT = 29876;
 const E2E_TIMEOUT = 60_000; // Copilot CLI can be slow
+const LOW_COST_CHAT_MODEL_IDS: ReadonlyArray<string> = ["claude-haiku-4.5"];
+const LOW_COST_EFFORT_MODEL_IDS: ReadonlyArray<string> = ["gpt-5.4-mini", "gpt-5-mini", "gpt-5.4"];
 
 // --- Test Helpers ---
 
@@ -116,6 +118,21 @@ function connectToServer(port: number, jwtToken?: string): Promise<WSClient> {
 
         ws.on("error", reject);
     });
+}
+
+function pickPreferredModel(
+    models: ReadonlyArray<ModelInfo>,
+    preferredIds: ReadonlyArray<string>,
+    predicate: (model: ModelInfo) => boolean
+): ModelInfo | undefined {
+    for (const modelId of preferredIds) {
+        const preferredModel = models.find((model) => model.id === modelId && predicate(model));
+        if (preferredModel !== undefined) {
+            return preferredModel;
+        }
+    }
+
+    return models.find(predicate);
 }
 
 // --- E2E Tests ---
@@ -247,7 +264,7 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
         }
     });
 
-    it("should create session and send message (effort-supporting model)", async (t) => {
+    it("should create session and send message (preferred low-cost model)", async (t) => {
         if (!cliAvailable) {
             t.skip("Copilot CLI not accessible");
             return;
@@ -265,33 +282,28 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
             }));
             await client.waitForMessage("auth.authenticated");
 
-            // Find an effort-supporting model from the real model list
+            // Prefer a low-cost chat model for the main smoke path.
             client.send(makeClientMsg("models.request", {}));
             const modelsMsg = await client.waitForMessage("models.list");
             if (modelsMsg.type !== "models.list") {
                 throw new Error("Expected models.list");
             }
-            const effortModel = modelsMsg.payload.models.find(
-                (m) => m.supportsReasoningEffort === true &&
-                    (m.supportedReasoningEfforts?.length ?? 0) > 0
+            const chatModel = pickPreferredModel(
+                modelsMsg.payload.models,
+                LOW_COST_CHAT_MODEL_IDS,
+                (model) => model.supportsReasoningEffort === false
             );
-            if (effortModel === undefined) {
-                t.skip("No effort-supporting model found");
+            if (chatModel === undefined) {
+                t.skip("No low-cost chat model found");
                 return;
             }
-            const effortLevel =
-                effortModel.defaultReasoningEffort ??
-                effortModel.supportedReasoningEfforts?.[0];
-            assert.ok(effortLevel !== undefined, "Should find an effort level");
 
-            console.log(`   🧠 Test modeli: ${effortModel.id} effort=${effortLevel}`);
+            console.log(`   🧠 Test modeli: ${chatModel.id}`);
 
-            // Create session — including reasoningEffort
             client.send(
                 makeClientMsg("session.create", {
                     config: {
-                        model: effortModel.id,
-                        reasoningEffort: effortLevel,
+                        model: chatModel.id,
                         streaming: true,
                         agentMode: "agent",
                         permissionLevel: "default",

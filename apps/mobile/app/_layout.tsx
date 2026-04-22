@@ -2,7 +2,7 @@
 
 import "expo-dev-client";
 import "../src/services/notification-background-task";
-import { Stack } from "expo-router";
+import { Stack, usePathname, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
@@ -14,7 +14,7 @@ import { ThemeProvider, useAppTheme } from "../src/theme/theme-context";
 
 export default function RootLayout() {
     const [themeReady, setThemeReady] = useState(false);
-    const [initialScreen, setInitialScreen] = useState<"(drawer)" | "onboarding" | null>(null);
+    const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
 
     useEffect(() => {
         void useThemeStore.getState().hydrate().finally(() => {
@@ -36,7 +36,7 @@ export default function RootLayout() {
                 return;
             }
 
-            setInitialScreen(completed ? "(drawer)" : "onboarding");
+            setOnboardingCompleted(completed);
         });
 
         return () => {
@@ -44,7 +44,7 @@ export default function RootLayout() {
         };
     }, [themeReady]);
 
-    if (!themeReady || initialScreen === null) {
+    if (!themeReady || onboardingCompleted === null) {
         return null;
     }
 
@@ -52,21 +52,31 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
             <SafeAreaProvider>
                 <ThemeProvider>
-                    <RootNavigator initialScreen={initialScreen} />
+                    <RootNavigator onboardingCompleted={onboardingCompleted} />
                 </ThemeProvider>
             </SafeAreaProvider>
         </GestureHandlerRootView>
     );
 }
 
-function RootNavigator({ initialScreen }: { initialScreen: "(drawer)" | "onboarding" }) {
+function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }) {
     const theme = useAppTheme();
+    const pathname = usePathname();
+    const router = useRouter();
+
+    useEffect(() => {
+        if (onboardingCompleted || pathname === "/onboarding") {
+            return;
+        }
+
+        router.replace("/onboarding");
+    }, [onboardingCompleted, pathname, router]);
 
     return (
         <>
             <StatusBar style={theme.resolvedScheme === "light" ? "dark" : "light"} />
             <Stack
-                initialRouteName={initialScreen}
+                initialRouteName="(drawer)"
                 screenOptions={{
                     headerShown: false,
                     contentStyle: { backgroundColor: theme.colors.bg },
