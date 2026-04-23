@@ -37,6 +37,11 @@ export type ThinkingItem = ChatItemBase & {
     isStreaming: boolean;
 };
 
+export type SystemNotificationItem = ChatItemBase & {
+    type: "system_notification";
+    content: string;
+};
+
 export type ToolItem = ChatItemBase & {
     type: "tool";
     toolName: string;
@@ -58,7 +63,12 @@ export type AgentTodo = {
     priority?: "high" | "medium" | "low";
 };
 
-export type ChatItem = UserMessageItem | AssistantMessageItem | ThinkingItem | ToolItem;
+export type ChatItem =
+    | UserMessageItem
+    | AssistantMessageItem
+    | ThinkingItem
+    | SystemNotificationItem
+    | ToolItem;
 
 export type PermissionPrompt = {
     sessionId: string;
@@ -111,6 +121,7 @@ export type SessionStore = {
     hostCapabilities: HostSessionCapabilities;
     bridgeSettings: BridgeSettings;
     chatItems: ReadonlyArray<ChatItem>;
+    busySessions: Readonly<Record<string, boolean>>;
     isAssistantTyping: boolean;
     isAbortRequested: boolean;
     currentIntent: string | null;
@@ -153,6 +164,9 @@ export type SessionStore = {
     ) => void;
     appendAssistantDelta: (delta: string, index: number) => void;
     finalizeAssistantMessage: (content: string) => void;
+    addSystemNotification: (content: string) => void;
+    setSessionBusy: (sessionId: string, busy: boolean) => void;
+    clearSessionBusy: (sessionId: string) => void;
     setAssistantTyping: (typing: boolean) => void;
     setAbortRequested: (requested: boolean) => void;
     stopActiveTurn: () => void;

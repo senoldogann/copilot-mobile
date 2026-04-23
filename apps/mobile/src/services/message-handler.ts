@@ -31,33 +31,121 @@ const assistantDeltaBuffers = new Map<string, string>();
 const assistantDeltaTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const thinkingDeltaBuffers = new Map<string, string>();
 const thinkingDeltaTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const assistantSystemNotificationState = new Map<string, boolean>();
+type AssistantSystemNotificationBuffer = {
+    collecting: boolean;
+    content: string;
+};
+
+type AssistantInternalExtraction = {
+    visibleContent: string;
+    systemNotifications: ReadonlyArray<string>;
+};
+
+const assistantSystemNotificationState = new Map<string, AssistantSystemNotificationBuffer>();
+const emittedSystemNotificationKeys = new Map<string, Set<string>>();
+
+function normalizeSystemNotification(content: string): string {
+    return content
+        .replace(/<\/?system_notification\b[^>]*>/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
+function readEmittedSystemNotificationKeys(sessionId: string): Set<string> {
+    const existingKeys = emittedSystemNotificationKeys.get(sessionId);
+    if (existingKeys !== undefined) {
+        return existingKeys;
+    }
+
+    const keys = new Set<string>();
+    emittedSystemNotificationKeys.set(sessionId, keys);
+    return keys;
+}
+
+function addSystemNotificationForActiveSession(sessionId: string, content: string): void {
+    const normalizedContent = normalizeSystemNotification(content);
+    if (normalizedContent.length === 0) {
+        return;
+    }
+
+    const keys = readEmittedSystemNotificationKeys(sessionId);
+    if (keys.has(normalizedContent)) {
+        return;
+    }
+    keys.add(normalizedContent);
+
+    const sessionStore = useSessionStore.getState();
+    if (sessionStore.activeSessionId !== sessionId) {
+        return;
+    }
+
+    sessionStore.addSystemNotification(normalizedContent);
+}
+
+function clearSystemNotificationStreamState(sessionId: string): void {
+    assistantSystemNotificationState.delete(sessionId);
+    emittedSystemNotificationKeys.delete(sessionId);
+}
+
+function extractAssistantInternalContent(content: string): AssistantInternalExtraction {
+    const systemNotifications: Array<string> = [];
+    let visibleContent = "";
+    let cursor = 0;
+    const taggedPattern = /<system_notification\b[^>]*>([\s\S]*?)<\/system_notification>/gi;
+    let taggedMatch: RegExpExecArray | null;
+
+    while ((taggedMatch = taggedPattern.exec(content)) !== null) {
+        visibleContent += content.slice(cursor, taggedMatch.index);
+        systemNotifications.push(normalizeSystemNotification(taggedMatch[1] ?? ""));
+        cursor = taggedMatch.index + taggedMatch[0].length;
+    }
+
+    visibleContent += content.slice(cursor);
+    visibleContent = visibleContent.replace(
+        /^Agent\s+"[^"]+"\s+\([^)]+\)\s+has completed successfully\.\s+Use\s+read_agent[^\n]*?full results\.\s*$/gmi,
+        (match) => {
+            systemNotifications.push(normalizeSystemNotification(match));
+            return "";
+        }
+    );
+
+    return {
+        visibleContent: visibleContent
+            .replace(/<\/?system_notification\b[^>]*>/gi, "")
+            .replace(/<\/?thinking\b[^>]*>/gi, "")
+            .replace(/\n{3,}/g, "\n\n")
+            .trimStart(),
+        systemNotifications: systemNotifications.filter((item) => item.length > 0),
+    };
+}
 
 function stripAssistantInternalMarkup(content: string): string {
-    return content
-        .replace(/<system_notification\b[^>]*>[\s\S]*?<\/system_notification>/gi, "")
-        .replace(/^Agent\s+"[^"]+"\s+\([^)]+\)\s+has completed successfully\.\s+Use\s+read_agent[\s\S]*?full results\.\s*$/gmi, "")
-        .replace(/<\/?system_notification\b[^>]*>/gi, "")
-        .replace(/<\/?thinking\b[^>]*>/gi, "")
-        .replace(/\n{3,}/g, "\n\n")
-        .trimStart();
+    return extractAssistantInternalContent(content).visibleContent;
 }
 
 function filterAssistantDelta(sessionId: string, delta: string): string {
     let remaining = delta;
     let visible = "";
-    let suppressing = assistantSystemNotificationState.get(sessionId) === true;
+    const existingBuffer = assistantSystemNotificationState.get(sessionId);
+    let suppressing = existingBuffer?.collecting === true;
+    let notificationContent = existingBuffer?.content ?? "";
 
     while (remaining.length > 0) {
         if (suppressing) {
             const closeMatch = /<\/system_notification>/i.exec(remaining);
             if (closeMatch === null) {
-                assistantSystemNotificationState.set(sessionId, true);
+                assistantSystemNotificationState.set(sessionId, {
+                    collecting: true,
+                    content: notificationContent + remaining,
+                });
                 return visible;
             }
 
+            notificationContent += remaining.slice(0, closeMatch.index);
+            addSystemNotificationForActiveSession(sessionId, notificationContent);
             remaining = remaining.slice(closeMatch.index + closeMatch[0].length);
             suppressing = false;
+            notificationContent = "";
             continue;
         }
 
@@ -71,9 +159,18 @@ function filterAssistantDelta(sessionId: string, delta: string): string {
         visible += remaining.slice(0, openMatch.index);
         remaining = remaining.slice(openMatch.index + openMatch[0].length);
         suppressing = true;
+        notificationContent = "";
     }
 
-    assistantSystemNotificationState.set(sessionId, suppressing);
+    if (suppressing) {
+        assistantSystemNotificationState.set(sessionId, {
+            collecting: true,
+            content: notificationContent,
+        });
+    } else {
+        assistantSystemNotificationState.delete(sessionId);
+    }
+
     return stripAssistantInternalMarkup(visible);
 }
 
@@ -182,7 +279,7 @@ function scheduleThinkingDeltaFlush(sessionId: string, delta: string): void {
 function flushSessionStreamBuffers(sessionId: string): void {
     flushAssistantDeltaBuffer(sessionId);
     flushThinkingDeltaBuffer(sessionId);
-    assistantSystemNotificationState.delete(sessionId);
+    clearSystemNotificationStreamState(sessionId);
 }
 
 function isNonFatalProtocolError(code: string): boolean {
@@ -324,7 +421,10 @@ function mergeHistoryIntoExistingItems(
             return true;
         }
 
-        if (existingItem.content !== historyItem.content) {
+        const historyContent = historyItem.type === "assistant"
+            ? stripAssistantInternalMarkup(historyItem.content)
+            : historyItem.content;
+        if (existingItem.content !== historyContent) {
             return false;
         }
 
@@ -471,6 +571,7 @@ function restoreCachedConversationForMissingSession(missingSessionId: string): b
     clearBackgroundCompletion(missingSessionId);
     sessionStore.setSessionLoading(false);
     sessionStore.setAssistantTyping(false);
+    sessionStore.setSessionBusy(missingSessionId, false);
     sessionStore.setAgentTodos([]);
     sessionStore.clearPermissionPrompts();
     sessionStore.setUserInputPrompt(null);
@@ -519,8 +620,10 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setSessionLoading(false);
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.setAbortRequested(false);
+            sessionStore.clearSessionBusy(message.payload.session.id);
             sessionStore.upsertSession(message.payload.session);
             clearBackgroundCompletion(message.payload.session.id);
+            clearSystemNotificationStreamState(message.payload.session.id);
 
             // Link active conversation to this session.
             const chatHistoryStore = useChatHistoryStore.getState();
@@ -551,6 +654,7 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setAbortRequested(false);
             sessionStore.upsertSession(message.payload.session);
             clearBackgroundCompletion(message.payload.session.id);
+            clearSystemNotificationStreamState(message.payload.session.id);
             void import("./bridge").then(({ syncSessionPreferences }) =>
                 syncSessionPreferences(message.payload.session.id)
             );
@@ -576,6 +680,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "session.idle": {
             flushSessionStreamBuffers(message.payload.sessionId);
+            sessionStore.setSessionBusy(message.payload.sessionId, false);
             notifyIfBackgroundCompletion(message.payload.sessionId);
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.setAbortRequested(false);
@@ -613,7 +718,11 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.message": {
             flushAssistantDeltaBuffer(message.payload.sessionId);
-            const content = stripAssistantInternalMarkup(message.payload.content);
+            const extractedContent = extractAssistantInternalContent(message.payload.content);
+            for (const notification of extractedContent.systemNotifications) {
+                addSystemNotificationForActiveSession(message.payload.sessionId, notification);
+            }
+            const content = extractedContent.visibleContent;
             replaceBackgroundCompletionPreview(message.payload.sessionId, content);
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.finalizeAssistantMessage(content);
@@ -769,6 +878,9 @@ export function handleServerMessage(message: ServerMessage): void {
             if (isNonFatalProtocolError(message.payload.code)) {
                 const errorMessage = `[${message.payload.code}] ${message.payload.message}`;
                 sessionStore.setAbortRequested(false);
+                if (sessionStore.activeSessionId !== null) {
+                    sessionStore.setSessionBusy(sessionStore.activeSessionId, false);
+                }
                 connectionStore.setError(errorMessage);
                 scheduleTransientConnectionErrorClear(errorMessage);
                 break;
@@ -778,6 +890,9 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setSessionLoading(false);
             sessionStore.setAssistantTyping(false);
             sessionStore.setAbortRequested(false);
+            if (sessionStore.activeSessionId !== null) {
+                sessionStore.setSessionBusy(sessionStore.activeSessionId, false);
+            }
             sessionStore.setAgentTodos([]);
             // Clear open dialogs after a fatal error so they do not stay stuck onscreen.
             sessionStore.clearPermissionPrompts();
@@ -810,6 +925,14 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.state": {
+            if (message.payload.busy !== undefined) {
+                const wasBusy = useSessionStore.getState().busySessions[message.payload.sessionId] === true;
+                sessionStore.setSessionBusy(message.payload.sessionId, message.payload.busy);
+                if (message.payload.busy && !wasBusy) {
+                    emittedSystemNotificationKeys.delete(message.payload.sessionId);
+                }
+            }
+
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.syncRemoteSessionState({
                 agentMode: message.payload.agentMode,
@@ -837,6 +960,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "session.error": {
             flushSessionStreamBuffers(message.payload.sessionId);
+            sessionStore.setSessionBusy(message.payload.sessionId, false);
             notifyBackgroundCompletionFailure(
                 message.payload.sessionId,
                 `[${message.payload.errorType}] ${message.payload.message}`

@@ -129,6 +129,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     const drawerStatus = useDrawerStatus();
     const sessions = useSessionStore((s) => s.sessions);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
+    const busySessions = useSessionStore((s) => s.busySessions);
     const conversations = useChatHistoryStore((s) => s.conversations);
     const activeConversationId = useChatHistoryStore((s) => s.activeConversationId);
     const connectionState = useConnectionStore((s) => s.state);
@@ -1060,17 +1061,21 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     const renderProjectConversationBody = (params: {
         title: string;
         active: boolean;
+        running: boolean;
         lastActiveAt: number;
         resumeResult: DrawerResumeResult;
     }) => (
         <View style={styles.projectConversationContent}>
             <View style={[
                 styles.projectConversationState,
-                params.active && styles.projectConversationStateActive,
+                params.running && styles.projectConversationStateRunning,
+                params.active && !params.running && styles.projectConversationStateActive,
             ]}>
-                {params.resumeResult === "failed" && (
+                {params.running ? (
+                    <ActivityIndicator size="small" color={theme.colors.textLink} />
+                ) : params.resumeResult === "failed" ? (
                     <Feather name="alert-circle" size={13} color={theme.colors.error} />
-                )}
+                ) : null}
             </View>
             <Text
                 style={[
@@ -1206,6 +1211,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                         const linkedId = linkedConv?.id ?? null;
                                         const isEntrySelected = selectedWorkspaceEntryKeys.has(entry.key);
                                         const resumeResult = resumeResultsBySessionId[entry.primarySession.id] ?? "idle";
+                                        const isRunning = busySessions[entry.primarySession.id] === true;
                                         return (
                                             <View key={entry.key} style={styles.conversationRow}>
                                                 {workspaceSelectionMode === group.workspace && (
@@ -1255,6 +1261,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                                     {renderProjectConversationBody({
                                                         title: presentation.title,
                                                         active: activeSessionId === entry.primarySession.id,
+                                                        running: isRunning,
                                                         lastActiveAt: entry.primarySession.lastActiveAt,
                                                         resumeResult,
                                                     })}
@@ -1902,6 +1909,11 @@ return StyleSheet.create({
     projectConversationStateActive: {
         borderWidth: 2,
         borderColor: theme.colors.textTertiary,
+    },
+    projectConversationStateRunning: {
+        backgroundColor: theme.colors.accentMuted,
+        borderWidth: 1,
+        borderColor: theme.colors.borderActive,
     },
     projectConversationTitle: {
         flex: 1,

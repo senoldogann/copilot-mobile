@@ -78,6 +78,13 @@ function compactChatItemForPersistence(item: ChatItem): ChatItem {
         };
     }
 
+    if (item.type === "system_notification") {
+        return {
+            ...item,
+            content: limitPersistedText(item.content),
+        };
+    }
+
     return {
         ...item,
         ...(item.argumentsText !== undefined ? { argumentsText: limitPersistedText(item.argumentsText) } : {}),
@@ -176,6 +183,20 @@ function sanitizeChatItem(input: unknown): ChatItem | null {
                 type,
                 content,
                 isStreaming: false,
+            };
+        }
+
+        case "system_notification": {
+            const content = raw["content"];
+            if (typeof content !== "string") {
+                return null;
+            }
+
+            return {
+                id,
+                timestamp,
+                type,
+                content,
             };
         }
 

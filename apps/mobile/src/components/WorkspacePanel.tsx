@@ -1084,7 +1084,7 @@ return StyleSheet.create({
 function createTreeStyles(theme: AppTheme) {
 const emphasisTextColor = theme.resolvedScheme === "light"
     ? theme.colors.textPrimary
-    : theme.colors.textAssistant;
+    : "#f4f7f5";
 
 return StyleSheet.create({
     tree: { gap: 0, paddingBottom: theme.spacing.sm },
@@ -1133,10 +1133,10 @@ return StyleSheet.create({
 function createStyles(theme: AppTheme) {
 const emphasizedLabelColor = theme.resolvedScheme === "light"
     ? theme.colors.textPrimary
-    : theme.colors.textAssistant;
+    : "#f4f7f5";
 const supportingLabelColor = theme.resolvedScheme === "light"
     ? theme.colors.textSecondary
-    : theme.colors.textSecondary;
+    : "#c9d1d9";
 const successBadgeBg = theme.resolvedScheme === "light"
     ? theme.colors.successMuted
     : "#1b3f2a";

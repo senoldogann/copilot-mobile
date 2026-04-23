@@ -8,14 +8,14 @@ import {
     Modal,
     ScrollView,
     StyleSheet,
-    ActivityIndicator,
 } from "react-native";
+import { Feather } from "@expo/vector-icons";
 import type { SessionMessageAttachment } from "@copilot-mobile/shared";
 import type { ChatItem } from "../stores/session-store-types";
 import { ThinkingBubble } from "./ThinkingBubble";
 import { ToolCard } from "./ToolCard";
 import { FileContentViewer } from "./FileContentViewer";
-import { useThemedStyles, type AppTheme } from "../theme/theme-context";
+import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 type Props = {
     item: ChatItem;
 };
@@ -516,6 +516,25 @@ function AssistantBubble({
     );
 }
 
+function SystemNotificationCard({ content }: { content: string }) {
+    const theme = useAppTheme();
+    const styles = useThemedStyles(createStyles);
+
+    return (
+        <View style={styles.systemNotificationRow} pointerEvents="box-none">
+            <View style={styles.systemNotificationCard}>
+                <View style={styles.systemNotificationIcon}>
+                    <Feather name="bell" size={14} color={theme.colors.textPrimary} />
+                </View>
+                <View style={styles.systemNotificationContent}>
+                    <Text style={styles.systemNotificationTitle}>System notification</Text>
+                    <Text style={styles.systemNotificationText}>{content}</Text>
+                </View>
+            </View>
+        </View>
+    );
+}
+
 function ChatMessageItemComponent({ item }: Props) {
     const [viewerPath, setViewerPath] = useState<string | null>(null);
 
@@ -540,6 +559,8 @@ function ChatMessageItemComponent({ item }: Props) {
                         );
                     case "thinking":
                         return <ThinkingBubble item={item} />;
+                    case "system_notification":
+                        return <SystemNotificationCard content={item.content} />;
                     case "tool":
                         return <ToolCard item={item} />;
                 }
@@ -790,6 +811,45 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     assistantBubble: {
         paddingVertical: theme.spacing.sm,
         paddingHorizontal: theme.spacing.lg,
+    },
+    systemNotificationRow: {
+        paddingHorizontal: theme.spacing.md,
+        marginVertical: theme.spacing.xs,
+    },
+    systemNotificationCard: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: theme.spacing.md,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.md,
+        borderRadius: theme.borderRadius.lg,
+        backgroundColor: theme.colors.bgSecondary,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+    },
+    systemNotificationIcon: {
+        width: 26,
+        height: 26,
+        borderRadius: theme.borderRadius.sm,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: theme.colors.bgElevated,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
+    systemNotificationContent: {
+        flex: 1,
+        gap: 3,
+    },
+    systemNotificationTitle: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
+    },
+    systemNotificationText: {
+        fontSize: theme.fontSize.sm,
+        lineHeight: 18,
+        color: theme.colors.textSecondary,
     },
     cursor: {
         color: theme.colors.accent,

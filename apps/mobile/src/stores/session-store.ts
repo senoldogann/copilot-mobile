@@ -8,6 +8,7 @@ import type {
     AssistantMessageItem,
     PermissionPrompt,
     SessionStore,
+    SystemNotificationItem,
     SessionUsage,
     ThinkingItem,
     ToolItem,
@@ -37,6 +38,7 @@ export type {
     PermissionPrompt,
     PlanExitPrompt,
     SessionStore,
+    SystemNotificationItem,
     SessionUsage,
     ThinkingItem,
     TodoItemStatus,
@@ -61,6 +63,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
     bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
 
     chatItems: [],
+    busySessions: {},
     isAssistantTyping: false,
     isAbortRequested: false,
     currentIntent: null,
@@ -151,6 +154,9 @@ export const useSessionStore = create<SessionStore>((set) => ({
             const nextUsage: Record<string, SessionUsage> = { ...state.sessionUsage };
             delete nextUsage[sessionId];
 
+            const nextBusySessions: Record<string, boolean> = { ...state.busySessions };
+            delete nextBusySessions[sessionId];
+
             const nextDeferredPermissionPrompts = { ...state.deferredPermissionPrompts };
             delete nextDeferredPermissionPrompts[sessionId];
 
@@ -165,6 +171,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
                 activeSessionId: nextActiveSessionId,
                 ...(state.activeSessionId === sessionId ? { isAbortRequested: false } : {}),
                 sessionUsage: nextUsage,
+                busySessions: nextBusySessions,
                 deferredPermissionPrompts: nextDeferredPermissionPrompts,
                 deferredUserInputPrompts: nextDeferredUserInputPrompts,
                 deferredPlanExitPrompts: nextDeferredPlanExitPrompts,
@@ -375,36 +382,89 @@ export const useSessionStore = create<SessionStore>((set) => ({
         });
     },
 
+    addSystemNotification: (content) => {
+        const trimmedContent = content.trim();
+        if (trimmedContent.length === 0) {
+            return;
+        }
+
+        const item: SystemNotificationItem = {
+            id: createItemId(),
+            type: "system_notification",
+            content: trimmedContent,
+            timestamp: Date.now(),
+        };
+        set((s) => ({ chatItems: insertChatItemBeforeTrailingAssistant(s.chatItems, item) }));
+    },
+
+    setSessionBusy: (sessionId, busy) =>
+        set((state) => {
+            if (busy) {
+                if (state.busySessions[sessionId] === true) {
+                    return state;
+                }
+
+                return { busySessions: { ...state.busySessions, [sessionId]: true } };
+            }
+
+            if (state.busySessions[sessionId] === true) {
+                const nextBusySessions: Record<string, boolean> = { ...state.busySessions };
+                delete nextBusySessions[sessionId];
+                return { busySessions: nextBusySessions };
+            }
+
+            return state;
+        }),
+
+    clearSessionBusy: (sessionId) =>
+        set((state) => {
+            if (state.busySessions[sessionId] !== true) {
+                return state;
+            }
+
+            const nextBusySessions: Record<string, boolean> = { ...state.busySessions };
+            delete nextBusySessions[sessionId];
+            return { busySessions: nextBusySessions };
+        }),
+
     setAssistantTyping: (typing) => set({ isAssistantTyping: typing }),
 
     setAbortRequested: (requested) => set({ isAbortRequested: requested }),
 
     stopActiveTurn: () =>
-        set((state) => ({
-            chatItems: state.chatItems.map((item) => {
-                if ((item.type === "assistant" || item.type === "thinking") && item.isStreaming) {
-                    return { ...item, isStreaming: false };
-                }
+        set((state) => {
+            const nextBusySessions: Record<string, boolean> = { ...state.busySessions };
+            if (state.activeSessionId !== null) {
+                delete nextBusySessions[state.activeSessionId];
+            }
 
-                if (item.type === "tool" && item.status === "running") {
-                    return {
-                        ...item,
-                        status: "failed",
-                        errorMessage: item.errorMessage ?? "Stopped by user",
-                    };
-                }
+            return {
+                chatItems: state.chatItems.map((item) => {
+                    if ((item.type === "assistant" || item.type === "thinking") && item.isStreaming) {
+                        return { ...item, isStreaming: false };
+                    }
 
-                return item;
-            }),
-            isAssistantTyping: false,
-            isAbortRequested: false,
-            currentIntent: null,
-            agentTodos: [],
-            permissionPrompt: null,
-            permissionPromptQueue: [],
-            userInputPrompt: null,
-            planExitPrompt: null,
-        })),
+                    if (item.type === "tool" && item.status === "running") {
+                        return {
+                            ...item,
+                            status: "failed",
+                            errorMessage: item.errorMessage ?? "Stopped by user",
+                        };
+                    }
+
+                    return item;
+                }),
+                isAssistantTyping: false,
+                isAbortRequested: false,
+                busySessions: nextBusySessions,
+                currentIntent: null,
+                agentTodos: [],
+                permissionPrompt: null,
+                permissionPromptQueue: [],
+                userInputPrompt: null,
+                planExitPrompt: null,
+            };
+        }),
 
     setCurrentIntent: (intent) => set({ currentIntent: intent }),
 
@@ -853,6 +913,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
     clearChatItems: () => {
         set({
             chatItems: [],
+            busySessions: {},
             isAssistantTyping: false,
             isAbortRequested: false,
             currentIntent: null,
@@ -884,6 +945,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             hostCapabilities: { elicitation: false },
             bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
             chatItems: [],
+            busySessions: {},
             isAssistantTyping: false,
             isAbortRequested: false,
             currentIntent: null,
