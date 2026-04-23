@@ -1,7 +1,7 @@
 // Workspace explorer bottom sheet — GitHub Mobile style Changes / Files view.
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView } from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView, TextInput, Keyboard } from "react-native";
 import { BottomSheet } from "./BottomSheet";
 import { useAppTheme, type AppTheme } from "../theme/theme-context";
 import { useShallow } from "zustand/react/shallow";
@@ -9,6 +9,7 @@ import { useConnectionStore } from "../stores/connection-store";
 import { useSessionStore } from "../stores/session-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
 import {
+    commitWorkspace,
     pullWorkspace,
     pushWorkspace,
     requestWorkspaceGitSummary,
@@ -88,6 +89,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             expandedPaths: s.expandedPaths,
             loadingTreePaths: s.loadingTreePaths,
             isLoadingGit: s.isLoadingGit,
+            isCommitting: s.isCommitting,
             isPulling: s.isPulling,
             isPushing: s.isPushing,
             isSwitchingBranch: s.isSwitchingBranch,
@@ -99,6 +101,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const [viewMode, setViewMode] = useState<ViewMode>("diff");
     const [branchMenuOpen, setBranchMenuOpen] = useState<boolean>(false);
     const [commitMenuOpen, setCommitMenuOpen] = useState<boolean>(false);
+    const [commitComposerOpen, setCommitComposerOpen] = useState<boolean>(false);
+    const [commitMessage, setCommitMessage] = useState("");
     const [changesFilter, setChangesFilter] = useState<"uncommitted" | "recent">("uncommitted");
     const [changesFilterMenuOpen, setChangesFilterMenuOpen] = useState<boolean>(false);
     const [viewer, setViewer] = useState<{ path: string; mode: "file" | "diff" } | null>(null);
@@ -168,6 +172,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         setChangesFilter("uncommitted");
         setBranchMenuOpen(false);
         setCommitMenuOpen(false);
+        setCommitComposerOpen(false);
+        setCommitMessage("");
         setChangesFilterMenuOpen(false);
 
         if (activeSessionId === null) {
@@ -211,6 +217,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const handlePull = useCallback(() => {
         setBranchMenuOpen(false);
         setCommitMenuOpen(false);
+        setCommitComposerOpen(false);
         if (activeSessionId === null || !isConnected) return;
         void pullWorkspace(activeSessionId);
     }, [activeSessionId, isConnected]);
@@ -218,9 +225,44 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const handlePush = useCallback(() => {
         setBranchMenuOpen(false);
         setCommitMenuOpen(false);
+        setCommitComposerOpen(false);
         if (activeSessionId === null || !isConnected) return;
         void pushWorkspace(activeSessionId);
     }, [activeSessionId, isConnected]);
+
+    const handleOpenCommitComposer = useCallback(() => {
+        if (activeSessionId === null || !isConnected || !hasRepo || workspace.uncommittedChanges.length === 0) {
+            return;
+        }
+
+        setBranchMenuOpen(false);
+        setCommitMenuOpen(false);
+        setChangesFilterMenuOpen(false);
+        setCommitComposerOpen(true);
+    }, [activeSessionId, hasRepo, isConnected, workspace.uncommittedChanges.length]);
+
+    const handleCancelCommitComposer = useCallback(() => {
+        setCommitComposerOpen(false);
+        setCommitMessage("");
+        Keyboard.dismiss();
+    }, []);
+
+    const handleSubmitCommit = useCallback(() => {
+        const trimmedMessage = commitMessage.trim();
+        if (
+            trimmedMessage.length === 0
+            || activeSessionId === null
+            || !isConnected
+            || workspace.isCommitting
+        ) {
+            return;
+        }
+
+        void commitWorkspace(activeSessionId, trimmedMessage);
+        setCommitComposerOpen(false);
+        setCommitMessage("");
+        Keyboard.dismiss();
+    }, [activeSessionId, commitMessage, isConnected, workspace.isCommitting]);
 
     const handleToggleBranchMenu = useCallback(() => {
         if (activeSessionId === null || !isConnected || !hasRepo) {
@@ -238,6 +280,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         }
 
         setBranchMenuOpen(false);
+        setCommitComposerOpen(false);
         setChangesFilterMenuOpen(false);
         setCommitMenuOpen((value) => !value);
     }, [activeSessionId, hasRepo, isConnected]);
@@ -259,6 +302,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
     const hasGitContext = workspace.gitRoot !== null || activeContext?.gitRoot !== undefined;
     const branchLabel = workspace.branch ?? activeContext?.branch ?? (hasGitContext ? "main" : "workspace");
+    const canCommit = hasRepo && isConnected && workspace.uncommittedChanges.length > 0;
     const rootLabel = useMemo(() => {
         const rp = workspace.workspaceRoot ?? activeContext?.workspaceRoot ?? null;
         if (rp === null) return "Workspace";
@@ -498,12 +542,15 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                             style={({ pressed }) => [
                                 styles.commitButton,
                                 pressed && styles.pressed,
-                                !hasRepo && styles.commitButtonDisabled,
+                                !canCommit && styles.commitButtonDisabled,
                             ]}
-                            disabled={!hasRepo || workspace.uncommittedChanges.length === 0}
+                            onPress={handleOpenCommitComposer}
+                            disabled={!canCommit || workspace.isCommitting}
                         >
                             <GitHubIcon size={14} color={theme.colors.textPrimary} />
-                            <Text style={styles.commitButtonText}>Commit</Text>
+                            <Text style={styles.commitButtonText}>
+                                {workspace.isCommitting ? "Committing…" : "Commit"}
+                            </Text>
                         </Pressable>
                         <Pressable
                             style={({ pressed }) => [
@@ -542,6 +589,49 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     )}
                 </View>
             </View>
+
+            {commitComposerOpen && (
+                <View style={styles.commitComposer}>
+                    <Text style={styles.commitComposerTitle}>Create commit</Text>
+                    <Text style={styles.commitComposerHint}>
+                        All workspace changes will be staged and committed together.
+                    </Text>
+                    <TextInput
+                        style={styles.commitComposerInput}
+                        value={commitMessage}
+                        onChangeText={setCommitMessage}
+                        placeholder="Commit message"
+                        placeholderTextColor={theme.colors.textTertiary}
+                        returnKeyType="done"
+                        onSubmitEditing={handleSubmitCommit}
+                        editable={!workspace.isCommitting}
+                    />
+                    <View style={styles.commitComposerActions}>
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.commitComposerSecondaryButton,
+                                pressed && styles.pressed,
+                            ]}
+                            onPress={handleCancelCommitComposer}
+                        >
+                            <Text style={styles.commitComposerSecondaryText}>Cancel</Text>
+                        </Pressable>
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.commitComposerPrimaryButton,
+                                (commitMessage.trim().length === 0 || workspace.isCommitting) && styles.commitButtonDisabled,
+                                pressed && commitMessage.trim().length > 0 && !workspace.isCommitting && styles.pressed,
+                            ]}
+                            onPress={handleSubmitCommit}
+                            disabled={commitMessage.trim().length === 0 || workspace.isCommitting}
+                        >
+                            <Text style={styles.commitComposerPrimaryText}>
+                                {workspace.isCommitting ? "Saving…" : "Commit now"}
+                            </Text>
+                        </Pressable>
+                    </View>
+                </View>
+            )}
 
             {/* Uncommitted segmented header */}
             <View style={[styles.segmentRow, changesFilterMenuOpen && styles.rowWithOverlay]}>
@@ -773,6 +863,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 setViewer(null);
                 setBranchMenuOpen(false);
                 setCommitMenuOpen(false);
+                setCommitComposerOpen(false);
+                setCommitMessage("");
                 setChangesFilterMenuOpen(false);
                 onClose();
             }}
@@ -1111,6 +1203,66 @@ return StyleSheet.create({
         justifyContent: "center",
         borderLeftWidth: 1,
         borderLeftColor: theme.colors.borderMuted,
+    },
+    commitComposer: {
+        gap: theme.spacing.sm,
+        padding: theme.spacing.md,
+        borderRadius: theme.borderRadius.lg,
+        backgroundColor: theme.colors.bgSecondary,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+    },
+    commitComposerTitle: {
+        fontSize: theme.fontSize.md,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
+    },
+    commitComposerHint: {
+        fontSize: theme.fontSize.sm,
+        lineHeight: 20,
+        color: theme.colors.textSecondary,
+    },
+    commitComposerInput: {
+        minHeight: 44,
+        borderRadius: theme.borderRadius.md,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+        backgroundColor: theme.colors.bgElevated,
+        color: theme.colors.textPrimary,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.sm,
+        fontSize: theme.fontSize.sm,
+    },
+    commitComposerActions: {
+        flexDirection: "row",
+        justifyContent: "flex-end",
+        gap: theme.spacing.sm,
+    },
+    commitComposerSecondaryButton: {
+        minHeight: 38,
+        borderRadius: theme.borderRadius.full,
+        justifyContent: "center",
+        paddingHorizontal: theme.spacing.md,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+        backgroundColor: theme.colors.bgElevated,
+    },
+    commitComposerSecondaryText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "600",
+        color: theme.colors.textPrimary,
+    },
+    commitComposerPrimaryButton: {
+        minHeight: 38,
+        borderRadius: theme.borderRadius.full,
+        justifyContent: "center",
+        paddingHorizontal: theme.spacing.lg,
+        backgroundColor: theme.colors.textLink,
+    },
+    commitComposerPrimaryText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "700",
+        color: theme.colors.textOnAccent,
     },
 
     // Pull/Push popover

@@ -485,6 +485,12 @@ export function createMessageHandler(
                 case "workspace.pull":
                     return sessionManager.pullWorkspace(message.payload.sessionId);
 
+                case "workspace.commit":
+                    return sessionManager.commitWorkspace(
+                        message.payload.sessionId,
+                        message.payload.message
+                    );
+
                 case "workspace.push":
                     return sessionManager.pushWorkspace(message.payload.sessionId);
 

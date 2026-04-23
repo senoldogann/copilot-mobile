@@ -675,6 +675,24 @@ export async function pullWorkspace(sessionId: string): Promise<void> {
     }
 }
 
+// Workspace commit — stages workspace changes and creates a git commit
+export async function commitWorkspace(sessionId: string, message: string): Promise<void> {
+    const c = getClient();
+    const workspaceStore = getBridgeWorkspaceState();
+    workspaceStore.setWorkspaceOperationState("commit", true);
+    try {
+        await c.sendMessage("workspace.commit", {
+            sessionId,
+            message,
+        });
+    } catch (error) {
+        workspaceStore.setWorkspaceOperationState("commit", false);
+        workspaceStore.setError(
+            `Failed to commit workspace: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+}
+
 // Workspace push — triggers repository push if backend supports it
 export async function pushWorkspace(sessionId: string): Promise<void> {
     const c = getClient();

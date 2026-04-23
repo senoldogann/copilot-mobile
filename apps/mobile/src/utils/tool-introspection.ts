@@ -679,11 +679,20 @@ export function getActiveAgentItems(
         return currentTurnItems;
     }
 
+    const hasLiveAgentArtifact = items.some((item) => (
+        ((item.type === "assistant" || item.type === "thinking") && item.isStreaming)
+        || (item.type === "tool" && item.status === "running")
+    ));
+    if (!hasLiveAgentArtifact) {
+        return currentTurnItems;
+    }
+
     const lastAgentAnchorIndex = [...items]
         .map((item, index) => ({ item, index }))
         .reverse()
         .find(({ item }) =>
-            item.type === "tool" && (item.status === "running" || isSubagentToolName(item.toolName))
+            ((item.type === "assistant" || item.type === "thinking") && item.isStreaming)
+            || (item.type === "tool" && item.status === "running")
         )
         ?.index ?? -1;
 

@@ -105,7 +105,7 @@ export type GitBranchSummary = {
     current: boolean;
 };
 
-export type WorkspaceOperation = "pull" | "push";
+export type WorkspaceOperation = "commit" | "pull" | "push";
 
 export type WorkspaceSearchMatch = {
     path: string;
@@ -204,6 +204,14 @@ export type WorkspaceOperationRequestMessage = BaseBridgeMessage & {
     };
 };
 
+export type WorkspaceCommitRequestMessage = BaseBridgeMessage & {
+    type: "workspace.commit";
+    payload: {
+        sessionId: string;
+        message: string;
+    };
+};
+
 export type WorkspaceFileRequestMessage = BaseBridgeMessage & {
     type: "workspace.file.request";
     payload: {
@@ -296,6 +304,11 @@ export type WorkspaceOperationResultPayload = {
 export type WorkspacePullResultMessage = BaseBridgeMessage & {
     type: "workspace.pull.result";
     payload: WorkspaceOperationResultPayload & { operation: "pull" };
+};
+
+export type WorkspaceCommitResultMessage = BaseBridgeMessage & {
+    type: "workspace.commit.result";
+    payload: WorkspaceOperationResultPayload & { operation: "commit" };
 };
 
 export type WorkspacePushResultMessage = BaseBridgeMessage & {
@@ -664,6 +677,7 @@ export type ServerMessage =
     | WorkspaceTreeMessage
     | WorkspaceGitSummaryMessage
     | WorkspaceBranchSwitchResultMessage
+    | WorkspaceCommitResultMessage
     | WorkspacePullResultMessage
     | WorkspacePushResultMessage
     | WorkspaceResolveResponseMessage
@@ -823,6 +837,7 @@ export type ClientMessage =
     | WorkspaceSearchRequestMessage
     | WorkspaceTreeRequestMessage
     | WorkspaceGitSummaryRequestMessage
+    | WorkspaceCommitRequestMessage
     | WorkspaceOperationRequestMessage
     | WorkspaceBranchSwitchRequestMessage
     | WorkspaceResolveRequestMessage

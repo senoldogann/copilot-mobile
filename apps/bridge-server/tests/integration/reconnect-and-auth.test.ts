@@ -747,7 +747,7 @@ describe("workspace explorer integration", () => {
         }
     });
 
-    it("returns git summary and safe pull/push results", async () => {
+    it("returns git summary, supports commit, and reports safe pull/push results", async () => {
         const token = generatePairingToken();
         const client = await createWSClient(WORKSPACE_TEST_PORT);
 
@@ -786,6 +786,36 @@ describe("workspace explorer integration", () => {
             assert.ok(gitMsg.payload.uncommittedChanges.some((change) => change.path === "notes.txt"));
             assert.ok(gitMsg.payload.recentCommits.length >= 2);
             assert.equal(gitMsg.payload.recentCommits[0]?.files.includes("src/feature.ts"), true);
+
+            client.send(makeClientMessage("workspace.commit", {
+                sessionId: session.id,
+                message: "commit from mobile",
+            }));
+            const commitMsg = await client.waitForMessage("workspace.commit.result");
+            if (commitMsg.type !== "workspace.commit.result") {
+                throw new Error("Expected workspace.commit.result");
+            }
+            assert.equal(commitMsg.payload.sessionId, session.id);
+            assert.equal(commitMsg.payload.operation, "commit");
+            assert.equal(commitMsg.payload.success, true);
+            const statusAfterCommit = await execFileAsync("git", ["status", "--porcelain=v1"], {
+                cwd: workspaceRoot,
+                env: {
+                    ...process.env,
+                    GIT_TERMINAL_PROMPT: "0",
+                    GIT_OPTIONAL_LOCKS: "0",
+                },
+            });
+            assert.equal(statusAfterCommit.stdout.toString().trim().length, 0);
+            const lastCommit = await execFileAsync("git", ["log", "-1", "--pretty=%s"], {
+                cwd: workspaceRoot,
+                env: {
+                    ...process.env,
+                    GIT_TERMINAL_PROMPT: "0",
+                    GIT_OPTIONAL_LOCKS: "0",
+                },
+            });
+            assert.equal(lastCommit.stdout.toString().trim(), "commit from mobile");
 
             client.send(makeClientMessage("workspace.pull", {
                 sessionId: session.id,

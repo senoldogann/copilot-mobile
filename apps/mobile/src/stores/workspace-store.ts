@@ -34,6 +34,7 @@ export type WorkspaceStore = {
     expandedPaths: Record<string, boolean>;
     loadingTreePaths: Record<string, boolean>;
     isLoadingGit: boolean;
+    isCommitting: boolean;
     isPulling: boolean;
     isPushing: boolean;
     isSwitchingBranch: boolean;
@@ -79,6 +80,7 @@ type WorkspaceState = Pick<
     | "expandedPaths"
     | "loadingTreePaths"
     | "isLoadingGit"
+    | "isCommitting"
     | "isPulling"
     | "isPushing"
     | "isSwitchingBranch"
@@ -104,12 +106,29 @@ const initialState: WorkspaceState = {
     expandedPaths: {},
     loadingTreePaths: {},
     isLoadingGit: false,
+    isCommitting: false,
     isPulling: false,
     isPushing: false,
     isSwitchingBranch: false,
     operationMessage: null,
     error: null,
 };
+
+function readWorkspaceOperationSuccessMessage(payload: WorkspaceOperationResultPayload): string {
+    if (payload.message !== undefined) {
+        return payload.message;
+    }
+
+    if (payload.operation === "commit") {
+        return "Commit created";
+    }
+
+    if (payload.operation === "pull") {
+        return "Pull completed";
+    }
+
+    return "Push completed";
+}
 
 function replaceTreeNode(
     node: WorkspaceTreeNode,
@@ -294,6 +313,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         set({
             loadingTreePaths: {},
             isLoadingGit: false,
+            isCommitting: false,
+            isPulling: false,
+            isPushing: false,
+            isSwitchingBranch: false,
         }),
 
     setWorkspaceTree: (payload) =>
@@ -354,6 +377,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
 
     setWorkspaceOperationState: (operation, loading, message) =>
         set((state) => ({
+            isCommitting: operation === "commit" ? loading : state.isCommitting,
             isPulling: operation === "pull" ? loading : state.isPulling,
             isPushing: operation === "push" ? loading : state.isPushing,
             operationMessage: loading ? null : (message !== undefined ? message : null),
@@ -364,10 +388,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         set((state) => ({
             sessionId: payload.sessionId,
             context: payload.context,
+            isCommitting: payload.operation === "commit" ? false : state.isCommitting,
             isPulling: payload.operation === "pull" ? false : state.isPulling,
             isPushing: payload.operation === "push" ? false : state.isPushing,
             operationMessage: payload.success
-                ? (payload.message ?? `${payload.operation} completed`)
+                ? readWorkspaceOperationSuccessMessage(payload)
                 : null,
             error: payload.success ? null : (payload.message ?? "Workspace operation failed"),
         })),

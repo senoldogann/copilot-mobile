@@ -693,8 +693,46 @@ export async function performWorkspaceGitOperation(
     const cwd = resolveWorkspaceRoot(context);
     const args = operation === "pull"
         ? ["pull", "--ff-only", "--no-rebase"]
-        : ["push"];
+        : operation === "push"
+            ? ["push"]
+            : null;
+    if (args === null) {
+        throw new Error(`Unsupported workspace git operation: ${operation}`);
+    }
     return runGit(cwd, args);
+}
+
+export async function commitWorkspaceChanges(
+    context: SessionContext,
+    message: string
+): Promise<GitCommandResult> {
+    const cwd = resolveWorkspaceRoot(context);
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length === 0) {
+        return {
+            success: false,
+            stdout: "",
+            stderr: "",
+            message: "Commit message is required",
+        };
+    }
+
+    const addResult = await runGit(cwd, ["add", "-A", "--", "."]);
+    if (!addResult.success) {
+        return addResult;
+    }
+
+    const stagedCheckResult = await runGit(cwd, ["diff", "--cached", "--quiet", "--", "."]);
+    if (stagedCheckResult.success) {
+        return {
+            success: false,
+            stdout: "",
+            stderr: "",
+            message: "No changes to commit",
+        };
+    }
+
+    return runGit(cwd, ["commit", "-m", trimmedMessage, "--", "."]);
 }
 
 export async function switchWorkspaceBranch(

@@ -227,7 +227,7 @@ const planExitRequestPayloadSchema = z.object({
 const workspaceOperationResultPayloadSchema = z.object({
     sessionId: z.string().min(1),
     context: sessionContextSchema,
-    operation: z.enum(["pull", "push"]),
+    operation: z.enum(["commit", "pull", "push"]),
     success: z.boolean(),
     stdout: z.string().optional(),
     stderr: z.string().optional(),
@@ -510,6 +510,13 @@ const workspacePullResultSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceCommitResultSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.commit.result"),
+    payload: workspaceOperationResultPayloadSchema.extend({
+        operation: z.literal("commit"),
+    }),
+});
+
 const workspacePushResultSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.push.result"),
     payload: workspaceOperationResultPayloadSchema.extend({
@@ -606,6 +613,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     workspaceTreeSchema,
     workspaceGitSummarySchema,
     workspaceBranchSwitchResultSchema,
+    workspaceCommitResultSchema,
     workspacePullResultSchema,
     workspacePushResultSchema,
     workspaceResolveResponseSchema,
@@ -768,6 +776,14 @@ const workspacePullSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceCommitSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.commit"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        message: z.string().trim().min(1),
+    }),
+});
+
 const workspacePushSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.push"),
     payload: z.object({
@@ -844,6 +860,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     workspaceSearchRequestSchema,
     workspaceTreeRequestSchema,
     workspaceGitSummaryRequestSchema,
+    workspaceCommitSchema,
     workspacePullSchema,
     workspacePushSchema,
     workspaceBranchSwitchSchema,

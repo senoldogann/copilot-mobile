@@ -877,11 +877,21 @@ export function handleServerMessage(message: ServerMessage): void {
             break;
         }
 
+        case "workspace.commit.result":
         case "workspace.pull.result":
         case "workspace.push.result": {
             if (!isActiveSession(message.payload.sessionId)) break;
             const workspaceStore = useWorkspaceStore.getState();
             workspaceStore.setWorkspaceOperationResult(message.payload);
+            if (message.payload.success) {
+                void import("./bridge").then(({
+                    requestWorkspaceGitSummary,
+                    requestWorkspaceTree,
+                }) => Promise.all([
+                    requestWorkspaceGitSummary(message.payload.sessionId, 10),
+                    requestWorkspaceTree(message.payload.sessionId, undefined, 2, 0, 200),
+                ]));
+            }
             break;
         }
 

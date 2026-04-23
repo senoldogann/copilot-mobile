@@ -29,6 +29,7 @@ import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
 import {
     buildWorkspaceGitSummary,
     buildWorkspaceTree,
+    commitWorkspaceChanges,
     performWorkspaceGitOperation,
     readWorkspaceDiff,
     readWorkspaceFile,
@@ -1125,6 +1126,45 @@ export function createSessionManager(
                         operation: "pull",
                         success: false,
                         message: error instanceof Error ? error.message : "Workspace pull failed",
+                    },
+                });
+            }
+        },
+
+        async commitWorkspace(sessionId: string, message: string): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const result = await commitWorkspaceChanges(context, message);
+                send({
+                    ...makeBase(),
+                    type: "workspace.commit.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        operation: "commit",
+                        success: result.success,
+                        ...(result.stdout.length > 0 ? { stdout: result.stdout.trim() } : {}),
+                        ...(result.stderr.length > 0 ? { stderr: result.stderr.trim() } : {}),
+                        ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+                        ...(result.signal !== undefined ? { signal: result.signal } : {}),
+                        ...(result.message !== undefined ? { message: result.message } : {}),
+                    },
+                });
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "workspace.commit.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        operation: "commit",
+                        success: false,
+                        message: error instanceof Error ? error.message : "Workspace commit failed",
                     },
                 });
             }
