@@ -1060,14 +1060,6 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 <View style={styles.headerActions}>
                     <Pressable
                         style={({ pressed }) => [styles.headerRefreshButton, pressed && styles.headerRefreshButtonPressed]}
-                        onPress={() => setWorkspacePickerOpen(true)}
-                        hitSlop={8}
-                        accessibilityLabel="Add workspace"
-                    >
-                        <Feather name="folder-plus" size={14} color={theme.colors.textTertiary} />
-                    </Pressable>
-                    <Pressable
-                        style={({ pressed }) => [styles.headerRefreshButton, pressed && styles.headerRefreshButtonPressed]}
                         onPress={() => {
                             void refreshDrawerData(true);
                         }}
@@ -1537,7 +1529,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 )}
             </ScrollView>
 
-            {/* Footer — settings and connection status */}
+            {/* Footer — settings and workspace actions */}
             <View style={styles.footer}>
                 <View style={styles.footerDivider} />
 
@@ -1556,25 +1548,16 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                         <Feather name="settings" size={15} color={theme.colors.textTertiary} />
                         <Text style={styles.footerItemText}>Settings</Text>
                     </Pressable>
-                </View>
-
-                <View style={styles.connectionRow}>
-                    <View
-                        style={[
-                            styles.statusDot,
-                            connectionState === "authenticated"
-                                ? styles.dotConnected
-                                : styles.dotDisconnected,
+                    <Pressable
+                        style={({ pressed }) => [
+                            styles.footerIconButton,
+                            pressed && styles.footerItemPressed,
                         ]}
-                    />
-                    <Text style={styles.connectionText}>
-                        {connectionState === "authenticated"
-                            ? "Connected"
-                            : connectionState === "connecting" ||
-                                connectionState === "connected"
-                                ? "Connecting..."
-                                : "Disconnected"}
-                    </Text>
+                        onPress={() => setWorkspacePickerOpen(true)}
+                        accessibilityLabel="Add workspace"
+                    >
+                        <Feather name="folder-plus" size={16} color={theme.colors.textTertiary} />
+                    </Pressable>
                 </View>
             </View>
 
@@ -2040,6 +2023,7 @@ return StyleSheet.create({
     footerActions: {
         flexDirection: "row",
         alignItems: "center",
+        justifyContent: "space-between",
         gap: theme.spacing.sm,
     },
     footerItem: {
@@ -2071,28 +2055,6 @@ return StyleSheet.create({
         fontSize: theme.fontSize.md,
         color: theme.colors.textPrimary,
         fontWeight: "400",
-    },
-    connectionRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: theme.spacing.md,
-        paddingVertical: theme.spacing.sm,
-        gap: 6,
-    },
-    statusDot: {
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-    },
-    dotConnected: {
-        backgroundColor: theme.colors.success,
-    },
-    dotDisconnected: {
-        backgroundColor: theme.colors.textTertiary,
-    },
-    connectionText: {
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.textTertiary,
     },
     renameOverlay: {
         ...StyleSheet.absoluteFillObject,

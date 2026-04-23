@@ -47,7 +47,16 @@ function createInitialCycleState(): SessionCycleState {
 }
 
 function isPushEligible(deviceRegistry: DeviceRegistry, deviceId: string): boolean {
-    return !deviceRegistry.isConnected(deviceId);
+    if (!deviceRegistry.isConnected(deviceId)) {
+        return true;
+    }
+
+    const presence = deviceRegistry.getPresence(deviceId);
+    if (presence === null) {
+        return false;
+    }
+
+    return presence.state !== "active";
 }
 
 function buildNotificationPayload(state: CompletedCycleSnapshot, sessionId: string): {
