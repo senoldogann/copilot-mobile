@@ -34,14 +34,13 @@ import { buildWorkspaceGroups, type WorkspaceGroup } from "./drawer-session-grou
 import {
     buildArchivedConversationMetadata,
     buildCloudConversationMetadata,
-    buildCopilotCliMetadata,
+    formatRelativeTimestamp,
     isRecentCloudSync,
     type DrawerMetadataChip,
     type DrawerMetadataChipTone,
     type DrawerProviderMetadata,
     type DrawerResumeResult,
 } from "../view-models/provider-metadata";
-import { CopilotBadge } from "./CopilotBadge";
 import { useWorkspaceDirectoryStore } from "../stores/workspace-directory-store";
 import { WorkspacePickerModal } from "./WorkspacePickerModal";
 
@@ -525,11 +524,16 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         }
 
         const canSelectChats = group.entries.length > 0;
+        const workspaceRoot = group.workspace === "__none__" ? null : group.workspace;
 
         Alert.alert(
             group.displayName,
             undefined,
             [
+                {
+                    text: "New chat",
+                    onPress: () => handleNewChat(workspaceRoot),
+                },
                 ...(canSelectChats
                     ? [{
                         text: "Select chats to delete",
@@ -551,6 +555,12 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
             "Chat actions",
             undefined,
             [
+                {
+                    text: "Refresh chats",
+                    onPress: () => {
+                        void refreshDrawerData(true);
+                    },
+                },
                 {
                     text: allWorkspacesExpanded ? "Collapse all workspaces" : "Expand all workspaces",
                     onPress: () => toggleAllWorkspaces(),
@@ -1047,55 +1057,68 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         </>
     );
 
+    const renderProjectConversationBody = (params: {
+        title: string;
+        active: boolean;
+        lastActiveAt: number;
+        resumeResult: DrawerResumeResult;
+    }) => (
+        <View style={styles.projectConversationContent}>
+            <View style={[
+                styles.projectConversationState,
+                params.active && styles.projectConversationStateActive,
+            ]}>
+                {params.resumeResult === "failed" && (
+                    <Feather name="alert-circle" size={13} color={theme.colors.error} />
+                )}
+            </View>
+            <Text
+                style={[
+                    styles.projectConversationTitle,
+                    params.active && styles.projectConversationTitleActive,
+                ]}
+                numberOfLines={1}
+            >
+                {params.title}
+            </Text>
+            <Text style={styles.projectConversationTime} numberOfLines={1}>
+                {formatRelativeTimestamp(params.lastActiveAt, now).replace(" ago", "")}
+            </Text>
+        </View>
+    );
+
     return (
         <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
-            {/* Header */}
             <View style={styles.header}>
                 <View style={styles.headerLeft}>
-                    <View style={styles.headerIcon}>
-                        <CopilotBadge size={28} iconSize={15} />
-                    </View>
-                    <Text style={styles.headerTitle}>Code Companion</Text>
+                    <Text style={styles.headerTitle}>Projects</Text>
                 </View>
                 <View style={styles.headerActions}>
                     <Pressable
                         style={({ pressed }) => [styles.headerRefreshButton, pressed && styles.headerRefreshButtonPressed]}
                         onPress={() => {
-                            void refreshDrawerData(true);
+                            openGlobalDrawerMenu();
                         }}
                         disabled={isRefreshing}
                         hitSlop={8}
-                        accessibilityLabel="Refresh chats"
+                        accessibilityLabel="Project actions"
                     >
                         {isRefreshing ? (
                             <ActivityIndicator size="small" color={theme.colors.textSecondary} />
                         ) : (
-                            <Feather name="refresh-cw" size={14} color={theme.colors.textTertiary} />
+                            <Feather name="filter" size={16} color={theme.colors.textTertiary} />
                         )}
                     </Pressable>
                     <Pressable
                         style={({ pressed }) => [styles.headerRefreshButton, pressed && styles.headerRefreshButtonPressed]}
-                        onPress={() => openGlobalDrawerMenu()}
+                        onPress={() => setWorkspacePickerOpen(true)}
                         hitSlop={8}
-                        accessibilityLabel="Chat actions"
+                        accessibilityLabel="Add workspace"
                     >
-                        <Feather name="more-horizontal" size={14} color={theme.colors.textTertiary} />
+                        <Feather name="folder-plus" size={17} color={theme.colors.textTertiary} />
                     </Pressable>
                 </View>
             </View>
-
-            {/* New chat button */}
-            <Pressable
-                style={({ pressed }) => [
-                    styles.newChatButton,
-                    pressed && styles.newChatButtonPressed,
-                ]}
-                onPress={() => handleNewChat(null)}
-                accessibilityLabel="New session"
-            >
-                <Feather name="plus" size={16} color={theme.colors.textPrimary} />
-                <Text style={styles.newChatText}>New Chat</Text>
-            </Pressable>
 
             {/* Chat history — workspace grouped */}
             <ScrollView
@@ -1114,21 +1137,15 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     {copilotCliGroups.map((group) => {
                         const expansionKey = makeWorkspaceSectionKey("copilot", group.workspace);
                         const isExpanded = expandedWorkspaces.has(expansionKey);
-                        const workspaceRootForNewChat =
-                            group.workspace === "__none__" ? null : group.workspace;
                         return (
                             <View key={group.workspace} style={styles.workspaceGroup}>
                                 <View style={styles.workspaceHeaderRow}>
                                     <Pressable
                                         style={styles.workspaceHeader}
                                         onPress={() => toggleWorkspace(expansionKey)}
+                                        onLongPress={() => openWorkspaceMenu(group)}
                                     >
-                                        <Feather
-                                            name={isExpanded ? "chevron-down" : "chevron-right"}
-                                            size={12}
-                                            color={theme.colors.textTertiary}
-                                        />
-                                        <Feather name="folder" size={14} color={theme.colors.textTertiary} />
+                                        <Feather name={isExpanded ? "folder" : "folder"} size={19} color={theme.colors.textSecondary} />
                                         <Text
                                             style={styles.workspaceName}
                                             numberOfLines={1}
@@ -1151,17 +1168,6 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                         accessibilityLabel={`${group.displayName} menu`}
                                     >
                                         <Feather name="more-horizontal" size={14} color={theme.colors.textSecondary} />
-                                    </Pressable>
-                                    <Pressable
-                                        style={({ pressed }) => [
-                                            styles.workspaceAddBtn,
-                                            pressed && styles.workspaceAddBtnPressed,
-                                        ]}
-                                        onPress={() => handleNewChat(workspaceRootForNewChat)}
-                                        hitSlop={8}
-                                        accessibilityLabel={`New chat for ${group.displayName}`}
-                                    >
-                                        <Feather name="plus" size={14} color={theme.colors.textSecondary} />
                                     </Pressable>
                                 </View>
                                 {workspaceSelectionMode === group.workspace && (
@@ -1199,11 +1205,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                         const presentation = getConversationPresentation(entry, linkedConv);
                                         const linkedId = linkedConv?.id ?? null;
                                         const isEntrySelected = selectedWorkspaceEntryKeys.has(entry.key);
-                                        const metadata = buildCopilotCliMetadata(
-                                            entry.primarySession.lastActiveAt,
-                                            resumeResultsBySessionId[entry.primarySession.id] ?? "idle",
-                                            now,
-                                        );
+                                        const resumeResult = resumeResultsBySessionId[entry.primarySession.id] ?? "idle";
                                         return (
                                             <View key={entry.key} style={styles.conversationRow}>
                                                 {workspaceSelectionMode === group.workspace && (
@@ -1250,13 +1252,11 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                                     }
                                                     accessibilityLabel={entry.title.length > 0 ? entry.title : "Session"}
                                                 >
-                                                    {renderConversationBody({
+                                                    {renderProjectConversationBody({
                                                         title: presentation.title,
                                                         active: activeSessionId === entry.primarySession.id,
-                                                        preview: presentation.preview,
-                                                        emptyPreview: `${entry.duplicateCount + 1} similar sessions`,
-                                                        metadata,
-                                                        duplicateCount: entry.duplicateCount,
+                                                        lastActiveAt: entry.primarySession.lastActiveAt,
+                                                        resumeResult,
                                                     })}
                                                 </Pressable>
                                                 {workspaceSelectionMode !== group.workspace && (
@@ -1628,7 +1628,7 @@ function createStyles(theme: AppTheme) {
 return StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: theme.colors.bgSecondary,
+        backgroundColor: theme.colors.sidebarBg,
     },
     header: {
         flexDirection: "row",
@@ -1643,14 +1643,10 @@ return StyleSheet.create({
         alignItems: "center",
         gap: 10,
     },
-    headerIcon: {
-        justifyContent: "center",
-        alignItems: "center",
-    },
     headerTitle: {
-        fontSize: 15,
+        fontSize: 16,
         fontWeight: "600",
-        color: theme.colors.textPrimary,
+        color: theme.colors.textSecondary,
     },
     headerRefreshButton: {
         width: 28,
@@ -1667,28 +1663,9 @@ return StyleSheet.create({
         alignItems: "center",
         gap: 6,
     },
-    newChatButton: {
-        flexDirection: "row",
-        alignItems: "center",
-        marginHorizontal: theme.spacing.md,
-        paddingVertical: 10,
-        paddingHorizontal: 14,
-        borderRadius: theme.borderRadius.md,
-        backgroundColor: "transparent",
-        gap: theme.spacing.sm,
-        marginBottom: theme.spacing.sm,
-    },
-    newChatButtonPressed: {
-        opacity: 0.68,
-    },
-    newChatText: {
-        fontSize: theme.fontSize.md,
-        color: theme.colors.textPrimary,
-        fontWeight: "500",
-    },
     conversationList: {
         flex: 1,
-        paddingHorizontal: theme.spacing.sm,
+        paddingHorizontal: 12,
     },
     providerSection: {
         marginBottom: theme.spacing.sm,
@@ -1803,9 +1780,9 @@ return StyleSheet.create({
         flex: 1,
         flexDirection: "row",
         alignItems: "center",
-        paddingHorizontal: theme.spacing.md,
-        paddingVertical: 7,
-        gap: 6,
+        paddingHorizontal: 16,
+        paddingVertical: 9,
+        gap: 10,
     },
     workspaceHeaderRow: {
         flexDirection: "row",
@@ -1830,9 +1807,9 @@ return StyleSheet.create({
     },
     workspaceName: {
         flex: 1,
-        fontSize: theme.fontSize.sm,
+        fontSize: 15,
         fontWeight: "600",
-        color: theme.colors.textPrimary,
+        color: theme.colors.textSecondary,
     },
     workspaceCount: {
         fontSize: 10,
@@ -1844,11 +1821,11 @@ return StyleSheet.create({
         overflow: "hidden",
     },
     conversationItem: {
-        paddingVertical: 6,
-        paddingHorizontal: theme.spacing.md,
-        paddingLeft: 26,
-        borderRadius: theme.borderRadius.sm,
-        marginBottom: 1,
+        paddingVertical: 9,
+        paddingHorizontal: 12,
+        borderRadius: 14,
+        marginBottom: 2,
+        marginLeft: 20,
     },
     conversationItemFlex: {
         flex: 1,
@@ -1909,7 +1886,7 @@ return StyleSheet.create({
         backgroundColor: theme.colors.bgElevated,
     },
     conversationItemActive: {
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: theme.colors.sidebarItemActive,
     },
     conversationItemSelected: {
         backgroundColor: theme.colors.bgElevated,
@@ -1917,7 +1894,43 @@ return StyleSheet.create({
         borderColor: theme.colors.border,
     },
     conversationItemPressed: {
-        backgroundColor: theme.colors.bgSecondary,
+        backgroundColor: theme.colors.sidebarItemHover,
+    },
+    projectConversationContent: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 10,
+        minWidth: 0,
+    },
+    projectConversationState: {
+        width: 18,
+        height: 18,
+        borderRadius: 9,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    projectConversationStateActive: {
+        borderWidth: 2,
+        borderColor: theme.colors.textTertiary,
+    },
+    projectConversationTitle: {
+        flex: 1,
+        minWidth: 0,
+        fontSize: 15,
+        lineHeight: 21,
+        color: theme.colors.textPrimary,
+        fontWeight: "500",
+    },
+    projectConversationTitleActive: {
+        fontWeight: "700",
+    },
+    projectConversationTime: {
+        flexShrink: 0,
+        minWidth: 32,
+        textAlign: "right",
+        fontSize: 13,
+        fontWeight: "700",
+        color: theme.colors.textTertiary,
     },
     conversationTitle: {
         flex: 1,
