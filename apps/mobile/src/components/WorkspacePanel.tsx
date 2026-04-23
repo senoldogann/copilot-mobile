@@ -1082,7 +1082,9 @@ return StyleSheet.create({
 }
 
 function createTreeStyles(theme: AppTheme) {
-const emphasisTextColor = theme.colors.textPrimary;
+const emphasisTextColor = theme.resolvedScheme === "light"
+    ? theme.colors.textPrimary
+    : theme.colors.textAssistant;
 
 return StyleSheet.create({
     tree: { gap: 0, paddingBottom: theme.spacing.sm },
@@ -1129,10 +1131,18 @@ return StyleSheet.create({
 }
 
 function createStyles(theme: AppTheme) {
-const emphasizedLabelColor = theme.colors.textPrimary;
+const emphasizedLabelColor = theme.resolvedScheme === "light"
+    ? theme.colors.textPrimary
+    : theme.colors.textAssistant;
 const supportingLabelColor = theme.resolvedScheme === "light"
     ? theme.colors.textSecondary
-    : theme.colors.textTertiary;
+    : theme.colors.textSecondary;
+const successBadgeBg = theme.resolvedScheme === "light"
+    ? theme.colors.successMuted
+    : "#1b3f2a";
+const successBadgeBorder = theme.resolvedScheme === "light"
+    ? theme.colors.success
+    : "#2d5c3f";
 
 return StyleSheet.create({
     content: { gap: theme.spacing.sm },
@@ -1401,9 +1411,9 @@ return StyleSheet.create({
         paddingHorizontal: 8,
         paddingVertical: 3,
         borderRadius: theme.borderRadius.full,
-        backgroundColor: "#1b3f2a",
+        backgroundColor: successBadgeBg,
         borderWidth: 1,
-        borderColor: "#2d5c3f",
+        borderColor: successBadgeBorder,
     },
     newBadgeText: {
         fontSize: 10,

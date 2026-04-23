@@ -116,6 +116,13 @@ export default function SettingsScreen() {
 
     return (
         <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+            <View style={styles.pageHeader}>
+                <Text style={styles.pageTitle}>Settings</Text>
+                <Text style={styles.pageSubtitle}>
+                    Personalize the mobile bridge and setup flow.
+                </Text>
+            </View>
+
             <ThemeSettings />
 
             <View style={styles.card}>
@@ -152,29 +159,46 @@ function createStyles(theme: AppTheme) {
     return StyleSheet.create({
         container: {
             flex: 1,
-            backgroundColor: theme.colors.bg,
+            backgroundColor: theme.colors.bgSecondary,
         },
         content: {
-            paddingHorizontal: theme.spacing.lg,
-            paddingVertical: 24,
-            gap: theme.spacing.lg,
+            paddingHorizontal: theme.spacing.md,
+            paddingTop: 22,
+            paddingBottom: 36,
+            gap: theme.spacing.md,
+        },
+        pageHeader: {
+            paddingHorizontal: theme.spacing.xs,
+            paddingBottom: theme.spacing.xs,
+            gap: 4,
+        },
+        pageTitle: {
+            fontSize: 24,
+            lineHeight: 30,
+            fontWeight: "700",
+            color: theme.colors.textPrimary,
+        },
+        pageSubtitle: {
+            fontSize: theme.fontSize.sm,
+            lineHeight: 20,
+            color: theme.colors.textSecondary,
         },
         card: {
             backgroundColor: theme.colors.bgSecondary,
             borderWidth: 1,
-            borderColor: theme.colors.border,
-            borderRadius: theme.borderRadius.lg,
-            padding: theme.spacing.lg,
+            borderColor: theme.colors.borderMuted,
+            borderRadius: theme.borderRadius.md,
+            padding: theme.spacing.md,
             gap: theme.spacing.md,
         },
         cardTitle: {
-            fontSize: theme.fontSize.xl,
+            fontSize: theme.fontSize.base,
             fontWeight: "700",
             color: theme.colors.textPrimary,
         },
         cardDescription: {
-            fontSize: theme.fontSize.md,
-            lineHeight: 18,
+            fontSize: theme.fontSize.sm,
+            lineHeight: 20,
             color: theme.colors.textSecondary,
         },
         segmentedControl: {
@@ -183,10 +207,10 @@ function createStyles(theme: AppTheme) {
         },
         segment: {
             flex: 1,
-            minHeight: 40,
-            borderRadius: theme.borderRadius.md,
+            minHeight: 38,
+            borderRadius: theme.borderRadius.sm,
             borderWidth: 1,
-            borderColor: theme.colors.border,
+            borderColor: theme.colors.borderMuted,
             alignItems: "center",
             justifyContent: "center",
             backgroundColor: theme.colors.bgTertiary,
@@ -197,7 +221,7 @@ function createStyles(theme: AppTheme) {
         },
         segmentText: {
             color: theme.colors.textSecondary,
-            fontSize: theme.fontSize.md,
+            fontSize: theme.fontSize.sm,
             fontWeight: "600",
         },
         segmentTextActive: {
@@ -212,9 +236,9 @@ function createStyles(theme: AppTheme) {
         variantRow: {
             flexDirection: "row",
             alignItems: "center",
-            gap: theme.spacing.md,
+            gap: theme.spacing.sm,
             paddingHorizontal: theme.spacing.md,
-            paddingVertical: theme.spacing.md,
+            paddingVertical: 11,
             backgroundColor: theme.colors.bgTertiary,
             borderTopWidth: 1,
             borderTopColor: theme.colors.borderMuted,
@@ -230,17 +254,17 @@ function createStyles(theme: AppTheme) {
         variantLabel: {
             flex: 1,
             color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.lg,
+            fontSize: theme.fontSize.sm,
             fontWeight: "600",
         },
         variantCheck: {
-            color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.lg,
+            color: theme.colors.accent,
+            fontSize: theme.fontSize.md,
             fontWeight: "700",
         },
         actionButton: {
-            minHeight: 44,
-            borderRadius: theme.borderRadius.md,
+            minHeight: 42,
+            borderRadius: theme.borderRadius.sm,
             backgroundColor: theme.colors.accent,
             alignItems: "center",
             justifyContent: "center",
@@ -249,30 +273,30 @@ function createStyles(theme: AppTheme) {
         secondaryActionButton: {
             backgroundColor: theme.colors.bgTertiary,
             borderWidth: 1,
-            borderColor: theme.colors.border,
+            borderColor: theme.colors.borderMuted,
         },
         actionButtonText: {
             color: theme.colors.textOnAccent,
-            fontSize: theme.fontSize.md,
+            fontSize: theme.fontSize.sm,
             fontWeight: "700",
         },
         secondaryActionButtonText: {
             color: theme.colors.textPrimary,
         },
         versionText: {
-            color: theme.colors.textPrimary,
-            fontSize: 18,
-            fontWeight: "800",
+            color: theme.colors.textSecondary,
+            fontSize: theme.fontSize.sm,
+            fontWeight: "500",
             letterSpacing: 0.2,
         },
         versionPill: {
             alignSelf: "flex-start",
             borderRadius: theme.borderRadius.full,
             borderWidth: 1,
-            borderColor: theme.colors.border,
+            borderColor: theme.colors.borderMuted,
             backgroundColor: theme.colors.bgTertiary,
-            paddingHorizontal: theme.spacing.lg,
-            paddingVertical: theme.spacing.md,
+            paddingHorizontal: theme.spacing.md,
+            paddingVertical: 7,
         },
     });
 }

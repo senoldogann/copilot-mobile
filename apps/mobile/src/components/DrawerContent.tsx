@@ -1548,16 +1548,6 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                         <Feather name="settings" size={15} color={theme.colors.textTertiary} />
                         <Text style={styles.footerItemText}>Settings</Text>
                     </Pressable>
-                    <Pressable
-                        style={({ pressed }) => [
-                            styles.footerIconButton,
-                            pressed && styles.footerItemPressed,
-                        ]}
-                        onPress={() => setWorkspacePickerOpen(true)}
-                        accessibilityLabel="Add workspace"
-                    >
-                        <Feather name="folder-plus" size={16} color={theme.colors.textTertiary} />
-                    </Pressable>
                 </View>
             </View>
 
@@ -2036,7 +2026,7 @@ return StyleSheet.create({
     footerActions: {
         flexDirection: "row",
         alignItems: "center",
-        justifyContent: "space-between",
+        justifyContent: "flex-start",
         gap: theme.spacing.sm,
     },
     footerItem: {
@@ -2049,13 +2039,6 @@ return StyleSheet.create({
     },
     footerItemCompact: {
         flex: 1,
-    },
-    footerIconButton: {
-        width: 38,
-        height: 38,
-        borderRadius: theme.borderRadius.sm,
-        alignItems: "center",
-        justifyContent: "center",
     },
     footerItemPressed: {
         backgroundColor: theme.colors.bgElevated,

@@ -31,6 +31,51 @@ const assistantDeltaBuffers = new Map<string, string>();
 const assistantDeltaTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const thinkingDeltaBuffers = new Map<string, string>();
 const thinkingDeltaTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const assistantSystemNotificationState = new Map<string, boolean>();
+
+function stripAssistantInternalMarkup(content: string): string {
+    return content
+        .replace(/<system_notification\b[^>]*>[\s\S]*?<\/system_notification>/gi, "")
+        .replace(/^Agent\s+"[^"]+"\s+\([^)]+\)\s+has completed successfully\.\s+Use\s+read_agent[\s\S]*?full results\.\s*$/gmi, "")
+        .replace(/<\/?system_notification\b[^>]*>/gi, "")
+        .replace(/<\/?thinking\b[^>]*>/gi, "")
+        .replace(/\n{3,}/g, "\n\n")
+        .trimStart();
+}
+
+function filterAssistantDelta(sessionId: string, delta: string): string {
+    let remaining = delta;
+    let visible = "";
+    let suppressing = assistantSystemNotificationState.get(sessionId) === true;
+
+    while (remaining.length > 0) {
+        if (suppressing) {
+            const closeMatch = /<\/system_notification>/i.exec(remaining);
+            if (closeMatch === null) {
+                assistantSystemNotificationState.set(sessionId, true);
+                return visible;
+            }
+
+            remaining = remaining.slice(closeMatch.index + closeMatch[0].length);
+            suppressing = false;
+            continue;
+        }
+
+        const openMatch = /<system_notification\b[^>]*>/i.exec(remaining);
+        if (openMatch === null) {
+            visible += remaining;
+            remaining = "";
+            continue;
+        }
+
+        visible += remaining.slice(0, openMatch.index);
+        remaining = remaining.slice(openMatch.index + openMatch[0].length);
+        suppressing = true;
+    }
+
+    assistantSystemNotificationState.set(sessionId, suppressing);
+    return stripAssistantInternalMarkup(visible);
+}
 
 function scheduleTransientConnectionErrorClear(expectedMessage: string): void {
     if (transientConnectionErrorTimer !== null) {
@@ -62,10 +107,15 @@ function clearBufferedStreamTimer(
 
 function flushAssistantDeltaBuffer(sessionId: string): void {
     clearBufferedStreamTimer(assistantDeltaTimers, sessionId);
-    const delta = assistantDeltaBuffers.get(sessionId);
+    const rawDelta = assistantDeltaBuffers.get(sessionId);
     assistantDeltaBuffers.delete(sessionId);
 
-    if (delta === undefined || delta.length === 0) {
+    if (rawDelta === undefined || rawDelta.length === 0) {
+        return;
+    }
+
+    const delta = filterAssistantDelta(sessionId, rawDelta);
+    if (delta.length === 0) {
         return;
     }
 
@@ -132,6 +182,7 @@ function scheduleThinkingDeltaFlush(sessionId: string, delta: string): void {
 function flushSessionStreamBuffers(sessionId: string): void {
     flushAssistantDeltaBuffer(sessionId);
     flushThinkingDeltaBuffer(sessionId);
+    assistantSystemNotificationState.delete(sessionId);
 }
 
 function isNonFatalProtocolError(code: string): boolean {
@@ -193,6 +244,7 @@ function mapHistoryItemToChatItem(item: SessionHistoryItem): ChatItem {
         case "assistant":
             return {
                 ...item,
+                content: stripAssistantInternalMarkup(item.content),
                 isStreaming: false,
             };
 
@@ -561,9 +613,10 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.message": {
             flushAssistantDeltaBuffer(message.payload.sessionId);
-            replaceBackgroundCompletionPreview(message.payload.sessionId, message.payload.content);
+            const content = stripAssistantInternalMarkup(message.payload.content);
+            replaceBackgroundCompletionPreview(message.payload.sessionId, content);
             if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.finalizeAssistantMessage(message.payload.content);
+            sessionStore.finalizeAssistantMessage(content);
             break;
         }
 

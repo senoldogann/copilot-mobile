@@ -133,6 +133,7 @@ export function createSessionManager(
     const pendingPermissions = new Map<string, PendingPermission>();
     const pendingInputs = new Map<string, PendingInput>();
     const sessionStates = new Map<string, SessionBehaviorState>();
+    const abortedSessionIds = new Set<string>();
     let autoApproveReads = false;
     // Latest observed host session capabilities — merged per session.
     // Currently holds the value for the single active session model.
@@ -211,6 +212,26 @@ export function createSessionManager(
         state.busy = busy;
         completionNotifier.onBusyStateChanged(sessionId, busy);
         emitSessionState(sessionId);
+    }
+
+    function resolvePendingSessionInteractions(sessionId: string): void {
+        for (const [requestId, pending] of pendingPermissions.entries()) {
+            if (pending.payload.payload.sessionId !== sessionId) {
+                continue;
+            }
+            clearTimeout(pending.timer);
+            pendingPermissions.delete(requestId);
+            pending.resolve(false);
+        }
+
+        for (const [requestId, pending] of pendingInputs.entries()) {
+            if (pending.payload.payload.sessionId !== sessionId) {
+                continue;
+            }
+            clearTimeout(pending.timer);
+            pendingInputs.delete(requestId);
+            pending.resolve("");
+        }
     }
 
     function adaptSessionState(
@@ -331,6 +352,9 @@ export function createSessionManager(
             };
 
         session.onMessage((content: string) => {
+            if (abortedSessionIds.has(sessionId)) {
+                return;
+            }
             completionNotifier.replaceAssistantPreview(sessionId, content);
             emit({
                 ...makeBase(),
@@ -340,6 +364,9 @@ export function createSessionManager(
         });
 
         session.onDelta((delta: string, index: number) => {
+            if (abortedSessionIds.has(sessionId)) {
+                return;
+            }
             completionNotifier.appendAssistantPreview(sessionId, delta);
             emit({
                 ...makeBase(),
@@ -349,6 +376,9 @@ export function createSessionManager(
         });
 
         session.onReasoning((content: string) => {
+            if (abortedSessionIds.has(sessionId)) {
+                return;
+            }
             emit({
                 ...makeBase(),
                 type: "assistant.reasoning",
@@ -357,6 +387,9 @@ export function createSessionManager(
         });
 
         session.onReasoningDelta((delta: string, index: number) => {
+            if (abortedSessionIds.has(sessionId)) {
+                return;
+            }
             emit({
                 ...makeBase(),
                 type: "assistant.reasoning_delta",
@@ -365,6 +398,9 @@ export function createSessionManager(
         });
 
         session.onToolStart((toolName: string, requestId: string, details: AdaptedToolStartDetails | undefined) => {
+            if (abortedSessionIds.has(sessionId)) {
+                return;
+            }
             const normalizedToolName = toolName.trim().length > 0 ? toolName : "tool";
             toolNamesByRequestId.set(requestId, normalizedToolName);
 
@@ -381,6 +417,9 @@ export function createSessionManager(
         });
 
         session.onToolPartialResult((requestId: string, partialOutput: string) => {
+            if (abortedSessionIds.has(sessionId)) {
+                return;
+            }
             emit({
                 ...makeBase(),
                 type: "tool.execution_partial_result",
@@ -389,6 +428,9 @@ export function createSessionManager(
         });
 
         session.onToolProgress((requestId: string, progressMessage: string) => {
+            if (abortedSessionIds.has(sessionId)) {
+                return;
+            }
             emit({
                 ...makeBase(),
                 type: "tool.execution_progress",
@@ -402,6 +444,9 @@ export function createSessionManager(
             success: boolean,
             details?: AdaptedToolCompletionDetails
         ) => {
+            if (abortedSessionIds.has(sessionId)) {
+                return;
+            }
             const normalizedToolName =
                 toolNamesByRequestId.get(requestId)
                 ?? (toolName.trim().length > 0 ? toolName : "tool");
@@ -879,6 +924,7 @@ export function createSessionManager(
 
             try {
                 completionNotifier.bindSessionToDevice(sessionId, deviceId);
+                abortedSessionIds.delete(sessionId);
                 setSessionBusy(sessionId, true);
                 await session.send(
                     attachments !== undefined && attachments.length > 0
@@ -907,6 +953,16 @@ export function createSessionManager(
             }
 
             try {
+                abortedSessionIds.add(sessionId);
+                resolvePendingSessionInteractions(sessionId);
+                completionNotifier.cancelPendingCycle(sessionId);
+                setSessionBusy(sessionId, false);
+                emitSessionState(sessionId);
+                send({
+                    ...makeBase(),
+                    type: "session.idle",
+                    payload: { sessionId },
+                });
                 await session.abort();
             } catch (error) {
                 const message = error instanceof Error ? error.message : "Abort request failed";

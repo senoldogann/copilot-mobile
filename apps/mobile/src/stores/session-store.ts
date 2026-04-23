@@ -379,6 +379,33 @@ export const useSessionStore = create<SessionStore>((set) => ({
 
     setAbortRequested: (requested) => set({ isAbortRequested: requested }),
 
+    stopActiveTurn: () =>
+        set((state) => ({
+            chatItems: state.chatItems.map((item) => {
+                if ((item.type === "assistant" || item.type === "thinking") && item.isStreaming) {
+                    return { ...item, isStreaming: false };
+                }
+
+                if (item.type === "tool" && item.status === "running") {
+                    return {
+                        ...item,
+                        status: "failed",
+                        errorMessage: item.errorMessage ?? "Stopped by user",
+                    };
+                }
+
+                return item;
+            }),
+            isAssistantTyping: false,
+            isAbortRequested: false,
+            currentIntent: null,
+            agentTodos: [],
+            permissionPrompt: null,
+            permissionPromptQueue: [],
+            userInputPrompt: null,
+            planExitPrompt: null,
+        })),
+
     setCurrentIntent: (intent) => set({ currentIntent: intent }),
 
     setAgentTodos: (todos) => set({ agentTodos: todos }),

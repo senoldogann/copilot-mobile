@@ -702,6 +702,7 @@ export default function ChatScreen() {
     const handleAbort = useCallback(() => {
         if (activeSessionId !== null && !isAbortPending) {
             setAbortRequested(true);
+            useSessionStore.getState().stopActiveTurn();
             void abortMessage(activeSessionId).catch(() => {
                 useSessionStore.getState().setAbortRequested(false);
             });

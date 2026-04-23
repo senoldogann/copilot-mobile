@@ -155,6 +155,7 @@ export type SessionStore = {
     finalizeAssistantMessage: (content: string) => void;
     setAssistantTyping: (typing: boolean) => void;
     setAbortRequested: (requested: boolean) => void;
+    stopActiveTurn: () => void;
     appendThinkingDelta: (delta: string, index: number) => void;
     finalizeThinking: (content?: string) => void;
     addToolStart: (

@@ -343,6 +343,13 @@ export function createCompletionNotifier(deps: {
             void notifyForCompletedCycle(sessionId, snapshot);
         },
 
+        cancelPendingCycle(sessionId: string): void {
+            const state = getSessionState(sessionId);
+            state.pending = false;
+            state.latestPreview = "";
+            state.latestError = null;
+        },
+
         forgetSession(sessionId: string): void {
             sessionStates.delete(sessionId);
         },
