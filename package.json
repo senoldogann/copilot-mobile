@@ -56,11 +56,17 @@
         "@github/copilot-sdk": "0.2.2",
         "jsonwebtoken": "9.0.2",
         "qrcode": "1.5.4",
-        "uuid": "11.1.0",
         "ws": "8.18.2",
         "zod": "3.24.4"
     },
     "devDependencies": {
-        "esbuild": "^0.25.11"
+        "esbuild": "^0.25.11",
+        "uuid": "14.0.0"
+    },
+    "pnpm": {
+        "overrides": {
+            "@tootallnate/once": "3.0.1",
+            "uuid": "14.0.0"
+        }
     }
 }

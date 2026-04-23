@@ -1069,7 +1069,6 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
             <View style={[
                 styles.projectConversationState,
                 params.running && styles.projectConversationStateRunning,
-                params.active && !params.running && styles.projectConversationStateActive,
             ]}>
                 {params.running ? (
                     <ActivityIndicator size="small" color={theme.colors.textLink} />
@@ -1905,10 +1904,6 @@ return StyleSheet.create({
         borderRadius: 9,
         alignItems: "center",
         justifyContent: "center",
-    },
-    projectConversationStateActive: {
-        borderWidth: 2,
-        borderColor: theme.colors.textTertiary,
     },
     projectConversationStateRunning: {
         backgroundColor: theme.colors.accentMuted,

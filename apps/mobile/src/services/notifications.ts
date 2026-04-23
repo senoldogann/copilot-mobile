@@ -186,9 +186,9 @@ export async function initializeNotifications(): Promise<void> {
     if (!initialized) {
         notifications.setNotificationHandler({
             handleNotification: async () => ({
-                shouldShowBanner: true,
-                shouldShowList: true,
-                shouldPlaySound: true,
+                shouldShowBanner: false,
+                shouldShowList: false,
+                shouldPlaySound: false,
                 shouldSetBadge: false,
             }),
         });
