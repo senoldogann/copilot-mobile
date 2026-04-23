@@ -1,6 +1,7 @@
 {
   "expo": {
     "name": "Code Companion",
+    "owner": "senoldogan33",
     "slug": "code-companion",
     "version": "0.1.0",
     "orientation": "portrait",
@@ -25,22 +26,22 @@
         }
       }
     },
-        "android": {
-            "adaptiveIcon": {
-                "backgroundColor": "#1e1e1e"
-            },
-            "package": "dev.senoldogan.codecompanion",
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#1e1e1e"
+      },
+      "package": "dev.senoldogan.codecompanion",
       "permissions": [
-                "android.permission.CAMERA"
-            ]
-        },
-        "extra": {
-            "eas": {
-                "projectId": "1cc7a8e4-d1aa-48e8-90bc-c2ae41893f35"
-            }
-        },
-        "plugins": [
-            "expo-router",
+        "android.permission.CAMERA"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "33e68d9a-4ae3-47b2-b130-04b0c57ed91e"
+      }
+    },
+    "plugins": [
+      "expo-router",
       [
         "expo-camera",
         {
