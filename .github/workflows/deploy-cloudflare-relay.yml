@@ -2,12 +2,6 @@ name: Deploy Cloudflare Relay
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
-    paths:
-      - "apps/cloudflare-relay/**"
-      - ".github/workflows/deploy-cloudflare-relay.yml"
 
 concurrency:
   group: deploy-cloudflare-relay-${{ github.ref }}

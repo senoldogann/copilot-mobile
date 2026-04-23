@@ -30,13 +30,15 @@ The public relay and control-plane run in the same Worker.
 The repository now includes a dedicated workflow at
 [deploy-cloudflare-relay.yml](/Users/dogan/Desktop/copilot-mobile/.github/workflows/deploy-cloudflare-relay.yml).
 
-It will deploy the Worker automatically on `main` changes under `apps/cloudflare-relay/**`
-or when triggered manually, as long as these repository secrets exist:
+For now it is manual-only. Trigger it from GitHub Actions after these repository secrets exist:
 
 ```bash
 CLOUDFLARE_API_TOKEN
 CLOUDFLARE_ACCOUNT_ID
 ```
+
+Until those secrets are added in GitHub, deploy the Worker from a trusted local environment
+or an authenticated Cloudflare plugin session.
 
 ## One-Time Deploy
 
