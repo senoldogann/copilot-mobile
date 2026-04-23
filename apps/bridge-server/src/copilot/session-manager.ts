@@ -35,6 +35,7 @@ import {
     readWorkspaceFile,
     resolveWorkspaceReference as resolveWorkspaceReferenceInContext,
     resolveWorkspaceRoot,
+    searchWorkspaceFiles as searchWorkspaceFilesInContext,
     switchWorkspaceBranch,
 } from "../utils/workspace.js";
 import type { createCompletionNotifier } from "../notifications/completion-notifier.js";
@@ -134,6 +135,7 @@ export function createSessionManager(
     const pendingInputs = new Map<string, PendingInput>();
     const sessionStates = new Map<string, SessionBehaviorState>();
     const abortedSessionIds = new Set<string>();
+    const MAX_QUEUED_RESUME_MESSAGES = 200;
     let autoApproveReads = false;
     // Latest observed host session capabilities — merged per session.
     // Currently holds the value for the single active session model.
@@ -755,6 +757,9 @@ export function createSessionManager(
                 wireSessionEvents(session, (message) => {
                     if (isLiveSessionActivityMessage(message.type)) {
                         if (!historyDelivered) {
+                            if (queuedResumeMessages.length >= MAX_QUEUED_RESUME_MESSAGES) {
+                                queuedResumeMessages.shift();
+                            }
                             queuedResumeMessages.push(message);
                             return;
                         }
@@ -949,6 +954,15 @@ export function createSessionManager(
         async abortMessage(sessionId: string): Promise<void> {
             const session = activeSessions.get(sessionId);
             if (session === undefined) {
+                send({
+                    ...makeBase(),
+                    type: "message.abort.result",
+                    payload: {
+                        sessionId,
+                        success: false,
+                        error: "Session not found",
+                    },
+                });
                 return;
             }
 
@@ -956,23 +970,26 @@ export function createSessionManager(
                 abortedSessionIds.add(sessionId);
                 resolvePendingSessionInteractions(sessionId);
                 completionNotifier.cancelPendingCycle(sessionId);
+                await session.abort();
                 setSessionBusy(sessionId, false);
-                emitSessionState(sessionId);
                 send({
                     ...makeBase(),
-                    type: "session.idle",
-                    payload: { sessionId },
+                    type: "message.abort.result",
+                    payload: {
+                        sessionId,
+                        success: true,
+                    },
                 });
-                await session.abort();
             } catch (error) {
+                abortedSessionIds.delete(sessionId);
                 const message = error instanceof Error ? error.message : "Abort request failed";
                 send({
                     ...makeBase(),
-                    type: "error",
+                    type: "message.abort.result",
                     payload: {
-                        code: "ABORT_FAILED",
-                        message,
-                        retry: true,
+                        sessionId,
+                        success: false,
+                        error: message,
                     },
                 });
             }
@@ -1405,6 +1422,23 @@ export function createSessionManager(
                     ...(result.error !== undefined ? { error: result.error } : {}),
                 },
             });
+        },
+
+        async searchWorkspaceFiles(
+            sessionId: string,
+            query: string,
+            limit?: number
+        ): Promise<ReadonlyArray<{
+            path: string;
+            displayPath: string;
+            name: string;
+        }>> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                throw new Error(`Session ${sessionId} not found`);
+            }
+
+            return searchWorkspaceFilesInContext(context, query, limit);
         },
 
         async updateSessionMode(sessionId: string, agentMode: AgentMode): Promise<void> {

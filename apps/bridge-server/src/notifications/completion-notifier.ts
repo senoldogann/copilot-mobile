@@ -53,7 +53,7 @@ function isPushEligible(deviceRegistry: DeviceRegistry, deviceId: string): boole
 
     const presence = deviceRegistry.getPresence(deviceId);
     if (presence === null) {
-        return false;
+        return true;
     }
 
     return presence.state !== "active";

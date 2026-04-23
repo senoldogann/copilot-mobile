@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, InteractionManager, ActivityIndicator } from "react-native";
 import type { ToolItem } from "../stores/session-store-types";
 import { BottomSheet } from "./BottomSheet";
-import { ToolIcon, SubagentIcon, SkillIcon } from "./Icons";
+import { McpIcon, PluginIcon, ToolIcon, SubagentIcon, SkillIcon } from "./Icons";
 import type { FeatherName } from "./Icons";
 import { SunshineText } from "./ShimmerHighlight";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
@@ -15,6 +15,12 @@ type Props = { item: ToolItem };
 // ─── Tool classification ──────────────────────────────────────────────────────
 
 type ToolKind = "edit" | "create" | "shell" | "read" | "search" | "think" | "git" | "fetch" | "agent" | "skill" | "other";
+type ToolSourceKind = "native" | "mcp" | "plugin" | "skill" | "subagent";
+type ToolSource = {
+    kind: ToolSourceKind;
+    label: string;
+    detail?: string;
+};
 
 const EMPTY_PARSED_ARGS: ParsedArgs = {};
 
@@ -43,6 +49,37 @@ const KIND_ICONS: Record<ToolKind, FeatherName> = {
     search: "search", think: "cpu", git: "git-branch", fetch: "globe", agent: "cpu", skill: "tool", other: "tool",
 };
 
+function getToolLabel(toolName: string, kind: ToolKind): string {
+    const normalized = toolName.toLowerCase();
+
+    if (isTaskCompleteToolName(normalized)) {
+        return "Task completed";
+    }
+
+    if (kind === "search" && (normalized.includes("web_search") || (normalized.includes("web") && normalized.includes("search")))) {
+        return "Web Search";
+    }
+
+    if (kind === "fetch" && (normalized.includes("web_fetch") || normalized.includes("browse"))) {
+        return "Web Fetch";
+    }
+
+    return KIND_LABELS[kind];
+}
+
+function isTaskCompleteToolName(toolName: string): boolean {
+    return toolName.trim().toLowerCase() === "task_complete";
+}
+
+function readTaskCompleteSummary(args: ParsedArgs): string | null {
+    const summary = args.description?.trim();
+    if (summary !== undefined && summary.length > 0) {
+        return summary;
+    }
+
+    return null;
+}
+
 // ─── Argument parsing ─────────────────────────────────────────────────────────
 
 interface ParsedArgs {
@@ -59,6 +96,12 @@ interface ParsedArgs {
     agentName?: string;
     agentType?: string;
     skill?: string;
+    pluginName?: string;
+    pluginPublisher?: string;
+    pluginUri?: string;
+    mcpServer?: string;
+    mcpTool?: string;
+    appUri?: string;
     raw?: Record<string, unknown>;
 }
 
@@ -83,7 +126,178 @@ function parseArgs(text: string | undefined): ParsedArgs {
         ...(parsed.agentName !== undefined ? { agentName: parsed.agentName } : {}),
         ...(parsed.agentType !== undefined ? { agentType: parsed.agentType } : {}),
         ...(parsed.skill !== undefined ? { skill: parsed.skill } : {}),
+        ...(parsed.pluginName !== undefined ? { pluginName: parsed.pluginName } : {}),
+        ...(parsed.pluginPublisher !== undefined ? { pluginPublisher: parsed.pluginPublisher } : {}),
+        ...(parsed.pluginUri !== undefined ? { pluginUri: parsed.pluginUri } : {}),
+        ...(parsed.mcpServer !== undefined ? { mcpServer: parsed.mcpServer } : {}),
+        ...(parsed.mcpTool !== undefined ? { mcpTool: parsed.mcpTool } : {}),
+        ...(parsed.appUri !== undefined ? { appUri: parsed.appUri } : {}),
     };
+}
+
+function formatEntityName(value: string): string {
+    return value
+        .replace(/^[@/]+/, "")
+        .replace(/[_-]+/g, " ")
+        .replace(/\s+/g, " ")
+        .trim()
+        .replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function parsePluginUri(value: string | undefined): { name: string; publisher?: string } | null {
+    if (value === undefined || !value.startsWith("plugin://")) {
+        return null;
+    }
+
+    const identifier = value.slice("plugin://".length);
+    const [namePart, publisherPart] = identifier.split("@");
+    if (namePart === undefined || namePart.trim().length === 0) {
+        return null;
+    }
+
+    return {
+        name: formatEntityName(namePart),
+        ...(publisherPart !== undefined && publisherPart.trim().length > 0
+            ? { publisher: formatEntityName(publisherPart) }
+            : {}),
+    };
+}
+
+function inferPluginNameFromToolName(toolName: string): string | undefined {
+    const match = toolName.toLowerCase().match(/^plugin__([^_]+?)(?:__|$)/);
+    if (match?.[1] === undefined) {
+        return undefined;
+    }
+
+    return formatEntityName(match[1]);
+}
+
+function inferMcpServerFromToolName(toolName: string): string | undefined {
+    const normalized = toolName.toLowerCase();
+    const namespacedMatch = normalized.match(/^mcp__([^_]+?)(?:__|$)/);
+    if (namespacedMatch?.[1] !== undefined) {
+        return formatEntityName(namespacedMatch[1]);
+    }
+
+    if (normalized.startsWith("mcp:")) {
+        const value = normalized.slice("mcp:".length).split(/[./:]/)[0];
+        if (value !== undefined && value.length > 0) {
+            return formatEntityName(value);
+        }
+    }
+
+    return undefined;
+}
+
+function detectToolSource(toolName: string, args: ParsedArgs): ToolSource {
+    if (isSubagentToolName(toolName)) {
+        return {
+            kind: "subagent",
+            label: "Subagent",
+            ...(args.agentType !== undefined ? { detail: formatEntityName(args.agentType) } : {}),
+        };
+    }
+
+    if (toolName.toLowerCase() === "skill" || args.skill !== undefined) {
+        return {
+            kind: "skill",
+            label: "Skill",
+            ...(args.skill !== undefined ? { detail: formatEntityName(args.skill) } : {}),
+        };
+    }
+
+    const pluginFromUri = parsePluginUri(args.pluginUri);
+    if (pluginFromUri !== null) {
+        return {
+            kind: "plugin",
+            label: "Plugin",
+            detail: pluginFromUri.publisher !== undefined
+                ? `${pluginFromUri.name} · ${pluginFromUri.publisher}`
+                : pluginFromUri.name,
+        };
+    }
+
+    if (args.pluginName !== undefined) {
+        const pluginName = formatEntityName(args.pluginName);
+        return {
+            kind: "plugin",
+            label: "Plugin",
+            detail: args.pluginPublisher !== undefined
+                ? `${pluginName} · ${formatEntityName(args.pluginPublisher)}`
+                : pluginName,
+        };
+    }
+
+    const pluginFromToolName = inferPluginNameFromToolName(toolName);
+    if (pluginFromToolName !== undefined) {
+        return {
+            kind: "plugin",
+            label: "Plugin",
+            detail: pluginFromToolName,
+        };
+    }
+
+    const mcpServer = args.mcpServer ?? inferMcpServerFromToolName(toolName);
+    if (mcpServer !== undefined) {
+        return {
+            kind: "mcp",
+            label: "MCP",
+            detail: formatEntityName(mcpServer),
+        };
+    }
+
+    return {
+        kind: "native",
+        label: "",
+    };
+}
+
+function renderSourceIcon(
+    source: ToolSource,
+    toolName: string,
+    color: string
+): React.ReactNode {
+    if (source.kind === "subagent") {
+        return <SubagentIcon size={11} color={color} />;
+    }
+
+    if (source.kind === "skill") {
+        return <SkillIcon size={11} color={color} />;
+    }
+
+    if (source.kind === "plugin") {
+        return <PluginIcon size={11} color={color} />;
+    }
+
+    if (source.kind === "mcp") {
+        return <McpIcon size={11} color={color} />;
+    }
+
+    return <ToolIcon toolName={toolName} size={11} color={color} />;
+}
+
+function renderSheetIcon(
+    source: ToolSource,
+    kind: ToolKind,
+    color: string
+): { iconNode?: React.ReactNode; iconName?: FeatherName } {
+    if (source.kind === "subagent") {
+        return { iconNode: <SubagentIcon size={14} color={color} /> };
+    }
+
+    if (source.kind === "skill") {
+        return { iconNode: <SkillIcon size={14} color={color} /> };
+    }
+
+    if (source.kind === "plugin") {
+        return { iconNode: <PluginIcon size={14} color={color} /> };
+    }
+
+    if (source.kind === "mcp") {
+        return { iconNode: <McpIcon size={14} color={color} /> };
+    }
+
+    return { iconName: KIND_ICONS[kind] };
 }
 
 function shortPath(p: string | undefined): string {
@@ -316,6 +530,16 @@ function ThoughtBlock({ text }: { text: string }) {
     );
 }
 
+function SummaryBlock({ text }: { text: string }) {
+    const styles = useThemedStyles(createStyles);
+
+    return (
+        <View style={styles.summaryCard}>
+            <Text style={styles.summaryText} selectable>{text}</Text>
+        </View>
+    );
+}
+
 function AgentBlock({
     title,
     subtitle,
@@ -364,9 +588,60 @@ function MetaRow({ label, value, accent }: { label: string; value: string; accen
     );
 }
 
+function SourceBadge({ source }: { source: ToolSource }) {
+    const styles = useThemedStyles(createStyles);
+    if (source.kind === "native") {
+        return null;
+    }
+
+    return (
+        <View style={styles.sourceBadge}>
+            <Text style={styles.sourceBadgeText}>{source.label}</Text>
+        </View>
+    );
+}
+
+function formatSourceRowValue(source: ToolSource): string | null {
+    if (source.kind === "native") {
+        return null;
+    }
+
+    return source.detail !== undefined ? `${source.label} · ${source.detail}` : source.label;
+}
+
+function formatSheetSubtitle(source: ToolSource, statusText: string): string {
+    if (source.kind === "native") {
+        return statusText;
+    }
+
+    return source.detail !== undefined ? `${source.label} · ${source.detail} · ${statusText}` : `${source.label} · ${statusText}`;
+}
+
+function getRunningPreviewText(rowSummary: string, source: ToolSource): string {
+    if (rowSummary.length > 0) {
+        return rowSummary;
+    }
+
+    if (source.detail !== undefined) {
+        return source.detail;
+    }
+
+    return "";
+}
+
 // ─── Detail sheet content ─────────────────────────────────────────────────────
 
-function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args: ParsedArgs }) {
+function ToolDetail({
+    item,
+    kind,
+    args,
+    source,
+}: {
+    item: ToolItem;
+    kind: ToolKind;
+    args: ParsedArgs;
+    source: ToolSource;
+}) {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
     const diffStyles = useThemedStyles(createDiffStyles);
@@ -377,12 +652,21 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
             : item.status === "no_results"
                 ? theme.colors.textTertiary
                 : theme.colors.success;
+    const taskCompleteSummary = isTaskCompleteToolName(item.toolName)
+        ? readTaskCompleteSummary(args)
+        : null;
 
     return (
         <View style={styles.detailContainer}>
             {/* Status + tool name */}
             <View style={styles.metaSection}>
                 <MetaRow label="Tool" value={item.toolName} />
+                {formatSourceRowValue(source) !== null && (
+                    <MetaRow
+                        label="Source"
+                        value={formatSourceRowValue(source) ?? ""}
+                    />
+                )}
                 <MetaRow
                     label="Status"
                     value={
@@ -495,8 +779,15 @@ function ToolDetail({ item, kind, args }: { item: ToolItem; kind: ToolKind; args
                 </View>
             )}
 
+            {taskCompleteSummary !== null && (
+                <View style={styles.diffSection}>
+                    <Text style={styles.sectionTitle}>SUMMARY</Text>
+                    <SummaryBlock text={taskCompleteSummary} />
+                </View>
+            )}
+
             {/* Fallback: raw args if nothing else matched */}
-            {kind === "other" && item.argumentsText !== undefined && (
+            {kind === "other" && taskCompleteSummary === null && item.argumentsText !== undefined && (
                 <View style={styles.diffSection}>
                     <Text style={styles.sectionTitle}>ARGUMENTS</Text>
                     <TerminalBlock command={null} output={item.argumentsText} />
@@ -512,6 +803,15 @@ function getRowSummary(kind: ToolKind, args: ParsedArgs, item: ToolItem): string
     if (item.status === "running" && item.progressMessage !== undefined && item.progressMessage.length > 0) {
         return item.progressMessage;
     }
+
+    if (isTaskCompleteToolName(item.toolName)) {
+        const summary = readTaskCompleteSummary(args);
+        if (summary !== null) {
+            const firstLine = summary.split("\n").find((line) => line.trim().length > 0) ?? summary;
+            return firstLine.slice(0, 80);
+        }
+    }
+
     switch (kind) {
         case "agent":
             return args.description ?? args.agentName ?? args.agentType ?? "Subagent run";
@@ -556,12 +856,19 @@ function ToolCardComponent({ item }: Props) {
     const isFailed = item.status === "failed";
     const isNoResults = item.status === "no_results";
     const kind = classifyTool(item.toolName);
-    const label = KIND_LABELS[kind];
-    const iconName = KIND_ICONS[kind];
+    const label = getToolLabel(item.toolName, kind);
     const previewArgs = useMemo(() => parseArgs(item.argumentsText), [item.argumentsText]);
     const detailArgs = useMemo(
         () => (detailReady ? parseArgs(item.argumentsText) : EMPTY_PARSED_ARGS),
         [detailReady, item.argumentsText]
+    );
+    const source = useMemo(
+        () => detectToolSource(item.toolName, previewArgs),
+        [item.toolName, previewArgs]
+    );
+    const detailSource = useMemo(
+        () => detectToolSource(item.toolName, detailArgs),
+        [item.toolName, detailArgs]
     );
     const rowSummary = useMemo(
         () => getRowSummary(kind, previewArgs, item),
@@ -569,6 +876,10 @@ function ToolCardComponent({ item }: Props) {
     );
     const statusText = isRunning ? "running" : isFailed ? "failed" : isNoResults ? "no results" : "completed";
     const iconColor = isFailed ? theme.colors.error : theme.colors.textTertiary;
+    const sheetIconProps = useMemo(
+        () => renderSheetIcon(source, kind, theme.colors.textSecondary),
+        [kind, source, theme.colors.textSecondary]
+    );
 
     useEffect(() => {
         if (!showSheet) {
@@ -594,33 +905,36 @@ function ToolCardComponent({ item }: Props) {
                     hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
                 >
                     <View style={[styles.iconBox, isFailed && styles.iconBoxFailed]}>
-                        <ToolIcon toolName={item.toolName} size={11} color={iconColor} />
+                        {renderSourceIcon(source, item.toolName, iconColor)}
                     </View>
-                    {isRunning ? (
-                        <SunshineText
-                            active
-                            text={rowSummary.length > 0 ? `${label}  ${rowSummary}` : label}
-                            textStyle={styles.sunshineRow}
-                            style={styles.shimmerFlex}
-                            numberOfLines={1}
-                        />
-                    ) : (
-                        <View style={[styles.contentWrap, styles.shimmerFlex]}>
+                    <View style={[styles.contentWrap, styles.shimmerFlex]}>
+                        <View style={styles.labelGroup}>
                             <View style={styles.labelWrap}>
                                 <Text style={[styles.label, isFailed && styles.labelFailed]} numberOfLines={1}>
                                     {label}
                                 </Text>
                             </View>
-                            <View style={styles.argWrap}>
+                            <SourceBadge source={source} />
+                        </View>
+                        <View style={styles.argWrap}>
+                            {isRunning ? (
+                                <SunshineText
+                                    active
+                                    text={getRunningPreviewText(rowSummary, source)}
+                                    textStyle={styles.sunshineRow}
+                                    style={styles.shimmerFlex}
+                                    numberOfLines={1}
+                                />
+                            ) : (
                                 <Text
                                     style={[styles.argText, isNoResults && styles.argTextMuted]}
                                     numberOfLines={1}
                                 >
                                     {isNoResults && rowSummary.length === 0 ? "No results" : rowSummary}
                                 </Text>
-                            </View>
+                            )}
                         </View>
-                    )}
+                    </View>
                     <Text style={styles.chevron}>›</Text>
                 </Pressable>
             </View>
@@ -628,17 +942,12 @@ function ToolCardComponent({ item }: Props) {
             <BottomSheet
                 visible={showSheet}
                 onClose={() => setShowSheet(false)}
-                {...(kind === "agent"
-                    ? { iconNode: <SubagentIcon size={14} color={theme.colors.textSecondary} /> }
-                    : kind === "skill"
-                        ? { iconNode: <SkillIcon size={14} color={theme.colors.textSecondary} /> }
-                        : { iconName }
-                )}
+                {...sheetIconProps}
                 title={label}
-                subtitle={statusText}
+                subtitle={formatSheetSubtitle(source, statusText)}
             >
                 {detailReady ? (
-                    <ToolDetail item={item} kind={kind} args={detailArgs} />
+                    <ToolDetail item={item} kind={kind} args={detailArgs} source={detailSource} />
                 ) : (
                     <View style={styles.detailLoadingState}>
                         <ActivityIndicator size="small" color={theme.colors.textSecondary} />
@@ -831,13 +1140,13 @@ const createThoughtStyles = (theme: AppTheme) => StyleSheet.create({
     label: {
         fontSize: theme.fontSize.xs,
         fontWeight: "600",
-        color: theme.colors.textAssistant,
+        color: theme.colors.textSecondary,
         textTransform: "uppercase",
         letterSpacing: 0.4,
     },
     text: {
         fontSize: theme.fontSize.sm,
-        color: theme.colors.textAssistant,
+        color: theme.colors.textSecondary,
         lineHeight: 20,
     },
 });
@@ -892,6 +1201,13 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         alignItems: "center",
         gap: 4,
     },
+    labelGroup: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        minWidth: 0,
+        flexShrink: 0,
+    },
     labelWrap: {
         flexShrink: 0,
     },
@@ -905,6 +1221,23 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     argWrap: {
         flex: 1,
         minWidth: 0,
+        flexShrink: 1,
+    },
+    sourceBadge: {
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+        backgroundColor: theme.colors.bgTertiary,
+        alignSelf: "flex-start",
+    },
+    sourceBadgeText: {
+        fontSize: 10,
+        lineHeight: 14,
+        color: theme.colors.textTertiary,
+        fontWeight: "700",
+        letterSpacing: 0.2,
     },
     argText: {
         fontSize: theme.fontSize.sm,
@@ -969,5 +1302,17 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         fontWeight: "700",
         color: theme.colors.textSecondary,
         letterSpacing: 0.6,
+    },
+    summaryCard: {
+        backgroundColor: theme.colors.bgElevated,
+        borderRadius: 6,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        padding: theme.spacing.md,
+    },
+    summaryText: {
+        fontSize: theme.fontSize.sm,
+        lineHeight: 20,
+        color: theme.colors.textAssistant,
     },
 });

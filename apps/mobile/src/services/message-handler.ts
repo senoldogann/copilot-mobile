@@ -23,14 +23,26 @@ import {
     dispatchWorkspaceResolveResponse,
     dispatchWorkspaceSearchResponse,
 } from "./workspace-events";
+import {
+    clearSessionPrefetch,
+    consumeSessionPrefetchHistory,
+    consumeSessionPrefetchResume,
+} from "./session-prefetch";
 import { extractAgentTodosFromArgumentsText } from "../utils/tool-introspection";
 
 let transientConnectionErrorTimer: ReturnType<typeof setTimeout> | null = null;
-const STREAM_DELTA_BATCH_WINDOW_MS = 48;
+const ASSISTANT_DELTA_BATCH_WINDOW_MS = 40;
+const THINKING_DELTA_BATCH_WINDOW_MS = 18;
+const TOOL_PARTIAL_OUTPUT_BATCH_WINDOW_MS = 96;
 const assistantDeltaBuffers = new Map<string, string>();
 const assistantDeltaTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const thinkingDeltaBuffers = new Map<string, string>();
 const thinkingDeltaTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const toolPartialOutputBuffers = new Map<string, string>();
+const toolPartialOutputTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const assistantStreamStarted = new Set<string>();
+const thinkingStreamStarted = new Set<string>();
+const toolPartialStreamStarted = new Set<string>();
 type AssistantSystemNotificationBuffer = {
     collecting: boolean;
     content: string;
@@ -85,6 +97,10 @@ function addSystemNotificationForActiveSession(sessionId: string, content: strin
 function clearSystemNotificationStreamState(sessionId: string): void {
     assistantSystemNotificationState.delete(sessionId);
     emittedSystemNotificationKeys.delete(sessionId);
+}
+
+function createToolPartialBufferKey(sessionId: string, requestId: string): string {
+    return `${sessionId}:${requestId}`;
 }
 
 function extractAssistantInternalContent(content: string): AssistantInternalExtraction {
@@ -246,19 +262,47 @@ function flushThinkingDeltaBuffer(sessionId: string): void {
     sessionStore.appendThinkingDelta(delta, 0);
 }
 
+function flushToolPartialOutputBuffer(sessionId: string, requestId: string): void {
+    const bufferKey = createToolPartialBufferKey(sessionId, requestId);
+    clearBufferedStreamTimer(toolPartialOutputTimers, bufferKey);
+    const partialOutput = toolPartialOutputBuffers.get(bufferKey);
+    toolPartialOutputBuffers.delete(bufferKey);
+
+    if (partialOutput === undefined || partialOutput.length === 0) {
+        return;
+    }
+
+    const sessionStore = useSessionStore.getState();
+    if (sessionStore.activeSessionId !== sessionId) {
+        return;
+    }
+
+    armBackgroundCompletion(sessionId);
+    sessionStore.appendToolPartialOutput(requestId, partialOutput);
+}
+
 function scheduleAssistantDeltaFlush(sessionId: string, delta: string): void {
     if (delta.length === 0) {
         return;
     }
 
+    const shouldFlushImmediately = !assistantStreamStarted.has(sessionId)
+        && !assistantDeltaTimers.has(sessionId)
+        && !assistantDeltaBuffers.has(sessionId);
     assistantDeltaBuffers.set(sessionId, `${assistantDeltaBuffers.get(sessionId) ?? ""}${delta}`);
+    if (shouldFlushImmediately) {
+        assistantStreamStarted.add(sessionId);
+        flushAssistantDeltaBuffer(sessionId);
+        return;
+    }
+
     if (assistantDeltaTimers.has(sessionId)) {
         return;
     }
 
     assistantDeltaTimers.set(sessionId, setTimeout(() => {
         flushAssistantDeltaBuffer(sessionId);
-    }, STREAM_DELTA_BATCH_WINDOW_MS));
+    }, ASSISTANT_DELTA_BATCH_WINDOW_MS));
 }
 
 function scheduleThinkingDeltaFlush(sessionId: string, delta: string): void {
@@ -266,19 +310,71 @@ function scheduleThinkingDeltaFlush(sessionId: string, delta: string): void {
         return;
     }
 
+    const shouldFlushImmediately = !thinkingStreamStarted.has(sessionId)
+        && !thinkingDeltaTimers.has(sessionId)
+        && !thinkingDeltaBuffers.has(sessionId);
     thinkingDeltaBuffers.set(sessionId, `${thinkingDeltaBuffers.get(sessionId) ?? ""}${delta}`);
+    if (shouldFlushImmediately) {
+        thinkingStreamStarted.add(sessionId);
+        flushThinkingDeltaBuffer(sessionId);
+        return;
+    }
+
     if (thinkingDeltaTimers.has(sessionId)) {
         return;
     }
 
     thinkingDeltaTimers.set(sessionId, setTimeout(() => {
         flushThinkingDeltaBuffer(sessionId);
-    }, STREAM_DELTA_BATCH_WINDOW_MS));
+    }, THINKING_DELTA_BATCH_WINDOW_MS));
+}
+
+function scheduleToolPartialOutputFlush(sessionId: string, requestId: string, partialOutput: string): void {
+    if (partialOutput.length === 0) {
+        return;
+    }
+
+    const bufferKey = createToolPartialBufferKey(sessionId, requestId);
+    const shouldFlushImmediately = !toolPartialStreamStarted.has(bufferKey)
+        && !toolPartialOutputTimers.has(bufferKey)
+        && !toolPartialOutputBuffers.has(bufferKey);
+    toolPartialOutputBuffers.set(
+        bufferKey,
+        `${toolPartialOutputBuffers.get(bufferKey) ?? ""}${partialOutput}`
+    );
+    if (shouldFlushImmediately) {
+        toolPartialStreamStarted.add(bufferKey);
+        flushToolPartialOutputBuffer(sessionId, requestId);
+        return;
+    }
+
+    if (toolPartialOutputTimers.has(bufferKey)) {
+        return;
+    }
+
+    toolPartialOutputTimers.set(bufferKey, setTimeout(() => {
+        flushToolPartialOutputBuffer(sessionId, requestId);
+    }, TOOL_PARTIAL_OUTPUT_BATCH_WINDOW_MS));
+}
+
+function flushToolPartialOutputBuffersForSession(sessionId: string): void {
+    for (const bufferKey of [...toolPartialOutputBuffers.keys()]) {
+        if (!bufferKey.startsWith(`${sessionId}:`)) {
+            continue;
+        }
+
+        const requestId = bufferKey.slice(sessionId.length + 1);
+        flushToolPartialOutputBuffer(sessionId, requestId);
+        toolPartialStreamStarted.delete(bufferKey);
+    }
 }
 
 function flushSessionStreamBuffers(sessionId: string): void {
     flushAssistantDeltaBuffer(sessionId);
     flushThinkingDeltaBuffer(sessionId);
+    flushToolPartialOutputBuffersForSession(sessionId);
+    assistantStreamStarted.delete(sessionId);
+    thinkingStreamStarted.delete(sessionId);
     clearSystemNotificationStreamState(sessionId);
 }
 
@@ -311,6 +407,11 @@ function requestWorkspaceSnapshot(sessionId: string): void {
         requestWorkspaceGitSummary(sessionId, 10),
         requestWorkspaceTree(sessionId, undefined, 2, 0, 200),
     ]));
+}
+
+function isAbortInFlightForSession(sessionId: string): boolean {
+    const sessionStore = useSessionStore.getState();
+    return sessionStore.isAbortRequested && sessionStore.activeSessionId === sessionId;
 }
 
 function readSessionNotificationTitle(sessionId: string, fallback: string): string {
@@ -649,6 +750,12 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.resumed": {
+            if (consumeSessionPrefetchResume(message.payload.session.id)) {
+                sessionStore.upsertSession(message.payload.session);
+                rememberWorkspaceDirectory(message.payload.session.context?.workspaceRoot);
+                break;
+            }
+
             sessionStore.setSessionLoading(false);
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.setAbortRequested(false);
@@ -681,12 +788,19 @@ export function handleServerMessage(message: ServerMessage): void {
         case "session.idle": {
             flushSessionStreamBuffers(message.payload.sessionId);
             sessionStore.setSessionBusy(message.payload.sessionId, false);
-            notifyIfBackgroundCompletion(message.payload.sessionId);
+            const abortInFlight = isAbortInFlightForSession(message.payload.sessionId);
+            if (abortInFlight) {
+                clearBackgroundCompletion(message.payload.sessionId);
+            } else {
+                notifyIfBackgroundCompletion(message.payload.sessionId);
+            }
             if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.setAbortRequested(false);
             sessionStore.setAssistantTyping(false);
-            sessionStore.setAgentTodos([]);
-            sessionStore.finalizeThinking();
+            if (!abortInFlight) {
+                sessionStore.setAbortRequested(false);
+                sessionStore.setAgentTodos([]);
+                sessionStore.finalizeThinking();
+            }
             break;
         }
 
@@ -699,6 +813,22 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.history": {
+            if (consumeSessionPrefetchHistory(message.payload.sessionId)) {
+                const chatHistoryStore = useChatHistoryStore.getState();
+                const linkedConversation = chatHistoryStore.conversations.find(
+                    (conversation) => conversation.sessionId === message.payload.sessionId
+                );
+
+                if (linkedConversation !== undefined) {
+                    chatHistoryStore.setConversationItems(
+                        linkedConversation.id,
+                        message.payload.items.map(mapHistoryItemToChatItem)
+                    );
+                    chatHistoryStore.markConversationSynced(linkedConversation.id, Date.now());
+                }
+                break;
+            }
+
             const { activeSessionId } = useSessionStore.getState();
             if (activeSessionId === null || activeSessionId !== message.payload.sessionId) {
                 console.warn("[MessageHandler] session.history: sessionId eşleşmiyor, yoksayılıyor");
@@ -766,7 +896,8 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "tool.execution_partial_result": {
             if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.appendToolPartialOutput(
+            scheduleToolPartialOutputFlush(
+                message.payload.sessionId,
                 message.payload.requestId,
                 message.payload.partialOutput
             );
@@ -783,6 +914,10 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "tool.execution_complete": {
+            flushToolPartialOutputBuffer(message.payload.sessionId, message.payload.requestId);
+            toolPartialStreamStarted.delete(
+                createToolPartialBufferKey(message.payload.sessionId, message.payload.requestId)
+            );
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.updateToolStatus(
                 message.payload.requestId,
@@ -903,6 +1038,26 @@ export function handleServerMessage(message: ServerMessage): void {
             break;
         }
 
+        case "message.abort.result": {
+            if (message.payload.success) {
+                clearBackgroundCompletion(message.payload.sessionId);
+                if (isActiveSession(message.payload.sessionId)) {
+                    sessionStore.stopActiveTurn();
+                }
+                break;
+            }
+
+            if (isActiveSession(message.payload.sessionId)) {
+                sessionStore.setAbortRequested(false);
+            }
+            connectionStore.setError(
+                message.payload.error !== undefined && message.payload.error.length > 0
+                    ? `Failed to stop message: ${message.payload.error}`
+                    : "Failed to stop message"
+            );
+            break;
+        }
+
         case "connection.status": {
             // Connection status is informational
             break;
@@ -948,10 +1103,15 @@ export function handleServerMessage(message: ServerMessage): void {
                 if (message.payload.busy) {
                     armBackgroundCompletion(message.payload.sessionId);
                 } else {
+                    const abortInFlight = isAbortInFlightForSession(message.payload.sessionId);
                     flushSessionStreamBuffers(message.payload.sessionId);
-                    notifyIfBackgroundCompletion(message.payload.sessionId);
-                    sessionStore.setAbortRequested(false);
-                    sessionStore.setAgentTodos([]);
+                    if (abortInFlight) {
+                        clearBackgroundCompletion(message.payload.sessionId);
+                    } else {
+                        notifyIfBackgroundCompletion(message.payload.sessionId);
+                        sessionStore.setAbortRequested(false);
+                        sessionStore.setAgentTodos([]);
+                    }
                 }
                 sessionStore.setAssistantTyping(message.payload.busy);
             }
@@ -959,6 +1119,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.error": {
+            clearSessionPrefetch(message.payload.sessionId);
             flushSessionStreamBuffers(message.payload.sessionId);
             sessionStore.setSessionBusy(message.payload.sessionId, false);
             notifyBackgroundCompletionFailure(

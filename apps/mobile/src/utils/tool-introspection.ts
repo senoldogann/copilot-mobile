@@ -20,6 +20,12 @@ export type ParsedToolArguments = {
     agentName?: string;
     agentType?: string;
     skill?: string;
+    pluginName?: string;
+    pluginPublisher?: string;
+    pluginUri?: string;
+    mcpServer?: string;
+    mcpTool?: string;
+    appUri?: string;
 };
 
 type TodoMutation =
@@ -117,6 +123,28 @@ function formatAgentLabel(value: string): string {
         .replace(/\b\w/g, (match) => match.toUpperCase());
 }
 
+function readUriLikeValue(
+    record: Readonly<Record<string, unknown>>,
+    prefixes: ReadonlyArray<string>
+): string | undefined {
+    for (const value of Object.values(record)) {
+        if (typeof value !== "string") {
+            continue;
+        }
+
+        const trimmedValue = value.trim();
+        if (trimmedValue.length === 0) {
+            continue;
+        }
+
+        if (prefixes.some((prefix) => trimmedValue.startsWith(prefix))) {
+            return trimmedValue;
+        }
+    }
+
+    return undefined;
+}
+
 export function parseToolArgumentsText(
     text: string | undefined
 ): ParsedToolArguments | null {
@@ -144,6 +172,12 @@ export function parseToolArgumentsText(
         const agentName = readStringValue(record, ["name", "agent_name", "agent"]);
         const agentType = readStringValue(record, ["agent_type", "agentType", "provider"]);
         const skill = readStringValue(record, ["skill"]);
+        const pluginName = readStringValue(record, ["plugin", "pluginName", "plugin_name"]);
+        const pluginPublisher = readStringValue(record, ["marketplace", "publisher", "pluginPublisher"]);
+        const pluginUri = readUriLikeValue(record, ["plugin://"]);
+        const mcpServer = readStringValue(record, ["mcpServer", "mcp_server", "server", "serverName"]);
+        const mcpTool = readStringValue(record, ["tool", "tool_name", "toolName"]);
+        const appUri = readUriLikeValue(record, ["app://"]);
 
         return {
             raw: record,
@@ -160,6 +194,12 @@ export function parseToolArgumentsText(
             ...(agentName !== undefined ? { agentName } : {}),
             ...(agentType !== undefined ? { agentType } : {}),
             ...(skill !== undefined ? { skill } : {}),
+            ...(pluginName !== undefined ? { pluginName } : {}),
+            ...(pluginPublisher !== undefined ? { pluginPublisher } : {}),
+            ...(pluginUri !== undefined ? { pluginUri } : {}),
+            ...(mcpServer !== undefined ? { mcpServer } : {}),
+            ...(mcpTool !== undefined ? { mcpTool } : {}),
+            ...(appUri !== undefined ? { appUri } : {}),
         };
     } catch {
         return null;

@@ -19,7 +19,7 @@ function TodoStatusIcon({ status }: { status: AgentTodo["status"] }) {
     }
     if (status === "in_progress") {
         return (
-            <View style={[styles.statusIcon, { backgroundColor: theme.colors.textLink, borderColor: theme.colors.textLink }]}>
+            <View style={[styles.statusIcon, { backgroundColor: theme.colors.accent, borderColor: theme.colors.accent }]}>
                 <View style={styles.dotInner} />
             </View>
         );
@@ -158,7 +158,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         width: 18,
         height: 18,
         borderWidth: 1.5,
-        borderColor: theme.colors.textLink,
+        borderColor: theme.colors.accent,
         borderRadius: 4,
         alignItems: "center",
         justifyContent: "center",
@@ -166,7 +166,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     taskIconText: {
         fontSize: 11,
         fontWeight: "600",
-        color: theme.colors.textLink,
+        color: theme.colors.accent,
     },
     headerTitle: {
         fontSize: 13,
@@ -177,12 +177,12 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         paddingHorizontal: 6,
         paddingVertical: 2,
         borderRadius: 10,
-        backgroundColor: theme.colors.textLink + "22",
+        backgroundColor: theme.colors.accentMuted,
     },
     badgeText: {
         fontSize: 11,
         fontWeight: "600",
-        color: theme.colors.textLink,
+        color: theme.colors.accent,
     },
     badgeWarning: {
         marginLeft: 4,

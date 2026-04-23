@@ -276,6 +276,8 @@ export type WorkspaceSearchRequestMessage = BaseBridgeMessage & {
         requestKey: string;
         query: string;
         limit?: number;
+        sessionId?: string;
+        searchScope?: "directories" | "workspace_files";
     };
 };
 
@@ -610,6 +612,15 @@ export type SessionErrorMessage = BaseBridgeMessage & {
     payload: { sessionId: string; errorType: string; message: string };
 };
 
+export type MessageAbortResultMessage = BaseBridgeMessage & {
+    type: "message.abort.result";
+    payload: {
+        sessionId: string;
+        success: boolean;
+        error?: string;
+    };
+};
+
 export type SessionTitleChangedMessage = BaseBridgeMessage & {
     type: "session.title_changed";
     payload: { sessionId: string; title: string };
@@ -670,6 +681,7 @@ export type ServerMessage =
     | CapabilitiesStateMessage
     | SessionStateMessage
     | SessionErrorMessage
+    | MessageAbortResultMessage
     | SessionTitleChangedMessage
     | AssistantIntentMessage
     | SessionUsageMessage

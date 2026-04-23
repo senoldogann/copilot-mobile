@@ -127,7 +127,7 @@ function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }
                     name="settings"
                     options={{
                         headerShown: true,
-                        title: "Ayarlar",
+                        title: "",
                         headerBackButtonDisplayMode: "minimal",
                         headerStyle: { backgroundColor: theme.colors.bg },
                         headerTintColor: theme.colors.textPrimary,

@@ -43,6 +43,17 @@ import {
 } from "../view-models/provider-metadata";
 import { useWorkspaceDirectoryStore } from "../stores/workspace-directory-store";
 import { WorkspacePickerModal } from "./WorkspacePickerModal";
+import {
+    ArchiveIcon,
+    CloseIcon,
+    CirclePlusIcon,
+    FileTextIcon,
+    FolderIcon,
+    PencilIcon,
+    RefreshIcon,
+    TrashIcon,
+    ChevronDownIcon,
+} from "./ProviderIcon";
 
 type CloudConversationGroup = {
     workspace: string;
@@ -57,6 +68,21 @@ type RenameTarget = {
     title: string;
     preview: string;
     workspaceRoot: string | null;
+};
+
+type ChatActionMenuItem = {
+    key: string;
+    label: string;
+    tone: "default" | "danger";
+    icon: React.ReactNode;
+    onPress: () => void;
+};
+
+type ChatActionMenuState = {
+    title: string;
+    subtitle: string | null;
+    showHeaderDivider: boolean;
+    items: ReadonlyArray<ChatActionMenuItem>;
 };
 
 function basenamePath(value: string): string {
@@ -143,7 +169,17 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     const [resumeResultsBySessionId, setResumeResultsBySessionId] = useState<Readonly<Record<string, DrawerResumeResult>>>({});
     const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
     const [renameValue, setRenameValue] = useState("");
+    const [chatActionMenu, setChatActionMenu] = useState<ChatActionMenuState | null>(null);
     const refreshInFlightRef = useRef(false);
+
+    const closeChatActionMenu = () => {
+        setChatActionMenu(null);
+    };
+
+    const openChatActionMenu = (nextMenu: ChatActionMenuState) => {
+        Keyboard.dismiss();
+        setChatActionMenu(nextMenu);
+    };
 
     const linkedConversationBySessionId = useMemo(
         () => new Map(
@@ -527,56 +563,79 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         const canSelectChats = group.entries.length > 0;
         const workspaceRoot = group.workspace === "__none__" ? null : group.workspace;
 
-        Alert.alert(
-            group.displayName,
-            undefined,
-            [
+        openChatActionMenu({
+            title: group.displayName,
+            subtitle: "Workspace actions",
+            showHeaderDivider: false,
+            items: [
                 {
-                    text: "New chat",
+                    key: "new-chat",
+                    label: "New chat",
+                    tone: "default",
+                    icon: <CirclePlusIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => handleNewChat(workspaceRoot),
                 },
                 ...(canSelectChats
                     ? [{
-                        text: "Select chats to delete",
+                        key: "select-delete",
+                        label: "Select chats to delete",
+                        tone: "default" as const,
+                        icon: <TrashIcon size={15} color={theme.colors.textSecondary} />,
                         onPress: () => startWorkspaceSelectionMode(group.workspace),
-                    } satisfies { text: string; onPress: () => void }]
+                    }]
                     : []),
                 {
-                    text: "Remove workspace",
-                    style: "destructive",
+                    key: "remove-workspace",
+                    label: "Remove workspace",
+                    tone: "danger",
+                    icon: <TrashIcon size={15} color={theme.colors.error} />,
                     onPress: () => handleDeleteWorkspace(group),
                 },
-                { text: "Cancel", style: "cancel" },
-            ]
-        );
+            ],
+        });
     };
 
     const openGlobalDrawerMenu = () => {
-        Alert.alert(
-            "Chat actions",
-            undefined,
-            [
+        openChatActionMenu({
+            title: "Chat actions",
+            subtitle: "Projects panel actions",
+            showHeaderDivider: true,
+            items: [
                 {
-                    text: "Refresh chats",
+                    key: "refresh-chats",
+                    label: "Refresh chats",
+                    tone: "default",
+                    icon: <RefreshIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => {
                         void refreshDrawerData(true);
                     },
                 },
                 {
-                    text: allWorkspacesExpanded ? "Collapse all workspaces" : "Expand all workspaces",
+                    key: "toggle-workspaces",
+                    label: allWorkspacesExpanded ? "Collapse all workspaces" : "Expand all workspaces",
+                    tone: "default",
+                    icon: <ChevronDownIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => toggleAllWorkspaces(),
                 },
                 {
-                    text: `Delete drafts (${draftConversations.length})`,
+                    key: "delete-drafts",
+                    label: `Delete drafts (${draftConversations.length})`,
+                    tone: "default",
+                    icon: <FileTextIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => handleDeleteAllDrafts(),
                 },
                 {
-                    text: `Delete archived (${archivedConversations.length})`,
+                    key: "delete-archived",
+                    label: `Delete archived (${archivedConversations.length})`,
+                    tone: "default",
+                    icon: <ArchiveIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => handleDeleteAllArchived(),
                 },
                 {
-                    text: `Delete all chats (${sessions.length + draftConversations.length})`,
-                    style: "destructive",
+                    key: "delete-all",
+                    label: `Delete all chats (${sessions.length + draftConversations.length})`,
+                    tone: "danger",
+                    icon: <TrashIcon size={15} color={theme.colors.error} />,
                     onPress: () => {
                         Alert.alert(
                             "Delete all chats",
@@ -592,9 +651,8 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                         );
                     },
                 },
-                { text: "Cancel", style: "cancel" },
-            ]
-        );
+            ],
+        });
     };
 
     const toggleWorkspace = (workspace: string) => {
@@ -880,12 +938,16 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         preview: string,
         workspaceRoot: string | null
     ) => {
-        Alert.alert(
-            title.length > 0 ? title : "Chat",
-            undefined,
-            [
+        openChatActionMenu({
+            title: title.length > 0 ? title : "Chat",
+            subtitle: "Chat actions",
+            showHeaderDivider: false,
+            items: [
                 {
-                    text: "Rename",
+                    key: "rename",
+                    label: "Rename",
+                    tone: "default",
+                    icon: <PencilIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => openRenameModal({
                         conversationId,
                         sessionId,
@@ -895,17 +957,21 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     }),
                 },
                 {
-                    text: "Archive",
+                    key: "archive",
+                    label: "Archive",
+                    tone: "default",
+                    icon: <ArchiveIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => archiveSessionConversation(sessionId, conversationId, title, preview, workspaceRoot),
                 },
                 {
-                    text: "Delete",
-                    style: "destructive",
+                    key: "delete",
+                    label: "Delete",
+                    tone: "danger",
+                    icon: <TrashIcon size={15} color={theme.colors.error} />,
                     onPress: () => handleDeleteSession(sessionId),
                 },
-                { text: "Cancel", style: "cancel" },
-            ]
-        );
+            ],
+        });
     };
 
     const openArchivedMenu = (
@@ -915,12 +981,16 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         preview: string,
         workspaceRoot: string | null
     ) => {
-        Alert.alert(
-            title.length > 0 ? title : "Archived",
-            undefined,
-            [
+        openChatActionMenu({
+            title: title.length > 0 ? title : "Archived",
+            subtitle: "Archived chat actions",
+            showHeaderDivider: false,
+            items: [
                 {
-                    text: "Rename",
+                    key: "rename",
+                    label: "Rename",
+                    tone: "default",
+                    icon: <PencilIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => openRenameModal({
                         conversationId,
                         sessionId,
@@ -930,17 +1000,21 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     }),
                 },
                 {
-                    text: "Restore",
+                    key: "restore",
+                    label: "Restore",
+                    tone: "default",
+                    icon: <RefreshIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => useChatHistoryStore.getState().unarchiveConversation(conversationId),
                 },
                 {
-                    text: "Delete permanently",
-                    style: "destructive",
+                    key: "delete",
+                    label: "Delete permanently",
+                    tone: "danger",
+                    icon: <TrashIcon size={15} color={theme.colors.error} />,
                     onPress: () => useChatHistoryStore.getState().deleteConversation(conversationId),
                 },
-                { text: "Cancel", style: "cancel" },
-            ]
-        );
+            ],
+        });
     };
 
     const openCloudConversationMenu = (
@@ -950,12 +1024,16 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         preview: string,
         workspaceRoot: string | null
     ) => {
-        Alert.alert(
-            title.length > 0 ? title : "Cloud conversation",
-            undefined,
-            [
+        openChatActionMenu({
+            title: title.length > 0 ? title : "Cloud conversation",
+            subtitle: "Cloud chat actions",
+            showHeaderDivider: false,
+            items: [
                 {
-                    text: "Rename",
+                    key: "rename",
+                    label: "Rename",
+                    tone: "default",
+                    icon: <PencilIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => openRenameModal({
                         conversationId,
                         sessionId,
@@ -965,27 +1043,37 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                     }),
                 },
                 {
-                    text: "Open cached copy",
+                    key: "open-cached",
+                    label: "Open cached copy",
+                    tone: "default",
+                    icon: <FileTextIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => handleSelectCloudConversation(conversationId, null),
                 },
                 ...(sessionId !== null && connectionState === "authenticated"
                     ? [{
-                        text: "Try reconnect",
+                        key: "reconnect",
+                        label: "Try reconnect",
+                        tone: "default" as const,
+                        icon: <RefreshIcon size={15} color={theme.colors.textSecondary} />,
                         onPress: () => handleSelectCloudConversation(conversationId, sessionId),
                     }]
                     : []),
                 {
-                    text: "Archive",
+                    key: "archive",
+                    label: "Archive",
+                    tone: "default",
+                    icon: <ArchiveIcon size={15} color={theme.colors.textSecondary} />,
                     onPress: () => useChatHistoryStore.getState().archiveConversation(conversationId),
                 },
                 {
-                    text: "Delete cached copy",
-                    style: "destructive",
+                    key: "delete-cached",
+                    label: "Delete cached copy",
+                    tone: "danger",
+                    icon: <TrashIcon size={15} color={theme.colors.error} />,
                     onPress: () => useChatHistoryStore.getState().deleteConversation(conversationId),
                 },
-                { text: "Cancel", style: "cancel" },
-            ]
-        );
+            ],
+        });
     };
 
     const getChipStyle = (tone: DrawerMetadataChipTone) => {
@@ -1558,6 +1646,84 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
             </View>
 
             <Modal
+                visible={chatActionMenu !== null}
+                transparent
+                animationType="fade"
+                onRequestClose={closeChatActionMenu}
+            >
+                <Pressable style={styles.actionMenuOverlay} onPress={closeChatActionMenu}>
+                    <Pressable style={styles.actionMenuCard} onPress={(event) => event.stopPropagation()}>
+                        <View
+                            style={[
+                                styles.actionMenuHeader,
+                                !(chatActionMenu?.showHeaderDivider ?? false) && styles.actionMenuHeaderNoDivider,
+                            ]}
+                        >
+                            <View style={styles.actionMenuHeaderLeft}>
+                                <View style={styles.actionMenuIconBadge}>
+                                    <FolderIcon size={16} color={theme.colors.textSecondary} />
+                                </View>
+                                <View style={styles.actionMenuHeaderText}>
+                                    <Text style={styles.actionMenuTitle} numberOfLines={1}>
+                                        {chatActionMenu?.title ?? "Chat"}
+                                    </Text>
+                                    {chatActionMenu?.subtitle !== null && chatActionMenu?.subtitle !== undefined && (
+                                        <Text style={styles.actionMenuSubtitle} numberOfLines={1}>
+                                            {chatActionMenu.subtitle}
+                                        </Text>
+                                    )}
+                                </View>
+                            </View>
+                            <Pressable
+                                style={({ pressed }) => [
+                                    styles.actionMenuCloseButton,
+                                    pressed && styles.actionMenuCloseButtonPressed,
+                                ]}
+                                onPress={closeChatActionMenu}
+                                hitSlop={8}
+                                accessibilityLabel="Close chat actions"
+                            >
+                                <CloseIcon size={14} color={theme.colors.textTertiary} />
+                            </Pressable>
+                        </View>
+
+                        <View style={styles.actionMenuList}>
+                            {(chatActionMenu?.items ?? []).map((item, index) => (
+                                <React.Fragment key={item.key}>
+                                    <Pressable
+                                        style={({ pressed }) => [
+                                            styles.actionMenuItem,
+                                            pressed && styles.actionMenuItemPressed,
+                                        ]}
+                                        onPress={() => {
+                                            closeChatActionMenu();
+                                            item.onPress();
+                                        }}
+                                    >
+                                        <View style={[
+                                            styles.actionMenuItemIconWrap,
+                                            item.tone === "danger" && styles.actionMenuItemIconWrapDanger,
+                                        ]}>
+                                            {item.icon}
+                                        </View>
+                                        <Text style={[
+                                            styles.actionMenuItemText,
+                                            item.tone === "danger" && styles.actionMenuItemTextDanger,
+                                        ]}>
+                                            {item.label}
+                                        </Text>
+                                    </Pressable>
+                                    {index < (chatActionMenu?.items.length ?? 0) - 1 && (
+                                        <View style={styles.actionMenuSeparator} />
+                                    )}
+                                </React.Fragment>
+                            ))}
+                        </View>
+                    </Pressable>
+                </Pressable>
+            </Modal>
+
+            <Modal
                 visible={renameTarget !== null}
                 transparent
                 animationType="fade"
@@ -2058,6 +2224,121 @@ return StyleSheet.create({
         fontSize: theme.fontSize.md,
         color: theme.colors.textPrimary,
         fontWeight: "400",
+    },
+    actionMenuOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: theme.colors.overlay,
+        justifyContent: "flex-start",
+        paddingHorizontal: theme.spacing.md,
+        paddingTop: 72,
+    },
+    actionMenuCard: {
+        alignSelf: "stretch",
+        maxHeight: 420,
+        borderRadius: theme.borderRadius.xl,
+        backgroundColor: theme.colors.bgElevated,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        overflow: "hidden",
+        shadowColor: "#000",
+        shadowOpacity: theme.resolvedScheme === "light" ? 0.08 : 0.24,
+        shadowRadius: 16,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 14,
+    },
+    actionMenuHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        paddingTop: theme.spacing.md,
+        paddingBottom: theme.spacing.sm,
+        backgroundColor: theme.colors.bgElevated,
+        borderBottomWidth: StyleSheet.hairlineWidth,
+        borderBottomColor: theme.colors.borderMuted,
+    },
+    actionMenuHeaderNoDivider: {
+        borderBottomWidth: 0,
+    },
+    actionMenuHeaderLeft: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: theme.spacing.sm,
+    },
+    actionMenuIconBadge: {
+        width: 30,
+        height: 30,
+        borderRadius: theme.borderRadius.sm,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: theme.colors.bgTertiary,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+    },
+    actionMenuHeaderText: {
+        flex: 1,
+        minWidth: 0,
+    },
+    actionMenuTitle: {
+        fontSize: theme.fontSize.base,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
+    },
+    actionMenuSubtitle: {
+        marginTop: 2,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
+    },
+    actionMenuCloseButton: {
+        width: 28,
+        height: 28,
+        borderRadius: theme.borderRadius.sm,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: theme.colors.bgTertiary,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+    },
+    actionMenuCloseButtonPressed: {
+        opacity: 0.82,
+    },
+    actionMenuList: {
+        paddingVertical: theme.spacing.xs,
+    },
+    actionMenuItem: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: 13,
+    },
+    actionMenuItemPressed: {
+        backgroundColor: theme.colors.bgSecondary,
+    },
+    actionMenuItemIconWrap: {
+        width: 16,
+        height: 16,
+        alignItems: "center",
+        justifyContent: "center",
+    },
+    actionMenuItemIconWrapDanger: {
+        opacity: 0.92,
+    },
+    actionMenuItemText: {
+        flex: 1,
+        fontSize: theme.fontSize.md,
+        fontWeight: "600",
+        color: theme.colors.textPrimary,
+    },
+    actionMenuItemTextDanger: {
+        color: theme.colors.error,
+    },
+    actionMenuSeparator: {
+        height: StyleSheet.hairlineWidth,
+        marginLeft: theme.spacing.md + 16 + theme.spacing.sm,
+        backgroundColor: theme.colors.borderMuted,
     },
     renameOverlay: {
         ...StyleSheet.absoluteFillObject,

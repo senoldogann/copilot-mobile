@@ -13,6 +13,9 @@ import {
     StyleSheet,
     TouchableWithoutFeedback,
     AppState,
+    ActivityIndicator,
+    Animated,
+    TextInput,
 } from "react-native";
 import type { NativeSyntheticEvent, NativeScrollEvent } from "react-native";
 import { FlashList, type FlashListRef } from "@shopify/flash-list";
@@ -20,7 +23,19 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useNavigation, useRouter } from "expo-router";
 import type { DrawerNavigationProp } from "@react-navigation/drawer";
 import type { ParamListBase } from "@react-navigation/native";
-import { GitBranchIcon, DiffIcon, MoreVerticalIcon, ChevronDownIcon, CirclePlusIcon, SettingsIcon, WifiOffIcon } from "../../src/components/ProviderIcon";
+import {
+    GitBranchIcon,
+    DiffIcon,
+    MoreVerticalIcon,
+    ChevronDownIcon,
+    CirclePlusIcon,
+    SettingsIcon,
+    WifiOffIcon,
+    GitHubIcon,
+    GitPullRequestIcon,
+    GitPushIcon,
+    CheckIcon,
+} from "../../src/components/ProviderIcon";
 import { useSessionStore } from "../../src/stores/session-store";
 import type { AgentTodo, ChatItem } from "../../src/stores/session-store-types";
 import { useWorkspaceStore } from "../../src/stores/workspace-store";
@@ -39,7 +54,6 @@ import { useAppTheme, type AppTheme } from "../../src/theme/theme-context";
 import type { SessionConfig, SessionMessageAttachment } from "@copilot-mobile/shared";
 import {
     sendMessage,
-    sendQueuedMessage,
     abortMessage,
     createSessionWithInitialMessage,
     respondPermission,
@@ -50,6 +64,9 @@ import {
     requestWorkspaceGitSummary,
     requestSkillsList,
     disconnect,
+    commitWorkspace,
+    pullWorkspace,
+    pushWorkspace,
 } from "../../src/services/bridge";
 import { startDraftConversation } from "../../src/services/new-chat";
 import {
@@ -146,38 +163,56 @@ const ChatHeader = React.memo(function ChatHeader() {
     const activeConversationId = useChatHistoryStore((s) => s.activeConversationId);
     const connectionState = useConnectionStore((s) => s.state);
     const branch = useWorkspaceStore((s) => s.branch);
+    const gitRoot = useWorkspaceStore((s) => s.gitRoot);
     const repository = useWorkspaceStore((s) => s.repository);
     const workspaceRoot = useWorkspaceStore((s) => s.workspaceRoot);
     const workspaceSessionId = useWorkspaceStore((s) => s.sessionId);
     const uncommittedChanges = useWorkspaceStore((s) => s.uncommittedChanges);
+    const isCommitting = useWorkspaceStore((s) => s.isCommitting);
+    const isPulling = useWorkspaceStore((s) => s.isPulling);
+    const isPushing = useWorkspaceStore((s) => s.isPushing);
     const insets = useSafeAreaInsets();
     const [workspaceOpen, setWorkspaceOpen] = React.useState(false);
     const [menuOpen, setMenuOpen] = React.useState(false);
+    const [gitMenuOpen, setGitMenuOpen] = React.useState(false);
+    const [gitCommitComposerOpen, setGitCommitComposerOpen] = React.useState(false);
+    const [gitCommitMessage, setGitCommitMessage] = React.useState("");
     const handleCloseWorkspace = React.useCallback(() => setWorkspaceOpen(false), []);
     const isConnected = connectionState === "authenticated";
 
+    const handleCloseGitMenu = React.useCallback(() => {
+        setGitMenuOpen(false);
+        setGitCommitComposerOpen(false);
+        setGitCommitMessage("");
+        Keyboard.dismiss();
+    }, []);
+
     const handleNewChat = React.useCallback(() => {
         setMenuOpen(false);
+        handleCloseGitMenu();
         startDraftConversation(
             workspaceSessionId !== null && workspaceSessionId === activeSessionId ? workspaceRoot : null
         );
-    }, [activeSessionId, workspaceRoot, workspaceSessionId]);
+    }, [activeSessionId, handleCloseGitMenu, workspaceRoot, workspaceSessionId]);
 
     const handleOpenSettings = React.useCallback(() => {
         setMenuOpen(false);
+        handleCloseGitMenu();
         router.push("/settings");
-    }, [router]);
+    }, [handleCloseGitMenu, router]);
 
     const handleDisconnect = React.useCallback(() => {
         setMenuOpen(false);
+        handleCloseGitMenu();
         disconnect();
         router.replace("/scan");
-    }, [router]);
+    }, [handleCloseGitMenu, router]);
 
     const handleOpenWorkspaceChanges = React.useCallback(() => {
+        handleCloseGitMenu();
         useWorkspaceStore.getState().setTab("changes");
         setWorkspaceOpen(true);
-    }, []);
+    }, [handleCloseGitMenu]);
 
     const activeSession = sessions.find((s) => s.id === activeSessionId);
     const activeConversation = activeConversationId !== null
@@ -185,6 +220,7 @@ const ChatHeader = React.memo(function ChatHeader() {
         : undefined;
     const draftWorkspaceRoot = activeSessionId === null ? (activeConversation?.workspaceRoot ?? null) : null;
     const hasBoundWorkspaceSession = workspaceSessionId !== null && workspaceSessionId === activeSessionId;
+    const hasRepo = hasBoundWorkspaceSession && gitRoot !== null;
     const currentWorkspaceBranch = hasBoundWorkspaceSession ? branch : null;
     const currentWorkspaceRoot = hasBoundWorkspaceSession ? workspaceRoot : null;
     const currentRepository = hasBoundWorkspaceSession ? repository : null;
@@ -213,6 +249,63 @@ const ChatHeader = React.memo(function ChatHeader() {
         )
     ), [summaryChanges]);
     const hasVisibleDiffTotals = changeTotals.additions > 0 || changeTotals.deletions > 0;
+    const gitActionBusy = isCommitting || isPulling || isPushing;
+    const canOpenGitMenu = hasRepo && isConnected;
+    const canCommit = canOpenGitMenu && uncommittedChanges.length > 0;
+
+    const handleToggleGitMenu = React.useCallback(() => {
+        if (!canOpenGitMenu) {
+            return;
+        }
+
+        setMenuOpen(false);
+        setWorkspaceOpen(false);
+        setGitMenuOpen((value) => !value);
+        setGitCommitComposerOpen(false);
+        setGitCommitMessage("");
+    }, [canOpenGitMenu]);
+
+    const handleOpenGitCommitComposer = React.useCallback(() => {
+        if (!canCommit || isCommitting) {
+            return;
+        }
+
+        setGitCommitComposerOpen(true);
+    }, [canCommit, isCommitting]);
+
+    const handleCancelGitCommitComposer = React.useCallback(() => {
+        setGitCommitComposerOpen(false);
+        setGitCommitMessage("");
+        Keyboard.dismiss();
+    }, []);
+
+    const handleSubmitGitCommit = React.useCallback(() => {
+        const trimmedMessage = gitCommitMessage.trim();
+        if (trimmedMessage.length === 0 || activeSessionId === null || !canCommit || isCommitting) {
+            return;
+        }
+
+        void commitWorkspace(activeSessionId, trimmedMessage);
+        handleCloseGitMenu();
+    }, [activeSessionId, canCommit, gitCommitMessage, handleCloseGitMenu, isCommitting]);
+
+    const handleGitPull = React.useCallback(() => {
+        if (activeSessionId === null || !canOpenGitMenu || isPulling) {
+            return;
+        }
+
+        void pullWorkspace(activeSessionId);
+        handleCloseGitMenu();
+    }, [activeSessionId, canOpenGitMenu, handleCloseGitMenu, isPulling]);
+
+    const handleGitPush = React.useCallback(() => {
+        if (activeSessionId === null || !canOpenGitMenu || isPushing) {
+            return;
+        }
+
+        void pushWorkspace(activeSessionId);
+        handleCloseGitMenu();
+    }, [activeSessionId, canOpenGitMenu, handleCloseGitMenu, isPushing]);
 
     React.useEffect(() => {
         if (!isConnected || activeSessionId === null) {
@@ -229,13 +322,20 @@ const ChatHeader = React.memo(function ChatHeader() {
             }
 
             setMenuOpen(false);
+            handleCloseGitMenu();
             setWorkspaceOpen(false);
         });
 
         return () => {
             subscription.remove();
         };
-    }, []);
+    }, [handleCloseGitMenu]);
+
+    React.useEffect(() => {
+        handleCloseGitMenu();
+        setWorkspaceOpen(false);
+        setMenuOpen(false);
+    }, [activeSessionId, handleCloseGitMenu]);
 
     return (
         <>
@@ -278,6 +378,7 @@ const ChatHeader = React.memo(function ChatHeader() {
                         accessibilityLabel="Open workspace changes"
                     >
                         <DiffIcon size={17} color={theme.colors.textSecondary} />
+                        <Text style={headerStyles.diffButtonText}>Diff</Text>
                         {hasVisibleDiffTotals && (
                             <View style={headerStyles.diffTotals}>
                                 <Text style={headerStyles.diffAddText}>+{changeTotals.additions}</Text>
@@ -286,8 +387,31 @@ const ChatHeader = React.memo(function ChatHeader() {
                         )}
                     </Pressable>
                     <Pressable
+                        style={({ pressed }) => [
+                            headerStyles.gitButton,
+                            gitMenuOpen && headerStyles.iconButtonActive,
+                            !canOpenGitMenu && headerStyles.iconButtonDisabled,
+                            pressed && canOpenGitMenu && headerStyles.iconButtonPressed,
+                        ]}
+                        onPress={handleToggleGitMenu}
+                        hitSlop={10}
+                        accessibilityLabel="Open Git actions"
+                        disabled={!canOpenGitMenu}
+                    >
+                        {gitActionBusy ? (
+                            <ActivityIndicator size="small" color={theme.colors.textSecondary} />
+                        ) : (
+                            <GitHubIcon size={15} color={theme.colors.textSecondary} />
+                        )}
+                        <Text style={headerStyles.gitButtonText}>Git</Text>
+                        <ChevronDownIcon size={11} color={theme.colors.textTertiary} />
+                    </Pressable>
+                    <Pressable
                         style={headerStyles.iconButton}
-                        onPress={() => setMenuOpen(true)}
+                        onPress={() => {
+                            handleCloseGitMenu();
+                            setMenuOpen(true);
+                        }}
                         hitSlop={10}
                         accessibilityLabel="More options"
                     >
@@ -334,7 +458,217 @@ const ChatHeader = React.memo(function ChatHeader() {
                     </Pressable>
                 </Pressable>
             </Modal>
+
+            <Modal
+                visible={gitMenuOpen}
+                transparent
+                animationType="fade"
+                onRequestClose={handleCloseGitMenu}
+            >
+                <Pressable
+                    style={[headerStyles.menuOverlay, headerStyles.gitMenuOverlay, { paddingTop: insets.top + 64 }]}
+                    onPress={handleCloseGitMenu}
+                >
+                    <Pressable
+                        style={headerStyles.gitMenuCard}
+                        onPress={(e) => e.stopPropagation()}
+                    >
+                        <View style={headerStyles.gitMenuHeader}>
+                            <View style={headerStyles.gitMenuTitleRow}>
+                                <GitHubIcon size={15} color={theme.colors.textSecondary} />
+                                <Text style={headerStyles.gitMenuTitle}>Repository actions</Text>
+                            </View>
+                            <Text style={headerStyles.gitMenuSubtitle} numberOfLines={1}>
+                                {repoName} · {branchName}
+                            </Text>
+                        </View>
+
+                        <Pressable
+                            style={({ pressed }) => [
+                                headerStyles.menuItem,
+                                (!canCommit || isCommitting) && headerStyles.menuItemDisabled,
+                                pressed && canCommit && !isCommitting && headerStyles.menuItemPressed,
+                            ]}
+                            onPress={handleOpenGitCommitComposer}
+                            disabled={!canCommit || isCommitting}
+                        >
+                            <GitHubIcon size={16} color={theme.colors.textSecondary} />
+                            <Text style={headerStyles.menuItemText}>
+                                {isCommitting ? "Committing…" : "Commit"}
+                            </Text>
+                        </Pressable>
+                        <View style={headerStyles.menuSep} />
+                        <Pressable
+                            style={({ pressed }) => [
+                                headerStyles.menuItem,
+                                isPulling && headerStyles.menuItemDisabled,
+                                pressed && !isPulling && headerStyles.menuItemPressed,
+                            ]}
+                            onPress={handleGitPull}
+                            disabled={isPulling}
+                        >
+                            <GitPullRequestIcon size={15} color={theme.colors.textSecondary} />
+                            <Text style={headerStyles.menuItemText}>
+                                {isPulling ? "Pulling…" : "Pull"}
+                            </Text>
+                        </Pressable>
+                        <View style={headerStyles.menuSep} />
+                        <Pressable
+                            style={({ pressed }) => [
+                                headerStyles.menuItem,
+                                isPushing && headerStyles.menuItemDisabled,
+                                pressed && !isPushing && headerStyles.menuItemPressed,
+                            ]}
+                            onPress={handleGitPush}
+                            disabled={isPushing}
+                        >
+                            <GitPushIcon size={15} color={theme.colors.textSecondary} />
+                            <Text style={headerStyles.menuItemText}>
+                                {isPushing ? "Pushing…" : "Push"}
+                            </Text>
+                        </Pressable>
+
+                        {gitCommitComposerOpen && (
+                            <>
+                                <View style={headerStyles.menuSep} />
+                                <View style={headerStyles.gitComposer}>
+                                    <Text style={headerStyles.gitComposerTitle}>Create commit</Text>
+                                    <Text style={headerStyles.gitComposerHint}>
+                                        All workspace changes will be staged together.
+                                    </Text>
+                                    <TextInput
+                                        style={headerStyles.gitComposerInput}
+                                        value={gitCommitMessage}
+                                        onChangeText={setGitCommitMessage}
+                                        placeholder="Commit message"
+                                        placeholderTextColor={theme.colors.textTertiary}
+                                        returnKeyType="done"
+                                        onSubmitEditing={handleSubmitGitCommit}
+                                        editable={!isCommitting}
+                                    />
+                                    <View style={headerStyles.gitComposerActions}>
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                headerStyles.gitComposerSecondaryButton,
+                                                pressed && headerStyles.iconButtonPressed,
+                                            ]}
+                                            onPress={handleCancelGitCommitComposer}
+                                        >
+                                            <Text style={headerStyles.gitComposerSecondaryText}>Cancel</Text>
+                                        </Pressable>
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                headerStyles.gitComposerPrimaryButton,
+                                                (gitCommitMessage.trim().length === 0 || isCommitting) && headerStyles.iconButtonDisabled,
+                                                pressed && gitCommitMessage.trim().length > 0 && !isCommitting && headerStyles.iconButtonPressed,
+                                            ]}
+                                            onPress={handleSubmitGitCommit}
+                                            disabled={gitCommitMessage.trim().length === 0 || isCommitting}
+                                        >
+                                            <Text style={headerStyles.gitComposerPrimaryText}>
+                                                {isCommitting ? "Saving…" : "Commit now"}
+                                            </Text>
+                                        </Pressable>
+                                    </View>
+                                </View>
+                            </>
+                        )}
+                    </Pressable>
+                </Pressable>
+            </Modal>
         </>
+    );
+});
+
+const WorkspaceOperationToast = React.memo(function WorkspaceOperationToast() {
+    const theme = useAppTheme();
+    const styles = useMemo(() => createStyles(theme), [theme]);
+    const operationMessage = useWorkspaceStore((s) => s.operationMessage);
+    const [visibleMessage, setVisibleMessage] = useState<string | null>(null);
+    const opacity = useRef(new Animated.Value(0)).current;
+    const translateY = useRef(new Animated.Value(-10)).current;
+    const hideTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+    useEffect(() => {
+        return () => {
+            if (hideTimeoutRef.current !== null) {
+                clearTimeout(hideTimeoutRef.current);
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (operationMessage === null) {
+            return;
+        }
+
+        if (hideTimeoutRef.current !== null) {
+            clearTimeout(hideTimeoutRef.current);
+            hideTimeoutRef.current = null;
+        }
+
+        setVisibleMessage(operationMessage);
+        opacity.stopAnimation();
+        translateY.stopAnimation();
+        opacity.setValue(0);
+        translateY.setValue(-10);
+
+        Animated.parallel([
+            Animated.timing(opacity, {
+                toValue: 1,
+                duration: 180,
+                useNativeDriver: true,
+            }),
+            Animated.timing(translateY, {
+                toValue: 0,
+                duration: 180,
+                useNativeDriver: true,
+            }),
+        ]).start();
+
+        hideTimeoutRef.current = setTimeout(() => {
+            Animated.parallel([
+                Animated.timing(opacity, {
+                    toValue: 0,
+                    duration: 220,
+                    useNativeDriver: true,
+                }),
+                Animated.timing(translateY, {
+                    toValue: -8,
+                    duration: 220,
+                    useNativeDriver: true,
+                }),
+            ]).start(() => {
+                setVisibleMessage((current) => (current === operationMessage ? null : current));
+            });
+        }, 3_000);
+    }, [opacity, operationMessage, translateY]);
+
+    if (visibleMessage === null) {
+        return null;
+    }
+
+    return (
+        <Animated.View
+            pointerEvents="none"
+            style={[
+                styles.workspaceToast,
+                {
+                    opacity,
+                    transform: [{ translateY }],
+                },
+            ]}
+        >
+            <View style={styles.workspaceToastIcon}>
+                <CheckIcon size={15} color={theme.colors.success} />
+            </View>
+            <View style={styles.workspaceToastContent}>
+                <Text style={styles.workspaceToastLabel}>Repository updated</Text>
+                <Text style={styles.workspaceToastText} numberOfLines={2}>
+                    {visibleMessage}
+                </Text>
+            </View>
+        </Animated.View>
     );
 });
 
@@ -367,6 +701,7 @@ export default function ChatScreen() {
     const [queuedDrafts, setQueuedDrafts] = useState<Array<QueuedDraft>>([]);
     const [editingDraft, setEditingDraft] = useState<QueuedDraft | null>(null);
     const prevSessionIdRef = useRef<string | null>(null);
+    const autoSentQueuedDraftIdRef = useRef<string | null>(null);
     const persistChatItemsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const persistInteractionRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(null);
     const stableSubagentRunsRef = useRef<ReadonlyArray<SubagentRun>>([]);
@@ -380,6 +715,7 @@ export default function ChatScreen() {
     const isSessionLoading = useSessionStore((s) => s.isSessionLoading);
     const isTyping = useSessionStore((s) => s.isAssistantTyping);
     const isAbortPending = useSessionStore((s) => s.isAbortRequested);
+    const busySessions = useSessionStore((s) => s.busySessions);
     const chatCurrentIntent = useSessionStore((s) => s.currentIntent);
     const models = useSessionStore((s) => s.models);
     const selectedModel = useSessionStore((s) => s.selectedModel);
@@ -407,6 +743,7 @@ export default function ChatScreen() {
     const isConnecting =
         connectionState === "connecting" || connectionState === "connected";
     const inputDisabled = !isConnected || isSessionLoading;
+    const isActiveSessionBusy = activeSessionId !== null && busySessions[activeSessionId] === true;
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
     const activeAgentItems = useMemo(
         () => getActiveAgentItems(chatItems, isTyping),
@@ -433,7 +770,7 @@ export default function ChatScreen() {
         [activeAgentItems],
     );
     const nextVisibleAgentTodos = useMemo(() => {
-        const hasActiveTurn = isTyping || hasRunningToolInCurrentTurn;
+        const hasActiveTurn = isActiveSessionBusy || isTyping || hasRunningToolInCurrentTurn;
         if (!hasActiveTurn) {
             return [];
         }
@@ -444,7 +781,7 @@ export default function ChatScreen() {
         }
 
         return agentTodos;
-    }, [activeAgentItems, agentTodos, hasRunningToolInCurrentTurn, isTyping]);
+    }, [activeAgentItems, agentTodos, hasRunningToolInCurrentTurn, isActiveSessionBusy, isTyping]);
     if (!areAgentTodosEqual(stableAgentTodosRef.current, nextVisibleAgentTodos)) {
         stableAgentTodosRef.current = nextVisibleAgentTodos;
     }
@@ -608,9 +945,31 @@ export default function ChatScreen() {
                 return;
             }
 
-            // "send" mode — abort current turn (if any) then send
-            if (mode === "send" && activeSessionId !== null && isTyping) {
-                abortMessage(activeSessionId);
+            const hasBlockingTurn = activeSessionId !== null && (
+                isActiveSessionBusy
+                || isTyping
+                || permissionPrompt !== null
+                || userInputPrompt !== null
+                || planExitPrompt !== null
+            );
+
+            if (mode === "send" && hasBlockingTurn && activeSessionId !== null) {
+                setQueuedDrafts((prev) => [
+                    ...prev,
+                    {
+                        id: `queued-${Date.now()}-${prev.length + 1}`,
+                        sessionId: activeSessionId,
+                        content,
+                        images: [...images],
+                    },
+                ]);
+                if (!isAbortPending) {
+                    setAbortRequested(true);
+                    void abortMessage(activeSessionId).catch(() => {
+                        useSessionStore.getState().setAbortRequested(false);
+                    });
+                }
+                return;
             }
 
             const historyStore = useChatHistoryStore.getState();
@@ -687,12 +1046,18 @@ export default function ChatScreen() {
             activeSessionId,
             agentMode,
             enableAutoFollow,
+            isActiveSessionBusy,
+            isAbortPending,
             isTyping,
             models,
+            permissionPrompt,
             permissionLevel,
+            planExitPrompt,
             reasoningEffort,
             selectedModel,
+            setAbortRequested,
             sessions,
+            userInputPrompt,
             workspaceRoot,
             workspaceSessionId,
         ]
@@ -702,7 +1067,6 @@ export default function ChatScreen() {
     const handleAbort = useCallback(() => {
         if (activeSessionId !== null && !isAbortPending) {
             setAbortRequested(true);
-            useSessionStore.getState().stopActiveTurn();
             void abortMessage(activeSessionId).catch(() => {
                 useSessionStore.getState().setAbortRequested(false);
             });
@@ -735,6 +1099,46 @@ export default function ChatScreen() {
         setEditingDraft(null);
     }, []);
 
+    useEffect(() => {
+        if (
+            activeSessionId === null
+            || isActiveSessionBusy
+            || isTyping
+            || inputDisabled
+            || isAbortPending
+            || permissionPrompt !== null
+            || userInputPrompt !== null
+            || planExitPrompt !== null
+        ) {
+            return;
+        }
+
+        const nextDraft = queuedDrafts.find((draft) => draft.sessionId === activeSessionId);
+        if (nextDraft === undefined) {
+            autoSentQueuedDraftIdRef.current = null;
+            return;
+        }
+
+        if (autoSentQueuedDraftIdRef.current === nextDraft.id) {
+            return;
+        }
+
+        autoSentQueuedDraftIdRef.current = nextDraft.id;
+        handleSend(nextDraft.content, nextDraft.images, "send");
+        setQueuedDrafts((prev) => prev.filter((draft) => draft.id !== nextDraft.id));
+    }, [
+        activeSessionId,
+        handleSend,
+        isActiveSessionBusy,
+        inputDisabled,
+        isAbortPending,
+        isTyping,
+        permissionPrompt,
+        planExitPrompt,
+        queuedDrafts,
+        userInputPrompt,
+    ]);
+
     // Respond to permission
     const handlePermissionRespond = useCallback(
         (requestId: string, approved: boolean) => {
@@ -766,7 +1170,10 @@ export default function ChatScreen() {
 
     return (
         <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
-            <ChatHeader />
+            <View style={styles.headerStack}>
+                <ChatHeader />
+                <WorkspaceOperationToast />
+            </View>
 
             <KeyboardAvoidingView
                 style={styles.flex}
@@ -924,6 +1331,13 @@ return StyleSheet.create({
         alignItems: "center",
         gap: 6,
     },
+    iconButtonActive: {
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.bgElevated,
+    },
+    iconButtonDisabled: {
+        opacity: 0.5,
+    },
     iconButton: {
         width: 34,
         height: 34,
@@ -945,10 +1359,32 @@ return StyleSheet.create({
         borderWidth: 1,
         borderColor: theme.colors.borderMuted,
     },
+    gitButton: {
+        minHeight: 34,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 6,
+        paddingHorizontal: theme.spacing.sm,
+        borderRadius: theme.borderRadius.full,
+        backgroundColor: theme.colors.bgSecondary,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+    },
+    gitButtonText: {
+        fontSize: theme.fontSize.xs,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
+    },
     diffTotals: {
         flexDirection: "row",
         alignItems: "center",
         gap: 4,
+    },
+    diffButtonText: {
+        fontSize: theme.fontSize.xs,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
     },
     diffAddText: {
         fontSize: theme.fontSize.xs,
@@ -967,6 +1403,9 @@ return StyleSheet.create({
         paddingRight: theme.spacing.md,
         alignItems: "flex-end",
     }, // paddingTop overridden inline with insets.top + 64
+    gitMenuOverlay: {
+        paddingRight: theme.spacing.xl + 8,
+    },
     menuCard: {
         minWidth: 180,
         backgroundColor: theme.colors.bgElevated,
@@ -982,12 +1421,112 @@ return StyleSheet.create({
         paddingHorizontal: theme.spacing.md,
         paddingVertical: 12,
     },
+    menuItemPressed: {
+        backgroundColor: theme.colors.bgSecondary,
+    },
+    menuItemDisabled: {
+        opacity: 0.58,
+    },
     menuItemText: {
         fontSize: theme.fontSize.md,
         color: theme.colors.textPrimary,
     },
     menuItemDanger: {
         color: theme.colors.error,
+    },
+    gitMenuCard: {
+        minWidth: 232,
+        maxWidth: 280,
+        backgroundColor: theme.colors.bgElevated,
+        borderRadius: theme.borderRadius.lg,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: theme.colors.border,
+        overflow: "hidden",
+        shadowColor: "#000",
+        shadowOpacity: theme.resolvedScheme === "light" ? 0.08 : 0.26,
+        shadowRadius: 12,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 8,
+    },
+    gitMenuHeader: {
+        gap: 5,
+        paddingHorizontal: theme.spacing.md,
+        paddingTop: theme.spacing.md,
+        paddingBottom: theme.spacing.sm,
+        backgroundColor: theme.colors.bgSecondary,
+    },
+    gitMenuTitleRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    gitMenuTitle: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
+    },
+    gitMenuSubtitle: {
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
+    },
+    gitComposer: {
+        gap: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        paddingTop: theme.spacing.md,
+        paddingBottom: theme.spacing.md,
+    },
+    gitComposerTitle: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
+    },
+    gitComposerHint: {
+        fontSize: theme.fontSize.xs,
+        lineHeight: 18,
+        color: theme.colors.textSecondary,
+    },
+    gitComposerInput: {
+        minHeight: 42,
+        borderRadius: theme.borderRadius.md,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.bg,
+        paddingHorizontal: theme.spacing.md,
+        color: theme.colors.textPrimary,
+        fontSize: theme.fontSize.md,
+    },
+    gitComposerActions: {
+        flexDirection: "row",
+        justifyContent: "flex-end",
+        gap: theme.spacing.sm,
+    },
+    gitComposerSecondaryButton: {
+        minHeight: 34,
+        justifyContent: "center",
+        alignItems: "center",
+        borderRadius: theme.borderRadius.full,
+        paddingHorizontal: theme.spacing.md,
+        backgroundColor: theme.colors.bgSecondary,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+    },
+    gitComposerSecondaryText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "600",
+        color: theme.colors.textSecondary,
+    },
+    gitComposerPrimaryButton: {
+        minHeight: 34,
+        justifyContent: "center",
+        alignItems: "center",
+        borderRadius: theme.borderRadius.full,
+        paddingHorizontal: theme.spacing.md,
+        backgroundColor: theme.colors.textPrimary,
+    },
+    gitComposerPrimaryText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "700",
+        color: theme.colors.bg,
     },
     menuSep: {
         height: StyleSheet.hairlineWidth,
@@ -1002,6 +1541,10 @@ return StyleSheet.create({
     container: {
         flex: 1,
         backgroundColor: theme.colors.bg,
+    },
+    headerStack: {
+        position: "relative",
+        zIndex: 12,
     },
     flex: {
         flex: 1,
@@ -1027,6 +1570,49 @@ return StyleSheet.create({
         fontSize: theme.fontSize.md,
         lineHeight: 18,
         color: theme.colors.error,
+    },
+    workspaceToast: {
+        position: "absolute",
+        top: 76,
+        left: theme.spacing.lg,
+        right: theme.spacing.lg,
+        zIndex: 20,
+        flexDirection: "row",
+        alignItems: "center",
+        gap: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.sm,
+        borderRadius: theme.borderRadius.lg,
+        borderWidth: 0,
+        backgroundColor: theme.resolvedScheme === "light" ? theme.colors.bgSecondary : theme.colors.bgSecondary,
+        shadowColor: "#000",
+        shadowOpacity: theme.resolvedScheme === "light" ? 0.08 : 0.22,
+        shadowRadius: 10,
+        shadowOffset: { width: 0, height: 6 },
+        elevation: 8,
+    },
+    workspaceToastIcon: {
+        width: 28,
+        height: 28,
+        borderRadius: 14,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: theme.colors.successMuted,
+    },
+    workspaceToastContent: {
+        flex: 1,
+        gap: 2,
+    },
+    workspaceToastLabel: {
+        fontSize: theme.fontSize.xs,
+        fontWeight: "700",
+        color: theme.colors.success,
+    },
+    workspaceToastText: {
+        fontSize: theme.fontSize.sm,
+        lineHeight: 18,
+        fontWeight: "600",
+        color: theme.colors.textAssistant,
     },
     scrollToBottomBtn: {
         position: "absolute",

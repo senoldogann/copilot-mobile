@@ -250,10 +250,57 @@ export function CheckIcon({ size = 14, color = "#3fb950" }: { size?: number; col
     );
 }
 
+export function PencilIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M12 20h9"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+            <Path
+                d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5Z"
+                stroke={color}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                fill="none"
+            />
+        </Svg>
+    );
+}
+
 export function CloseIcon({ size = 16, color = "#595B5B" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
             <Path d="M18 6 6 18M6 6l12 12" stroke={color} strokeWidth={2} strokeLinecap="round" />
+        </Svg>
+    );
+}
+
+export function TrashIcon({ size = 14, color = "#f85149" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M3 6h18" />
+                <Path d="M8 6V4h8v2" />
+                <Path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                <Path d="M10 11v6M14 11v6" />
+            </G>
+        </Svg>
+    );
+}
+
+export function ArchiveIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M21 8v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8" />
+                <Path d="M23 3H1v5h22V3Z" />
+                <Path d="M10 12h4" />
+            </G>
         </Svg>
     );
 }

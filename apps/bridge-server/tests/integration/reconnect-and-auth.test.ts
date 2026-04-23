@@ -747,6 +747,46 @@ describe("workspace explorer integration", () => {
         }
     });
 
+    it("searches files within the active workspace for @file autocomplete", async () => {
+        const token = generatePairingToken();
+        const client = await createWSClient(WORKSPACE_TEST_PORT);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await client.waitForMessage("session.created");
+
+            client.send(makeClientMessage("workspace.search.request", {
+                requestKey: "workspace-file-search",
+                sessionId: session.id,
+                query: "feature",
+                limit: 10,
+                searchScope: "workspace_files",
+            }));
+
+            const searchMessage = await client.waitForMessage("workspace.search.response");
+            assert.equal(searchMessage.type, "workspace.search.response");
+            assert.equal(
+                searchMessage.payload.matches.some((match) => match.path === "src/feature.ts"),
+                true
+            );
+        } finally {
+            await client.close();
+        }
+    });
+
     it("returns git summary, supports commit, and reports safe pull/push results", async () => {
         const token = generatePairingToken();
         const client = await createWSClient(WORKSPACE_TEST_PORT);
@@ -784,6 +824,17 @@ describe("workspace explorer integration", () => {
             assert.equal(gitMsg.payload.repository, "example/copilot-mobile");
             assert.ok(gitMsg.payload.uncommittedChanges.some((change) => change.path === "README.md"));
             assert.ok(gitMsg.payload.uncommittedChanges.some((change) => change.path === "notes.txt"));
+            assert.deepEqual(
+                gitMsg.payload.uncommittedChanges.find((change) => change.path === "notes.txt"),
+                {
+                    path: "notes.txt",
+                    status: "untracked",
+                    indexStatus: "?",
+                    worktreeStatus: "?",
+                    additions: 1,
+                    deletions: 0,
+                }
+            );
             assert.ok(gitMsg.payload.recentCommits.length >= 2);
             assert.equal(gitMsg.payload.recentCommits[0]?.files.includes("src/feature.ts"), true);
 

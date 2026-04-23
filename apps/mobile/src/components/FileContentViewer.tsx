@@ -305,6 +305,10 @@ function FileBody({ content }: { readonly content: string }): React.JSX.Element 
 }
 
 function createStyles(theme: AppTheme) {
+    const fileBodyBackground = theme.resolvedScheme === "light"
+        ? theme.colors.bgSecondary
+        : theme.colors.bg;
+
     return StyleSheet.create({
         metaBanner: {
             flexDirection: "row",
@@ -352,13 +356,13 @@ function createStyles(theme: AppTheme) {
             color: theme.colors.textPrimary,
         },
         codeBlock: {
-            backgroundColor: theme.colors.bg,
+            backgroundColor: fileBodyBackground,
             paddingHorizontal: 8,
             paddingVertical: theme.spacing.sm,
         },
         codeLine: {
             flexDirection: "row",
-            backgroundColor: theme.colors.bg,
+            backgroundColor: fileBodyBackground,
         },
         lineNum: {
             width: 36,

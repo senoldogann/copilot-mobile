@@ -247,6 +247,181 @@ Release gate:
 - App Store Connect metadata does not contain placeholder privacy or support URLs
 - Reviewer package includes a sample QR and a short setup video
 
+## Real-Device Regression Gate
+
+Run this gate on a physical iPhone paired to a real Mac companion before every TestFlight or App Store submission. Every scenario below must have a clear pass or fail result.
+
+### 1. Background Push
+
+Setup:
+
+- pair the iPhone with a Mac companion that is already healthy in `code-companion doctor`
+- enable notifications for the app on the device
+- keep the app installed as a development or production build, not Expo Go
+
+Steps:
+
+- send a prompt that will finish in the background
+- immediately move the app to the background
+- repeat with a prompt that triggers a permission request
+
+Expected result:
+
+- a local notification arrives while the app is backgrounded when the session finishes
+- a local notification arrives while the app is backgrounded when a permission request is waiting
+- opening the app clears the pending notification state instead of showing the same notification again
+
+Fail condition:
+
+- no notification arrives until the app returns to the foreground
+- the same session completion notification appears again after reopening the app
+
+### 2. Reconnect
+
+Setup:
+
+- start with a fresh successful pairing
+- confirm the companion is connected through the hosted relay
+
+Steps:
+
+- switch from Wi-Fi to cellular
+- switch to a completely different network after the original QR scan
+- background and foreground the app during an active session
+- restart the desktop daemon and reconnect
+- put the Mac to sleep and wake it again
+
+Expected result:
+
+- the phone reconnects without a fresh QR scan
+- the active session resumes without losing message history or stream state
+- stale credentials fail cleanly and prompt for fresh pairing instead of looping forever
+
+Fail condition:
+
+- reconnect requires re-pairing in a healthy hosted-relay scenario
+- the app shows connected state while the underlying session is actually broken
+
+### 3. Stop Session
+
+Setup:
+
+- send a prompt that triggers tool calls, thinking, or subagents
+
+Steps:
+
+- tap the stop button while the assistant is actively streaming
+- repeat during a long tool run and during a subagent run
+
+Expected result:
+
+- the stream stops immediately
+- no additional assistant, thinking, todo, or subagent updates arrive after the stop is acknowledged
+- the UI leaves the running state and the stop control becomes tappable again for later turns
+
+Fail condition:
+
+- the stop button changes visual state but the assistant keeps running
+- the UI gets stuck in a pseudo-running state after the stop request
+
+### 4. Git Commit / Pull / Push
+
+Setup:
+
+- open a workspace with a real git remote and a clean authenticated GitHub flow
+
+Steps:
+
+- create or edit files in the workspace
+- commit from the top-bar git menu
+- pull from the same menu
+- push from the same menu
+
+Expected result:
+
+- commit, pull, and push are available from the chat header without opening the workspace sheet
+- success feedback is shown with a short transient toast
+- diff totals include new files as additions
+- failures include actionable error text
+
+Fail condition:
+
+- any git action silently fails
+- success feedback never appears or persists indefinitely
+- new files do not contribute to the `+` diff count
+
+### 5. Onboarding
+
+Setup:
+
+- delete the app from the phone and install a fresh build
+
+Steps:
+
+- open the app for the first time
+- complete or dismiss onboarding
+- reopen the app
+- open onboarding again manually from Settings
+
+Expected result:
+
+- onboarding appears exactly once on first install before normal app usage
+- onboarding can be opened again from Settings
+- all cards fit on screen in light and dark themes without clipped content
+- setup copy clearly explains the Mac companion requirement and the exact `code-companion` commands
+
+Fail condition:
+
+- the app lands directly on the main chat on a first install
+- onboarding loops when the user taps the CTA buttons
+- onboarding layout clips text or buttons on supported iPhone sizes
+
+### 6. Large Chat Performance
+
+Setup:
+
+- use a chat with long streaming output, tool cards, thoughts, subagents, and todos
+
+Steps:
+
+- stream a long response
+- scroll during streaming
+- open and close tool cards, todo panels, and subagent panels
+- leave the chat and return to it
+
+Expected result:
+
+- thinking and tool progress appear incrementally while preserving device thermals
+- the main chat scroll remains responsive from the center of the screen, not only from the edges
+- todo and subagent panels update live without flickering or stale counts
+- finished todo and subagent state does not reappear on unrelated later turns
+
+Fail condition:
+
+- stream content only appears after completion
+- repeated rerenders cause visible flicker, jank, or excessive device heat
+- stale subagent or todo panels return on a later user message
+
+### 7. Brand And Review Safety
+
+Setup:
+
+- review the latest iOS build, onboarding, settings, App Store metadata draft, and support copy together
+
+Steps:
+
+- scan for `Copilot Mobile`, `VSCode Mobile`, or any copy that suggests this is an official Microsoft or GitHub mobile client
+- verify that the app is described as a desktop coding companion that runs actions on the user's own Mac
+
+Expected result:
+
+- product copy stays in the "desktop coding companion" lane
+- no visible strings imply official GitHub Copilot or Visual Studio Code ownership
+
+Fail condition:
+
+- any customer-facing copy can be read as a brand clone, official client, or endorsed first-party product
+
 ## Recommendation
 
 Use `code-companion doctor` as the first support and release gate. If it is not green, do not proceed to public pairing or reconnect validation.

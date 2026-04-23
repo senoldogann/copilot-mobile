@@ -104,7 +104,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     },
     toggleText: {
         fontSize: theme.fontSize.xs,
-        color: theme.colors.textAssistant,
+        color: theme.colors.textSecondary,
         marginLeft: "auto",
     },
     inlinePanel: {
@@ -115,9 +115,9 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     content: {
         fontSize: theme.fontSize.sm,
         lineHeight: 20,
-        color: theme.colors.textAssistant,
+        color: theme.colors.textSecondary,
     },
     cursor: {
-        color: theme.colors.textAssistant,
+        color: theme.colors.textSecondary,
     },
 });

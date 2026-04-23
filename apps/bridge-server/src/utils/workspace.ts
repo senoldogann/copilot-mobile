@@ -17,7 +17,10 @@ const DEFAULT_TREE_PAGE_SIZE = 200;
 const MAX_WORKSPACE_TREE_DEPTH = 7;
 const MAX_WORKSPACE_COMMIT_LIMIT = 50;
 const MAX_WORKSPACE_RESOLVE_MATCHES = 10;
+const MAX_WORKSPACE_SEARCH_LIMIT = 24;
 const GIT_OPERATION_TIMEOUT_MS = 30_000;
+const WORKSPACE_CANDIDATE_CACHE_TTL_MS = 5_000;
+const MAX_WORKSPACE_CANDIDATE_CACHE_ENTRIES = 8;
 const FALLBACK_RESOLVE_IGNORED_DIRS = new Set([".git", "node_modules", "Pods", "build", "dist", ".expo"]);
 
 type GitCommandResult = {
@@ -28,6 +31,48 @@ type GitCommandResult = {
     signal?: string | null | undefined;
     message?: string | undefined;
 };
+
+type WorkspaceCandidateCacheEntry = {
+    candidates: ReadonlyArray<string>;
+    expiresAt: number;
+};
+
+const workspaceCandidateCache = new Map<string, WorkspaceCandidateCacheEntry>();
+
+function readCachedWorkspaceCandidates(rootPath: string): ReadonlyArray<string> | null {
+    const cached = workspaceCandidateCache.get(rootPath);
+    if (cached === undefined) {
+        return null;
+    }
+
+    if (cached.expiresAt <= Date.now()) {
+        workspaceCandidateCache.delete(rootPath);
+        return null;
+    }
+
+    return cached.candidates;
+}
+
+function writeCachedWorkspaceCandidates(
+    rootPath: string,
+    candidates: ReadonlyArray<string>
+): ReadonlyArray<string> {
+    workspaceCandidateCache.delete(rootPath);
+    workspaceCandidateCache.set(rootPath, {
+        candidates,
+        expiresAt: Date.now() + WORKSPACE_CANDIDATE_CACHE_TTL_MS,
+    });
+
+    while (workspaceCandidateCache.size > MAX_WORKSPACE_CANDIDATE_CACHE_ENTRIES) {
+        const oldestRootPath = workspaceCandidateCache.keys().next().value;
+        if (typeof oldestRootPath !== "string") {
+            break;
+        }
+        workspaceCandidateCache.delete(oldestRootPath);
+    }
+
+    return candidates;
+}
 
 export function resolveWorkspaceRoot(context: SessionContext): string {
     return resolve(context.workspaceRoot);
@@ -149,15 +194,26 @@ async function listWorkspaceCandidatesFromFilesystem(
 }
 
 async function listWorkspaceCandidates(rootPath: string): Promise<ReadonlyArray<string>> {
-    const gitResult = await runGit(rootPath, ["ls-files", "--cached", "--others", "--exclude-standard"]);
-    if (gitResult.success) {
-        return gitResult.stdout
-            .split(/\r?\n/)
-            .map((line) => line.trim())
-            .filter((line) => line.length > 0);
+    const cached = readCachedWorkspaceCandidates(rootPath);
+    if (cached !== null) {
+        return cached;
     }
 
-    return listWorkspaceCandidatesFromFilesystem(rootPath, rootPath);
+    const gitResult = await runGit(rootPath, ["ls-files", "--cached", "--others", "--exclude-standard"]);
+    if (gitResult.success) {
+        return writeCachedWorkspaceCandidates(
+            rootPath,
+            gitResult.stdout
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter((line) => line.length > 0)
+        );
+    }
+
+    return writeCachedWorkspaceCandidates(
+        rootPath,
+        await listWorkspaceCandidatesFromFilesystem(rootPath, rootPath)
+    );
 }
 
 function matchWorkspaceCandidates(
@@ -176,6 +232,82 @@ function matchWorkspaceCandidates(
     return candidates.filter((candidate) =>
         candidate === suffix || candidate.endsWith(`/${suffix}`)
     );
+}
+
+function candidateMatchesWorkspaceSearch(candidate: string, normalizedQuery: string): boolean {
+    if (normalizedQuery.length === 0) {
+        return true;
+    }
+
+    const loweredCandidate = candidate.toLowerCase();
+    if (loweredCandidate.includes(normalizedQuery)) {
+        return true;
+    }
+
+    const fileName = basename(loweredCandidate);
+    return fileName.includes(normalizedQuery);
+}
+
+function scoreWorkspaceSearchCandidate(candidate: string, normalizedQuery: string): number {
+    if (normalizedQuery.length === 0) {
+        return 0;
+    }
+
+    const loweredCandidate = candidate.toLowerCase();
+    const fileName = basename(loweredCandidate);
+    if (fileName === normalizedQuery) {
+        return 0;
+    }
+
+    if (fileName.startsWith(normalizedQuery)) {
+        return 1;
+    }
+
+    if (loweredCandidate.startsWith(normalizedQuery)) {
+        return 2;
+    }
+
+    if (fileName.includes(normalizedQuery)) {
+        return 3;
+    }
+
+    return 4;
+}
+
+export async function searchWorkspaceFiles(
+    context: SessionContext,
+    query: string,
+    requestedLimit: number | undefined
+): Promise<ReadonlyArray<{
+    path: string;
+    displayPath: string;
+    name: string;
+}>> {
+    const rootPath = resolveWorkspaceRoot(context);
+    const normalizedLimit = Math.min(
+        Math.max(requestedLimit ?? 12, 1),
+        MAX_WORKSPACE_SEARCH_LIMIT
+    );
+    const normalizedQuery = normalizeWorkspaceReference(query).toLowerCase();
+    const candidates = await listWorkspaceCandidates(rootPath);
+
+    return [...new Set(candidates)]
+        .filter((candidate) => candidateMatchesWorkspaceSearch(candidate, normalizedQuery))
+        .sort((left, right) => {
+            const scoreDelta = scoreWorkspaceSearchCandidate(left, normalizedQuery)
+                - scoreWorkspaceSearchCandidate(right, normalizedQuery);
+            if (scoreDelta !== 0) {
+                return scoreDelta;
+            }
+
+            return left.localeCompare(right);
+        })
+        .slice(0, normalizedLimit)
+        .map((candidate) => ({
+            path: candidate,
+            displayPath: candidate,
+            name: basename(candidate),
+        }));
 }
 
 export async function resolveWorkspaceReference(
@@ -577,6 +709,26 @@ function parseNumstat(stdout: string): Map<string, { additions: number; deletion
     return map;
 }
 
+async function readUntrackedFileNumstat(
+    gitRoot: string,
+    path: string
+): Promise<{ additions: number; deletions: number } | null> {
+    const diffResult = await runGit(gitRoot, ["diff", "--no-index", "--numstat", "/dev/null", path]);
+    const canReadDiffOutput = diffResult.success || diffResult.exitCode === 1;
+    if (!canReadDiffOutput) {
+        return null;
+    }
+
+    const parsed = parseNumstat(diffResult.stdout);
+    const exactMatch = parsed.get(path);
+    if (exactMatch !== undefined) {
+        return exactMatch;
+    }
+
+    const fallbackMatch = [...parsed.entries()].find(([candidatePath]) => candidatePath.endsWith(path));
+    return fallbackMatch?.[1] ?? null;
+}
+
 export async function buildWorkspaceGitSummary(
     context: SessionContext,
     commitLimit = 10
@@ -642,18 +794,39 @@ export async function buildWorkspaceGitSummary(
         ? parseGitBranches(branchListResult.stdout, branch)
         : parseGitBranches("", branch);
 
+    const parsedChanges = statusResult.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trimEnd())
+        .filter((line) => line.length > 0)
+        .map(parseGitStatusLine)
+        .filter((entry): entry is GitFileChange => entry !== null);
+
+    const missingUntrackedStats = parsedChanges.filter((change) =>
+        (change.status === "untracked" || change.status === "added")
+        && !numstatMap.has(change.path)
+    );
+    if (missingUntrackedStats.length > 0) {
+        const statsEntries = await Promise.all(
+            missingUntrackedStats.map(async (change) => {
+                const stats = await readUntrackedFileNumstat(gitRoot, change.path);
+                return stats === null ? null : [change.path, stats] as const;
+            })
+        );
+
+        for (const entry of statsEntries) {
+            if (entry !== null) {
+                numstatMap.set(entry[0], entry[1]);
+            }
+        }
+    }
+
     return {
         workspaceRoot,
         gitRoot,
         ...(repository !== undefined ? { repository } : {}),
         ...(branch !== undefined ? { branch } : {}),
         branches,
-        uncommittedChanges: statusResult.stdout
-            .split(/\r?\n/)
-            .map((line) => line.trimEnd())
-            .filter((line) => line.length > 0)
-            .map(parseGitStatusLine)
-            .filter((entry): entry is GitFileChange => entry !== null)
+        uncommittedChanges: parsedChanges
             .map((change) => {
                 if (!workspaceScoped) {
                     const stats = numstatMap.get(change.path);

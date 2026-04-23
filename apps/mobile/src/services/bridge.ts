@@ -45,6 +45,7 @@ import {
     markBridgeRemotePushRegistered,
     resolveRemotePushAvailability,
 } from "./notifications";
+import { clearSessionPrefetch, markSessionPrefetchRequest } from "./session-prefetch";
 
 export { onWorkspaceFileResponse, onWorkspaceDiffResponse, onWorkspaceResolveResponse };
 
@@ -537,11 +538,20 @@ export async function resumeSession(sessionId: string): Promise<void> {
     }
 }
 
-export async function prefetchSessionState(sessionId: string): Promise<void> {
+export async function prefetchSessionState(
+    sessionId: string,
+    hydrateActiveSession: boolean
+): Promise<void> {
     const c = getClient();
     try {
+        if (!hydrateActiveSession) {
+            markSessionPrefetchRequest(sessionId);
+        }
         await c.sendMessage("session.resume", { sessionId });
     } catch (error) {
+        if (!hydrateActiveSession) {
+            clearSessionPrefetch(sessionId);
+        }
         console.warn("[Bridge] session.resume prefetch failed", {
             sessionId,
             error,
@@ -879,6 +889,51 @@ export async function searchWorkspaceDirectories(
             requestKey,
             query,
             limit,
+        }).catch((error) => {
+            clearTimeout(timeoutId);
+            unsubscribe();
+            reject(error);
+        });
+    });
+}
+
+export async function searchWorkspaceFiles(
+    sessionId: string,
+    query: string,
+    limit: number
+): Promise<ReadonlyArray<WorkspaceDirectorySearchMatch>> {
+    const c = getClient();
+    const requestKey = `workspace-file-search-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const connectionState = getBridgeConnectionState();
+
+    if (connectionState.state !== "authenticated") {
+        throw new Error("Connect to the bridge before searching files.");
+    }
+
+    return new Promise<ReadonlyArray<WorkspaceDirectorySearchMatch>>((resolve, reject) => {
+        const unsubscribe = onWorkspaceSearchResponse(requestKey, (payload) => {
+            clearTimeout(timeoutId);
+            unsubscribe();
+
+            if (payload.error !== undefined) {
+                reject(new Error(payload.error));
+                return;
+            }
+
+            resolve(payload.matches);
+        });
+
+        const timeoutId = setTimeout(() => {
+            unsubscribe();
+            reject(new Error("Workspace file search timed out."));
+        }, 8000);
+
+        void c.sendMessage("workspace.search.request", {
+            requestKey,
+            sessionId,
+            query,
+            limit,
+            searchScope: "workspace_files",
         }).catch((error) => {
             clearTimeout(timeoutId);
             unsubscribe();

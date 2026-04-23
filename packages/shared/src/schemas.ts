@@ -435,6 +435,15 @@ const sessionErrorSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const messageAbortResultSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("message.abort.result"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        success: z.boolean(),
+        error: z.string().optional(),
+    }),
+});
+
 const sessionTitleChangedSchema = baseBridgeMessageSchema.extend({
     type: z.literal("session.title_changed"),
     payload: z.object({
@@ -606,6 +615,7 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     capabilitiesStateSchema,
     sessionStateSchema,
     sessionErrorSchema,
+    messageAbortResultSchema,
     sessionTitleChangedSchema,
     assistantIntentSchema,
     sessionUsageSchema,
@@ -830,6 +840,8 @@ const workspaceSearchRequestSchema = baseBridgeMessageSchema.extend({
         requestKey: z.string().min(1),
         query: z.string(),
         limit: z.number().int().positive().optional(),
+        sessionId: z.string().min(1).optional(),
+        searchScope: z.enum(["directories", "workspace_files"]).optional(),
     }),
 });
 

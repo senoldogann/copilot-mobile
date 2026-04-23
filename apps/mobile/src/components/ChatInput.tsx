@@ -23,7 +23,12 @@ import { useConnectionStore } from "../stores/connection-store";
 import type { WorkspaceTreeNode } from "@copilot-mobile/shared";
 import type { AgentMode, ModelInfo, PermissionLevel, ReasoningEffortLevel } from "@copilot-mobile/shared";
 import { MODEL_UNKNOWN } from "@copilot-mobile/shared";
-import { requestWorkspaceTree, updatePermissionLevel, updateSessionMode } from "../services/bridge";
+import {
+    requestWorkspaceTree,
+    searchWorkspaceFiles,
+    updatePermissionLevel,
+    updateSessionMode,
+} from "../services/bridge";
 import { useAppTheme, useThemedStyles } from "../theme/theme-context";
 import type {
     AutocompleteToken,
@@ -55,6 +60,7 @@ import {
     ShieldIcon,
     ShieldCheckIcon,
     ZapIcon,
+    AgentIcon,
 } from "./ProviderIcon";
 import { ReasoningEffortIcon } from "./Icons";
 
@@ -73,11 +79,13 @@ function DropdownModal({
     visible,
     onClose,
     title,
+    iconNode,
     children,
 }: {
     visible: boolean;
     onClose: () => void;
     title: string;
+    iconNode?: React.ReactNode;
     children: React.ReactNode;
 }) {
     const theme = useAppTheme();
@@ -96,7 +104,14 @@ function DropdownModal({
                     onPress={(e) => e.stopPropagation()}
                 >
                     <View style={dropdownStyles.header}>
-                        <Text style={dropdownStyles.title}>{title}</Text>
+                        <View style={dropdownStyles.headerLeft}>
+                            {iconNode !== undefined && (
+                                <View style={dropdownStyles.headerIconBadge}>
+                                    {iconNode}
+                                </View>
+                            )}
+                            <Text style={dropdownStyles.title}>{title}</Text>
+                        </View>
                         <Pressable onPress={onClose} hitSlop={8}>
                             <CloseIcon size={18} color={theme.colors.textTertiary} />
                         </Pressable>
@@ -111,6 +126,25 @@ function DropdownModal({
                 </Pressable>
             </Pressable>
         </Modal>
+    );
+}
+
+function DropdownSectionLabel({
+    label,
+    iconNode,
+}: {
+    label: string;
+    iconNode: React.ReactNode;
+}) {
+    const dropdownStyles = useThemedStyles(createDropdownStyles);
+
+    return (
+        <View style={dropdownStyles.sectionLabelRow}>
+            <View style={dropdownStyles.sectionLabelIcon}>
+                {iconNode}
+            </View>
+            <Text style={dropdownStyles.sectionLabel}>{label}</Text>
+        </View>
     );
 }
 
@@ -234,7 +268,10 @@ function EffortSelectorContent({
 
     return (
         <View style={dropdownStyles.effortList}>
-            <Text style={dropdownStyles.sectionLabel}>Agent Mode</Text>
+            <DropdownSectionLabel
+                label="Agent Mode"
+                iconNode={<AgentIcon size={14} color={theme.colors.textTertiary} />}
+            />
             {(["agent", "plan", "ask"] as const).map((mode) => {
                 const cfg = agentModeConfig[mode];
                 const isSelected = agentMode === mode;
@@ -273,7 +310,12 @@ function EffortSelectorContent({
             })}
 
             {options.length > 0 && <View style={dropdownStyles.sectionDivider} />}
-            {options.length > 0 && <Text style={dropdownStyles.sectionLabel}>Thinking Effort</Text>}
+            {options.length > 0 && (
+                <DropdownSectionLabel
+                    label="Thinking Effort"
+                    iconNode={<SlidersIcon size={14} color={theme.colors.textTertiary} />}
+                />
+            )}
             {options.map((level) => {
                 const isSelected = current === level;
                 const isDefault = defaultEffort === level;
@@ -316,7 +358,10 @@ function EffortSelectorContent({
             })}
 
             <View style={dropdownStyles.sectionDivider} />
-            <Text style={dropdownStyles.sectionLabel}>Permission Level</Text>
+            <DropdownSectionLabel
+                label="Permission Level"
+                iconNode={<ShieldIcon size={14} color={theme.colors.textTertiary} />}
+            />
             {(["default", "bypass", "autopilot"] as const).map((level) => {
                 const cfg = permissionLevelConfig[level];
                 const isSelected = permissionLevel === level;
@@ -759,6 +804,7 @@ function ChatInputComponent({
     const [showSendMenu, setShowSendMenu] = useState(false);
     const [showContextWindowSheet, setShowContextWindowSheet] = useState(false);
     const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+    const [workspaceFileMatches, setWorkspaceFileMatches] = useState<ReadonlyArray<string>>([]);
     const lastSendSignatureRef = React.useRef<{ signature: string; sentAt: number } | null>(null);
     const workspaceTree = useWorkspaceStore((s) => s.tree);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
@@ -855,6 +901,7 @@ function ChatInputComponent({
 
     useEffect(() => {
         if (activeToken?.kind !== "file") {
+            setWorkspaceFileMatches([]);
             return;
         }
         if (activeSessionId === null || connectionState !== "authenticated") {
@@ -866,13 +913,49 @@ function ChatInputComponent({
         void requestWorkspaceTree(activeSessionId, undefined, 5);
     }, [activeToken?.kind, activeSessionId, connectionState, workspaceTree, filePaths.length]);
 
+    useEffect(() => {
+        if (activeToken?.kind !== "file") {
+            setWorkspaceFileMatches([]);
+            return;
+        }
+
+        if (activeSessionId === null || connectionState !== "authenticated") {
+            setWorkspaceFileMatches([]);
+            return;
+        }
+
+        let cancelled = false;
+        const timeoutId = setTimeout(() => {
+            void searchWorkspaceFiles(activeSessionId, activeToken.query, 12)
+                .then((matches) => {
+                    if (cancelled) {
+                        return;
+                    }
+
+                    setWorkspaceFileMatches(matches.map((match) => match.path));
+                })
+                .catch(() => {
+                    if (!cancelled) {
+                        setWorkspaceFileMatches([]);
+                    }
+                });
+        }, activeToken.query.trim().length === 0 ? 0 : 120);
+
+        return () => {
+            cancelled = true;
+            clearTimeout(timeoutId);
+        };
+    }, [activeSessionId, activeToken, connectionState]);
+
     // Suggestions filtered by token type (including slash + skill commands).
     const suggestions = useMemo<ReadonlyArray<{ label: string; value: string; hint?: string }>>(() => {
         if (activeToken === null) return [];
         const query = activeToken.query.toLowerCase();
         if (activeToken.kind === "file") {
-            return filePaths
-                .filter((p) => pathMatchesQuery(p, query))
+            return [...new Set([
+                ...filePaths.filter((p) => pathMatchesQuery(p, query)),
+                ...workspaceFileMatches,
+            ])]
                 .slice(0, 8)
                 .map((p) => ({ label: p, value: `@${p} ` }));
         }
@@ -890,7 +973,7 @@ function ChatInputComponent({
             }));
 
         return [...staticMatches, ...skillMatches].slice(0, 10);
-    }, [activeToken, filePaths, skills]);
+    }, [activeToken, filePaths, skills, workspaceFileMatches]);
 
     // Apply selected suggestion: replace token and move cursor to end.
     const applySuggestion = useCallback((value: string) => {
@@ -1352,7 +1435,8 @@ function ChatInputComponent({
             <DropdownModal
                 visible={showEffortPicker}
                 onClose={() => setShowEffortPicker(false)}
-                title="Session Controls"
+                title="Chat Actions"
+                iconNode={<SlidersIcon size={15} color={theme.colors.textSecondary} />}
             >
                 <EffortSelectorContent
                     agentMode={agentMode}

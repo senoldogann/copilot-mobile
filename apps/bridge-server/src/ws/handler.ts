@@ -435,10 +435,16 @@ export function createMessageHandler(
 
                 case "workspace.search.request": {
                     try {
-                        const matches = await searchWorkspaceDirectories(
-                            message.payload.query,
-                            message.payload.limit
-                        );
+                        const matches = message.payload.sessionId !== undefined
+                            ? await sessionManager.searchWorkspaceFiles(
+                                message.payload.sessionId,
+                                message.payload.query,
+                                message.payload.limit
+                            )
+                            : await searchWorkspaceDirectories(
+                                message.payload.query,
+                                message.payload.limit
+                            );
                         send({
                             ...makeBase(),
                             type: "workspace.search.response",

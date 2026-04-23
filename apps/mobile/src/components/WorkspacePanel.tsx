@@ -60,6 +60,7 @@ type ViewMode = "paragraph" | "diff" | "tree";
 const INITIAL_TREE_DEPTH = 2;
 const DIRECTORY_TREE_DEPTH = 2;
 const TREE_PAGE_SIZE = 200;
+const WORKSPACE_LOAD_TIMEOUT_MS = 12_000;
 
 function WorkspacePanelComponent({ visible, onClose }: Props) {
     const theme = useAppTheme();
@@ -112,6 +113,10 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         | { status: "ready"; body: string; truncated: boolean }
         | { status: "error"; message: string };
     const [inlineLoad, setInlineLoad] = useState<InlineLoadState>({ status: "loading" });
+    const workspaceLoadingSignature = useMemo(
+        () => Object.keys(workspace.loadingTreePaths).sort().join("|"),
+        [workspace.loadingTreePaths],
+    );
 
     // Load diff/file whenever viewer changes
     useEffect(() => {
@@ -175,6 +180,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         setCommitComposerOpen(false);
         setCommitMessage("");
         setChangesFilterMenuOpen(false);
+        setViewer(null);
+        setInlineLoad({ status: "loading" });
 
         if (activeSessionId === null) {
             useWorkspaceStore.getState().resetWorkspace();
@@ -191,6 +198,41 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         void requestWorkspaceTree(activeSessionId, undefined, INITIAL_TREE_DEPTH, 0, TREE_PAGE_SIZE);
         void requestWorkspaceGitSummary(activeSessionId, 10);
     }, [visible, activeSessionId, isConnected]);
+
+    useEffect(() => {
+        if (!visible || activeSessionId === null || !isConnected) {
+            return;
+        }
+
+        const hasPendingWorkspaceLoad =
+            workspace.isLoadingGit || Object.keys(workspace.loadingTreePaths).length > 0;
+        if (!hasPendingWorkspaceLoad) {
+            return;
+        }
+
+        const timeout = setTimeout(() => {
+            const store = useWorkspaceStore.getState();
+            const isSameSession = store.sessionId === activeSessionId || store.sessionId === null;
+            const stillLoading = store.isLoadingGit || Object.keys(store.loadingTreePaths).length > 0;
+            if (!isSameSession || !stillLoading) {
+                return;
+            }
+
+            store.clearRequestLoadingState();
+            store.setError("Workspace refresh timed out. Try again.");
+        }, WORKSPACE_LOAD_TIMEOUT_MS);
+
+        return () => {
+            clearTimeout(timeout);
+        };
+    }, [
+        activeSessionId,
+        isConnected,
+        visible,
+        workspace.isLoadingGit,
+        workspace.sessionId,
+        workspaceLoadingSignature,
+    ]);
 
     const hasRepo = workspace.gitRoot !== null;
     const treeRoot = workspace.tree;
@@ -327,8 +369,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         const additions = change.additions ?? 0;
         const deletions = change.deletions ?? 0;
         const isUntracked = change.status === "untracked" || change.status === "added";
-        const hasStats = additions > 0 || deletions > 0 || isUntracked;
-        const showStats = viewMode !== "paragraph";
+        const hasStats = additions > 0 || deletions > 0;
 
         return (
             <Pressable
@@ -355,7 +396,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                             <Text style={styles.newBadgeText}>New</Text>
                         </View>
                     )}
-                    {showStats && hasStats && !isUntracked && (
+                    {hasStats && (
                         <View style={styles.diffStats}>
                             <Text style={styles.diffAdd}>+{additions}</Text>
                             <Text style={styles.diffDel}>-{deletions}</Text>
@@ -364,7 +405,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 </View>
             </Pressable>
         );
-    }, [viewMode]);
+    }, []);
 
     const renderTreeNode = useCallback(
         (node: NonNullable<typeof workspace.tree>, depth: number): React.ReactNode => {
@@ -685,9 +726,6 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 </View>
             </View>
 
-            {workspace.operationMessage !== null && (
-                <Banner tone="success" text={workspace.operationMessage} />
-            )}
             {workspace.error !== null && <Banner tone="error" text={workspace.error} />}
 
             {activeSessionId === null ? (
@@ -877,11 +915,13 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                         <TabButton
                             label="Changes"
                             active={workspace.tab === "changes"}
+                            renderIcon={(color) => <DiffIcon size={14} color={color} />}
                             onPress={() => useWorkspaceStore.getState().setTab("changes")}
                         />
                         <TabButton
                             label="Files"
                             active={workspace.tab === "files"}
+                            renderIcon={(color) => <FolderFilledIcon size={14} color={color} />}
                             onPress={() => useWorkspaceStore.getState().setTab("files")}
                         />
                     </View>
@@ -922,6 +962,7 @@ function renderChangesAsTree(
                 const additions = change.additions ?? 0;
                 const deletions = change.deletions ?? 0;
                 const isUntracked = change.status === "untracked" || change.status === "added";
+                const hasStats = additions > 0 || deletions > 0;
                 return (
                     <Pressable
                         key={change.path}
@@ -935,9 +976,10 @@ function renderChangesAsTree(
                             <Text style={styles.changeName} numberOfLines={1}>{name}</Text>
                         </View>
                         <View style={styles.changeRight}>
-                            {isUntracked ? (
+                            {isUntracked && (
                                 <View style={styles.newBadge}><Text style={styles.newBadgeText}>New</Text></View>
-                            ) : (
+                            )}
+                            {hasStats && (
                                 <View style={styles.diffStats}>
                                     <Text style={styles.diffAdd}>+{additions}</Text>
                                     <Text style={styles.diffDel}>-{deletions}</Text>
@@ -954,14 +996,17 @@ function renderChangesAsTree(
 function TabButton({
     label,
     active,
+    renderIcon,
     onPress,
 }: {
     label: string;
     active: boolean;
+    renderIcon: (color: string) => React.ReactNode;
     onPress: () => void;
 }) {
     const theme = useAppTheme();
     const sheetStyles = useMemo(() => createSheetStyles(theme), [theme]);
+    const iconColor = active ? theme.colors.textPrimary : theme.colors.textTertiary;
 
     return (
         <Pressable
@@ -972,9 +1017,12 @@ function TabButton({
             ]}
             onPress={onPress}
         >
-            <Text style={[sheetStyles.tabLabel, active && sheetStyles.tabLabelActive]}>
-                {label}
-            </Text>
+            <View style={sheetStyles.tabContent}>
+                {renderIcon(iconColor)}
+                <Text style={[sheetStyles.tabLabel, active && sheetStyles.tabLabelActive]}>
+                    {label}
+                </Text>
+            </View>
         </Pressable>
     );
 }
@@ -1077,13 +1125,19 @@ return StyleSheet.create({
         color: theme.colors.textTertiary,
         fontWeight: "600",
     },
+    tabContent: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+    },
     tabLabelActive: { color: theme.colors.textPrimary },
 });
 }
 
 function createTreeStyles(theme: AppTheme) {
 const emphasisTextColor = theme.resolvedScheme === "light"
-    ? theme.colors.textPrimary
+    ? "#1b1b18"
     : "#f4f7f5";
 
 return StyleSheet.create({
@@ -1132,10 +1186,10 @@ return StyleSheet.create({
 
 function createStyles(theme: AppTheme) {
 const emphasizedLabelColor = theme.resolvedScheme === "light"
-    ? theme.colors.textPrimary
+    ? "#1b1b18"
     : "#f4f7f5";
 const supportingLabelColor = theme.resolvedScheme === "light"
-    ? theme.colors.textSecondary
+    ? "#5a5a54"
     : "#c9d1d9";
 const successBadgeBg = theme.resolvedScheme === "light"
     ? theme.colors.successMuted
@@ -1143,6 +1197,9 @@ const successBadgeBg = theme.resolvedScheme === "light"
 const successBadgeBorder = theme.resolvedScheme === "light"
     ? theme.colors.success
     : "#2d5c3f";
+const inlineViewerBackground = theme.resolvedScheme === "light"
+    ? theme.colors.bgSecondary
+    : theme.colors.bg;
 
 return StyleSheet.create({
     content: { gap: theme.spacing.sm },
@@ -1393,7 +1450,7 @@ return StyleSheet.create({
         fontWeight: "600",
     },
     changePath: { fontSize: theme.fontSize.xs, color: supportingLabelColor },
-    changeRight: { flexDirection: "row", alignItems: "center", gap: 6 },
+    changeRight: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },
     diffStats: { flexDirection: "row", alignItems: "center", gap: 6 },
     diffAdd: {
         fontSize: theme.fontSize.xs,
@@ -1486,6 +1543,7 @@ return StyleSheet.create({
     // Inline file/diff viewer
     inlineViewer: {
         flex: 1,
+        backgroundColor: inlineViewerBackground,
     },
     inlineBack: {
         flexDirection: "row",
@@ -1555,7 +1613,7 @@ return StyleSheet.create({
         fontSize: 11,
         fontFamily: "Courier",
         lineHeight: 20,
-        backgroundColor: theme.colors.bg,
+        backgroundColor: inlineViewerBackground,
     },
     codeText: {
         fontSize: 11,

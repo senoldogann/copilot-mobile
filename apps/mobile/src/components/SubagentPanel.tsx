@@ -78,7 +78,7 @@ function SubagentPanelInner({ runs }: SubagentPanelProps) {
             >
                 <View style={styles.headerLeft}>
                     <View style={styles.iconWrap}>
-                        <SubagentIcon size={14} color={theme.colors.textLink} />
+                        <SubagentIcon size={14} color={theme.colors.accent} />
                     </View>
                     <Text style={styles.headerTitle}>Subagents</Text>
                     <View style={styles.badge}>
@@ -172,7 +172,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         borderRadius: 4,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: theme.colors.textLink + "10",
+        backgroundColor: theme.colors.accentMuted,
     },
     headerTitle: {
         fontSize: 13,
@@ -183,12 +183,12 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         paddingHorizontal: 6,
         paddingVertical: 2,
         borderRadius: 10,
-        backgroundColor: theme.colors.textLink + "22",
+        backgroundColor: theme.colors.accentMuted,
     },
     badgeText: {
         fontSize: 11,
         fontWeight: "600",
-        color: theme.colors.textLink,
+        color: theme.colors.accent,
     },
     runningBadge: {
         backgroundColor: theme.colors.warning + "20",

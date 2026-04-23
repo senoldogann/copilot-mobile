@@ -33,6 +33,7 @@ type PendingMessage = {
 const PENDING_TIMEOUT_MS = 30_000;
 const MAX_PENDING_MESSAGES = 100;
 const AUTHENTICATION_TIMEOUT_MS = 12_000;
+const SOCKET_ERROR_RECOVERY_DELAY_MS = 250;
 
 function createSeqGenerator(): () => number {
     let counter = 0;
@@ -82,6 +83,7 @@ export function createWSClient(config: WSClientConfig) {
     let pendingPairMessage: ClientMessage | null = null;
     let pendingResumeMessage: ClientMessage | null = null;
     let authenticationTimer: ReturnType<typeof setTimeout> | null = null;
+    let socketErrorRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
 
     function describeSocketClose(code: number, reason: string): string {
         if (reason.trim().length > 0) {
@@ -110,6 +112,10 @@ export function createWSClient(config: WSClientConfig) {
     }
 
     function cleanup(): void {
+        if (socketErrorRecoveryTimer !== null) {
+            clearTimeout(socketErrorRecoveryTimer);
+            socketErrorRecoveryTimer = null;
+        }
         if (authenticationTimer !== null) {
             clearTimeout(authenticationTimer);
             authenticationTimer = null;
@@ -434,6 +440,33 @@ export function createWSClient(config: WSClientConfig) {
             if (reportConnectionErrors) {
                 config.onError("WebSocket connection error");
             }
+
+            if (
+                socketErrorRecoveryTimer !== null
+                || ws === null
+                || ws.readyState === WebSocket.CLOSING
+                || ws.readyState === WebSocket.CLOSED
+            ) {
+                return;
+            }
+
+            const socketAtError = ws;
+            socketErrorRecoveryTimer = setTimeout(() => {
+                socketErrorRecoveryTimer = null;
+                if (
+                    ws !== socketAtError
+                    || ws === null
+                    || ws.readyState === WebSocket.CLOSING
+                    || ws.readyState === WebSocket.CLOSED
+                    || state === "disconnected"
+                ) {
+                    return;
+                }
+
+                cleanup();
+                setState("disconnected");
+                scheduleReconnect();
+            }, SOCKET_ERROR_RECOVERY_DELAY_MS);
         };
     }
 

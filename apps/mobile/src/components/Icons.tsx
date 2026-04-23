@@ -89,6 +89,38 @@ export function SkillIcon({ size = 14, color }: { size?: number; color?: string 
     );
 }
 
+export function PluginIcon({ size = 14, color }: { size?: number; color?: string }) {
+    const theme = useAppTheme();
+    const resolvedColor = color ?? theme.colors.textSecondary;
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M9 5.5A2.5 2.5 0 1 1 14 5.5V8H16.5A2.5 2.5 0 1 1 16.5 13H14V16.5A2.5 2.5 0 1 1 9 16.5V13H6.5A2.5 2.5 0 1 1 6.5 8H9V5.5Z"
+                stroke={resolvedColor}
+                strokeWidth="1.6"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </Svg>
+    );
+}
+
+export function McpIcon({ size = 14, color }: { size?: number; color?: string }) {
+    const theme = useAppTheme();
+    const resolvedColor = color ?? theme.colors.textSecondary;
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Rect x="4" y="5" width="6" height="6" rx="1.5" stroke={resolvedColor} strokeWidth="1.5" />
+            <Rect x="14" y="5" width="6" height="6" rx="1.5" stroke={resolvedColor} strokeWidth="1.5" />
+            <Rect x="9" y="14" width="6" height="6" rx="1.5" stroke={resolvedColor} strokeWidth="1.5" />
+            <Path d="M10 8H14" stroke={resolvedColor} strokeWidth="1.5" strokeLinecap="round" />
+            <Path d="M7 11V14" stroke={resolvedColor} strokeWidth="1.5" strokeLinecap="round" />
+            <Path d="M17 11V14" stroke={resolvedColor} strokeWidth="1.5" strokeLinecap="round" />
+            <Path d="M7 14H17" stroke={resolvedColor} strokeWidth="1.5" strokeLinecap="round" />
+        </Svg>
+    );
+}
+
 /** Beyin — thinking / thought araçlarını temsil eder (Lucide brain) */
 export function BrainIcon({ size = 14, color }: { size?: number; color?: string }) {
     const theme = useAppTheme();

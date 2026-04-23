@@ -47,6 +47,8 @@ export type {
     UserMessageItem,
 } from "./session-store-types";
 
+const MAX_TOOL_PROGRESS_MESSAGES = 40;
+
 export const useSessionStore = create<SessionStore>((set) => ({
     activeSessionId: null,
     isSessionLoading: false,
@@ -550,7 +552,10 @@ export const useSessionStore = create<SessionStore>((set) => ({
                     ? {
                         ...item,
                         progressMessage,
-                        progressMessages: [...(item.progressMessages ?? []), progressMessage],
+                        progressMessages: [
+                            ...(item.progressMessages ?? []),
+                            progressMessage,
+                        ].slice(-MAX_TOOL_PROGRESS_MESSAGES),
                     }
                     : item
             ),

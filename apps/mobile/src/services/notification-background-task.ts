@@ -80,11 +80,7 @@ async function performBackgroundSessionSync(sessionId: string): Promise<void> {
     await listSessions();
 
     const activeSessionId = useSessionStore.getState().activeSessionId;
-    if (activeSessionId !== sessionId) {
-        return;
-    }
-
-    await prefetchSessionState(sessionId);
+    await prefetchSessionState(sessionId, activeSessionId === sessionId);
 }
 
 if (!TaskManager.isTaskDefined(BACKGROUND_NOTIFICATION_TASK)) {
