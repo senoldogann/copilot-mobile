@@ -155,6 +155,16 @@ function rememberWorkspaceDirectory(workspaceRoot: string | undefined): void {
     useWorkspaceDirectoryStore.getState().addDirectory(workspaceRoot);
 }
 
+function requestWorkspaceSnapshot(sessionId: string): void {
+    void import("./bridge").then(({
+        requestWorkspaceGitSummary,
+        requestWorkspaceTree,
+    }) => Promise.all([
+        requestWorkspaceGitSummary(sessionId, 10),
+        requestWorkspaceTree(sessionId, undefined, 2, 0, 200),
+    ]));
+}
+
 function readSessionNotificationTitle(sessionId: string, fallback: string): string {
     const session = useSessionStore.getState().sessions.find((item) => item.id === sessionId);
     if (session?.title?.trim().length) {
@@ -479,6 +489,7 @@ export function handleServerMessage(message: ServerMessage): void {
                 );
                 chatHistoryStore.setActiveConversation(conversationId);
             }
+            requestWorkspaceSnapshot(message.payload.session.id);
             break;
         }
 
@@ -507,6 +518,7 @@ export function handleServerMessage(message: ServerMessage): void {
             if (localItems.length > 0) {
                 sessionStore.replaceChatItems(localItems);
             }
+            requestWorkspaceSnapshot(message.payload.session.id);
             break;
         }
 
@@ -884,13 +896,7 @@ export function handleServerMessage(message: ServerMessage): void {
             const workspaceStore = useWorkspaceStore.getState();
             workspaceStore.setWorkspaceOperationResult(message.payload);
             if (message.payload.success) {
-                void import("./bridge").then(({
-                    requestWorkspaceGitSummary,
-                    requestWorkspaceTree,
-                }) => Promise.all([
-                    requestWorkspaceGitSummary(message.payload.sessionId, 10),
-                    requestWorkspaceTree(message.payload.sessionId, undefined, 2, 0, 200),
-                ]));
+                requestWorkspaceSnapshot(message.payload.sessionId);
             }
             break;
         }

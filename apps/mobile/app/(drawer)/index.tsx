@@ -424,10 +424,7 @@ export default function ChatScreen() {
         () => buildSubagentRuns(activeAgentItems, isTyping),
         [isTyping, subagentRunsSignature],
     );
-    if (
-        (nextSubagentRuns.length > 0 || !isTyping)
-        && !areSubagentRunsEqual(stableSubagentRunsRef.current, nextSubagentRuns)
-    ) {
+    if (!areSubagentRunsEqual(stableSubagentRunsRef.current, nextSubagentRuns)) {
         stableSubagentRunsRef.current = nextSubagentRuns;
     }
     const subagentRuns = stableSubagentRunsRef.current;
@@ -448,10 +445,7 @@ export default function ChatScreen() {
 
         return agentTodos;
     }, [activeAgentItems, agentTodos, hasRunningToolInCurrentTurn, isTyping]);
-    if (
-        (nextVisibleAgentTodos.length > 0 || !isTyping)
-        && !areAgentTodosEqual(stableAgentTodosRef.current, nextVisibleAgentTodos)
-    ) {
+    if (!areAgentTodosEqual(stableAgentTodosRef.current, nextVisibleAgentTodos)) {
         stableAgentTodosRef.current = nextVisibleAgentTodos;
     }
     const visibleAgentTodos = stableAgentTodosRef.current;
