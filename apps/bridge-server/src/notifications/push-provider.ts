@@ -32,16 +32,22 @@ function readFirstTicket(payload: unknown): ExpoPushTicket | null {
     }
 
     const value = payload as Record<string, unknown>;
-    if (!Array.isArray(value["data"])) {
+    const data = value["data"];
+
+    if (Array.isArray(data)) {
+        const firstTicket = data[0];
+        if (typeof firstTicket !== "object" || firstTicket === null || Array.isArray(firstTicket)) {
+            return null;
+        }
+
+        return firstTicket as ExpoPushTicket;
+    }
+
+    if (typeof data !== "object" || data === null || Array.isArray(data)) {
         return null;
     }
 
-    const firstTicket = value["data"][0];
-    if (typeof firstTicket !== "object" || firstTicket === null || Array.isArray(firstTicket)) {
-        return null;
-    }
-
-    return firstTicket as ExpoPushTicket;
+    return data as ExpoPushTicket;
 }
 
 function sleep(milliseconds: number): Promise<void> {
