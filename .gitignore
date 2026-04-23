@@ -1,6 +1,7 @@
 node_modules/
 dist/
 .expo/
+data/
 .cursor/
 .DS_Store
 *.tsbuildinfo

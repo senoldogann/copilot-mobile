@@ -15,6 +15,7 @@ import { ThemeProvider, useAppTheme } from "../src/theme/theme-context";
 export default function RootLayout() {
     const [themeReady, setThemeReady] = useState(false);
     const [onboardingCompleted, setOnboardingCompleted] = useState<boolean | null>(null);
+    const pathname = usePathname();
 
     useEffect(() => {
         void useThemeStore.getState().hydrate().finally(() => {
@@ -42,7 +43,7 @@ export default function RootLayout() {
         return () => {
             cancelled = true;
         };
-    }, [themeReady]);
+    }, [pathname, themeReady]);
 
     if (!themeReady || onboardingCompleted === null) {
         return null;
@@ -69,7 +70,19 @@ function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }
             return;
         }
 
-        router.replace("/onboarding");
+        let cancelled = false;
+
+        void loadOnboardingCompleted().then((completed) => {
+            if (cancelled || completed) {
+                return;
+            }
+
+            router.replace("/onboarding");
+        });
+
+        return () => {
+            cancelled = true;
+        };
     }, [onboardingCompleted, pathname, router]);
 
     return (

@@ -371,6 +371,7 @@ export default function ChatScreen() {
     const persistInteractionRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(null);
     const stableSubagentRunsRef = useRef<ReadonlyArray<SubagentRun>>([]);
     const stableAgentTodosRef = useRef<ReadonlyArray<AgentTodo>>([]);
+    const stablePanelSessionIdRef = useRef<string | null>(null);
 
     // Store'lardan state
     const chatItems = useSessionStore((s) => s.chatItems);
@@ -393,6 +394,12 @@ export default function ChatScreen() {
     const activeConversationId = useChatHistoryStore((s) => s.activeConversationId);
     const workspaceSessionId = useWorkspaceStore((s) => s.sessionId);
     const workspaceRoot = useWorkspaceStore((s) => s.workspaceRoot);
+
+    if (stablePanelSessionIdRef.current !== activeSessionId) {
+        stablePanelSessionIdRef.current = activeSessionId;
+        stableSubagentRunsRef.current = [];
+        stableAgentTodosRef.current = [];
+    }
 
     const connectionState = useConnectionStore((s) => s.state);
     const connectionError = useConnectionStore((s) => s.error);
@@ -417,7 +424,10 @@ export default function ChatScreen() {
         () => buildSubagentRuns(activeAgentItems, isTyping),
         [isTyping, subagentRunsSignature],
     );
-    if (!areSubagentRunsEqual(stableSubagentRunsRef.current, nextSubagentRuns)) {
+    if (
+        (nextSubagentRuns.length > 0 || !isTyping)
+        && !areSubagentRunsEqual(stableSubagentRunsRef.current, nextSubagentRuns)
+    ) {
         stableSubagentRunsRef.current = nextSubagentRuns;
     }
     const subagentRuns = stableSubagentRunsRef.current;
@@ -438,7 +448,10 @@ export default function ChatScreen() {
 
         return agentTodos;
     }, [activeAgentItems, agentTodos, hasRunningToolInCurrentTurn, isTyping]);
-    if (!areAgentTodosEqual(stableAgentTodosRef.current, nextVisibleAgentTodos)) {
+    if (
+        (nextVisibleAgentTodos.length > 0 || !isTyping)
+        && !areAgentTodosEqual(stableAgentTodosRef.current, nextVisibleAgentTodos)
+    ) {
         stableAgentTodosRef.current = nextVisibleAgentTodos;
     }
     const visibleAgentTodos = stableAgentTodosRef.current;
@@ -723,6 +736,10 @@ export default function ChatScreen() {
         setQueuedDrafts((prev) => prev.filter((item) => item.id !== draftId));
     }, [activeSessionId, handleSend, inputDisabled, queuedDrafts]);
 
+    const handleEditingDraftConsumed = useCallback(() => {
+        setEditingDraft(null);
+    }, []);
+
     // Respond to permission
     const handlePermissionRespond = useCallback(
         (requestId: string, approved: boolean) => {
@@ -847,7 +864,7 @@ export default function ChatScreen() {
                     disabled={inputDisabled}
                     queuedDrafts={visibleQueuedDrafts}
                     editingDraft={editingDraft}
-                    onEditingDraftConsumed={() => setEditingDraft(null)}
+                    onEditingDraftConsumed={handleEditingDraftConsumed}
                     onEditQueuedDraft={handleEditQueuedDraft}
                     onRemoveQueuedDraft={handleRemoveQueuedDraft}
                     onSteerQueuedDraft={handleSteerQueuedDraft}
