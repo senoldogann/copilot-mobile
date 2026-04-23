@@ -1168,7 +1168,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 params.running && styles.projectConversationStateRunning,
             ]}>
                 {params.running ? (
-                    <ActivityIndicator size="small" color={theme.colors.textLink} />
+                    <ActivityIndicator size="small" color={theme.colors.textSecondary} />
                 ) : params.resumeResult === "failed" ? (
                     <Feather name="alert-circle" size={13} color={theme.colors.error} />
                 ) : null}
@@ -1246,7 +1246,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                         onPress={() => toggleWorkspace(expansionKey)}
                                         onLongPress={() => openWorkspaceMenu(group)}
                                     >
-                                        <Feather name={isExpanded ? "folder" : "folder"} size={19} color={theme.colors.textSecondary} />
+                                        <Feather name={isExpanded ? "folder" : "folder"} size={13} color={theme.colors.textSecondary} />
                                         <Text
                                             style={styles.workspaceName}
                                             numberOfLines={1}
@@ -1994,8 +1994,8 @@ return StyleSheet.create({
     },
     workspaceName: {
         flex: 1,
-        fontSize: 15,
-        fontWeight: "600",
+        fontSize: theme.fontSize.sm,
+        fontWeight: "500",
         color: theme.colors.textSecondary,
     },
     workspaceCount: {
@@ -2097,9 +2097,8 @@ return StyleSheet.create({
         justifyContent: "center",
     },
     projectConversationStateRunning: {
-        backgroundColor: theme.colors.accentMuted,
-        borderWidth: 1,
-        borderColor: theme.colors.borderActive,
+        backgroundColor: "transparent",
+        borderWidth: 0,
     },
     projectConversationTitle: {
         flex: 1,

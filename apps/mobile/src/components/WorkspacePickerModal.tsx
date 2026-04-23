@@ -232,7 +232,7 @@ function createStyles(theme: AppTheme) {
             borderBottomColor: theme.colors.borderMuted,
         },
         headerTitle: {
-            fontSize: theme.fontSize.lg,
+            fontSize: theme.fontSize.md,
             fontWeight: "700",
             color: theme.colors.textPrimary,
         },
@@ -247,7 +247,7 @@ function createStyles(theme: AppTheme) {
             borderColor: theme.colors.inputBorder,
             backgroundColor: theme.colors.inputBg,
             color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.lg,
+            fontSize: theme.fontSize.md,
             paddingHorizontal: theme.spacing.md,
         },
         sectionTitle: {
@@ -278,12 +278,12 @@ function createStyles(theme: AppTheme) {
         },
         resultPath: {
             color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.lg,
+            fontSize: theme.fontSize.md,
             fontWeight: "600",
         },
         resultName: {
             color: theme.colors.textTertiary,
-            fontSize: theme.fontSize.sm,
+            fontSize: theme.fontSize.xs,
         },
         metadataChipRow: {
             flexDirection: "row",

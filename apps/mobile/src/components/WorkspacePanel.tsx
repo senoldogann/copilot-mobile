@@ -1046,7 +1046,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                             style={({ pressed }) => [styles.changeRow, pressed && styles.changeRowPressed]}
                             onPress={() => {
                                 setSelectedCommit(null);
-                                setViewer({ path: filePath, mode: "diff" });
+                                setViewer({ path: filePath, mode: "file" });
                             }}
                         >
                             <View style={styles.changeIconWrap}>

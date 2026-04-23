@@ -732,6 +732,8 @@ export default function ChatScreen() {
     const [showScrollToBottom, setShowScrollToBottom] = useState(false);
     const [queuedDrafts, setQueuedDrafts] = useState<Array<QueuedDraft>>([]);
     const [editingDraft, setEditingDraft] = useState<QueuedDraft | null>(null);
+    const [dismissedSubagentSignature, setDismissedSubagentSignature] = useState<string | null>(null);
+    const [dismissedTodoSignature, setDismissedTodoSignature] = useState<string | null>(null);
     const prevSessionIdRef = useRef<string | null>(null);
     const autoSentQueuedDraftIdRef = useRef<string | null>(null);
     const persistChatItemsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -797,6 +799,10 @@ export default function ChatScreen() {
         stableSubagentRunsRef.current = nextSubagentRuns;
     }
     const subagentRuns = stableSubagentRunsRef.current;
+    const subagentPanelSignature = useMemo(
+        () => subagentRuns.map((run) => `${run.requestId}:${run.title}`).join("|"),
+        [subagentRuns],
+    );
     const hasRunningToolInCurrentTurn = useMemo(
         () => activeAgentItems.some((item) => item.type === "tool" && item.status === "running"),
         [activeAgentItems],
@@ -818,6 +824,37 @@ export default function ChatScreen() {
         stableAgentTodosRef.current = nextVisibleAgentTodos;
     }
     const visibleAgentTodos = stableAgentTodosRef.current;
+    const todoPanelSignature = useMemo(
+        () => visibleAgentTodos.map((todo) => `${todo.id}:${todo.content}`).join("|"),
+        [visibleAgentTodos],
+    );
+    const showSubagentPanel = subagentRuns.length > 0 && dismissedSubagentSignature !== subagentPanelSignature;
+    const showTodoPanel = visibleAgentTodos.length > 0 && dismissedTodoSignature !== todoPanelSignature;
+
+    useEffect(() => {
+        if (
+            dismissedSubagentSignature !== null
+            && subagentPanelSignature.length > 0
+            && dismissedSubagentSignature !== subagentPanelSignature
+        ) {
+            setDismissedSubagentSignature(null);
+        }
+    }, [dismissedSubagentSignature, subagentPanelSignature]);
+
+    useEffect(() => {
+        if (
+            dismissedTodoSignature !== null
+            && todoPanelSignature.length > 0
+            && dismissedTodoSignature !== todoPanelSignature
+        ) {
+            setDismissedTodoSignature(null);
+        }
+    }, [dismissedTodoSignature, todoPanelSignature]);
+
+    useEffect(() => {
+        setDismissedSubagentSignature(null);
+        setDismissedTodoSignature(null);
+    }, [activeSessionId]);
 
     useEffect(() => {
         if (permissionPrompt !== null || userInputPrompt !== null || planExitPrompt !== null) {
@@ -1282,12 +1319,18 @@ export default function ChatScreen() {
                     </View>
                 )}
 
-                {subagentRuns.length > 0 && (
-                    <SubagentPanel runs={subagentRuns} />
+                {showSubagentPanel && (
+                    <SubagentPanel
+                        runs={subagentRuns}
+                        onDismiss={() => setDismissedSubagentSignature(subagentPanelSignature)}
+                    />
                 )}
 
-                {visibleAgentTodos.length > 0 && (
-                    <TodoPanel todos={visibleAgentTodos} />
+                {showTodoPanel && (
+                    <TodoPanel
+                        todos={visibleAgentTodos}
+                        onDismiss={() => setDismissedTodoSignature(todoPanelSignature)}
+                    />
                 )}
 
                 <ChatInput

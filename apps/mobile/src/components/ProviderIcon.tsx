@@ -817,10 +817,12 @@ export function ZapIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color
 export function PaletteIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <Path
-                d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 14c0 1.6-1.4 3-3 3h-1c-1 0-2 1-2 2a2 2 0 0 1-2 2 8 8 0 0 1-8-8zM6 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM11 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM16 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
-                stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none"
-            />
+            <Path d="M4 10.5V11a7 7 0 0 0 14 0v-.5" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M12 21v-8" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M12 3v4" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M7.5 5.5l1.5 1.5" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M16.5 5.5l-1.5 1.5" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Circle cx="12" cy="13" r="1" fill={color} />
         </Svg>
     );
 }
@@ -828,10 +830,7 @@ export function PaletteIcon({ size = 16, color = "#a0a3a2" }: { size?: number; c
 export function MoonIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <Path
-                d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"
-                stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none"
-            />
+            <Path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
     );
 }
@@ -839,10 +838,15 @@ export function MoonIcon({ size = 16, color = "#a0a3a2" }: { size?: number; colo
 export function SunIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
-                <Circle cx="12" cy="12" r="4" />
-                <Path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-            </G>
+            <Circle cx="12" cy="12" r="4" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M12 2v2" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M12 20v2" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M4.93 4.93l1.41 1.41" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M17.66 17.66l1.41 1.41" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M2 12h2" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M20 12h2" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M4.93 19.07l1.41-1.41" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M17.66 6.34l1.41-1.41" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
     );
 }
@@ -850,10 +854,8 @@ export function SunIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color
 export function SmartphoneIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
-                <Rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
-                <Path d="M12 18h.01" />
-            </G>
+            <Rect x="5" y="2" width="14" height="20" rx="2" ry="2" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M12 18h.01" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
         </Svg>
     );
 }
@@ -861,14 +863,40 @@ export function SmartphoneIcon({ size = 16, color = "#a0a3a2" }: { size?: number
 export function BookOpenIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-            <Path
-                d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"
-                stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none"
-            />
-            <Path
-                d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"
-                stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none"
-            />
+            <Path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+            <Path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+        </Svg>
+    );
+}
+
+
+export function CircleIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Circle cx="12" cy="12" r="8" stroke={color} strokeWidth={2} />
+        </Svg>
+    );
+}
+
+export function TypeIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="m4 7V4h16v3" />
+                <Path d="M9 20h6" />
+                <Path d="M12 4v16" />
+            </G>
+        </Svg>
+    );
+}
+
+export function PaintbrushIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                <Path d="m9.06 11.9 8.07-8.06a2.85 2.85 0 1 1 4.03 4.03l-8.06 8.08" />
+                <Path d="M7.07 14.94c-1.66 0-3 1.35-3 3.02 0 1.33-2.5 1.52-2 2.02 1.08 1.1 2.49 2.02 4 2.02 2.2 0 4-1.8 4-4.04a3.01 3.01 0 0 0-3-3.02z" />
+            </G>
         </Svg>
     );
 }

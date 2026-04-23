@@ -66,6 +66,7 @@ function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }
     const pathname = usePathname();
     const router = useRouter();
     const [splashVisible, setSplashVisible] = useState(true);
+    const semiboldFontFamily = theme.typography.sans(600, "normal");
 
     useEffect(() => {
         if (onboardingCompleted || pathname === "/onboarding") {
@@ -110,7 +111,10 @@ function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }
                         headerBackButtonDisplayMode: "minimal",
                         headerStyle: { backgroundColor: theme.colors.bg },
                         headerTintColor: theme.colors.textPrimary,
-                        headerTitleStyle: { fontWeight: "600" },
+                        headerTitleStyle: {
+                            fontWeight: "600",
+                            ...(semiboldFontFamily !== undefined ? { fontFamily: semiboldFontFamily } : {}),
+                        },
                     }}
                 />
                 <Stack.Screen
@@ -121,7 +125,10 @@ function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }
                         headerBackButtonDisplayMode: "minimal",
                         headerStyle: { backgroundColor: theme.colors.bg },
                         headerTintColor: theme.colors.textPrimary,
-                        headerTitleStyle: { fontWeight: "600" },
+                        headerTitleStyle: {
+                            fontWeight: "600",
+                            ...(semiboldFontFamily !== undefined ? { fontFamily: semiboldFontFamily } : {}),
+                        },
                         contentStyle: { backgroundColor: theme.colors.bg },
                     }}
                 />
@@ -133,7 +140,10 @@ function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }
                         headerBackButtonDisplayMode: "minimal",
                         headerStyle: { backgroundColor: theme.colors.bg },
                         headerTintColor: theme.colors.textPrimary,
-                        headerTitleStyle: { fontWeight: "600" },
+                        headerTitleStyle: {
+                            fontWeight: "600",
+                            ...(semiboldFontFamily !== undefined ? { fontFamily: semiboldFontFamily } : {}),
+                        },
                         contentStyle: { backgroundColor: theme.colors.bg },
                     }}
                 />

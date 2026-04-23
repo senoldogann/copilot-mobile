@@ -6,6 +6,7 @@ import { Stack, useRouter } from "expo-router";
 import { type ThemeMode, type ThemeVariant } from "../src/theme/colors";
 import { useThemedStyles, type AppTheme, useAppTheme } from "../src/theme/theme-context";
 import { useThemeStore } from "../src/theme/theme-store";
+import { APP_FONT_OPTIONS, type AppFontPreference } from "../src/theme/typography";
 import { prepareNotificationPermissions } from "../src/services/notifications";
 import { syncRemoteNotificationRegistration } from "../src/services/bridge";
 import {
@@ -19,12 +20,17 @@ import {
     ChevronRightIcon,
     CheckIcon,
     ArrowLeftIcon,
+    CircleIcon,
+    AlignLeftIcon,
+    ChevronDownIcon,
+    PaintbrushIcon,
+    TypeIcon,
 } from "../src/components/ProviderIcon";
 
 const THEME_MODES: ReadonlyArray<{ value: ThemeMode; label: string; icon: (props: any) => React.ReactNode }> = [
     { value: "light", label: "Light", icon: SunIcon },
     { value: "dark", label: "Dark", icon: MoonIcon },
-    { value: "system", label: "System", icon: SmartphoneIcon },
+    { value: "system", label: "Match iPhone", icon: SmartphoneIcon },
 ];
 
 const THEME_VARIANTS: ReadonlyArray<{ value: ThemeVariant; label: string; swatch: string }> = [
@@ -55,29 +61,29 @@ function SettingsGroup({
 
 function SettingsRow({
     icon,
-    iconBackgroundColor,
     label,
     value,
     rightElement,
     onPress,
     isLast = false,
+    active = false,
+    indented = false,
 }: {
     icon: (props: any) => React.ReactNode;
-    iconBackgroundColor?: string;
     label: string;
     value?: string;
     rightElement?: React.ReactNode;
     onPress?: () => void;
     isLast?: boolean;
+    active?: boolean;
+    indented?: boolean;
 }) {
     const styles = useThemedStyles(createStyles);
-    const theme = useThemeStore((state) => state.variant);
+    const theme = useAppTheme();
     const content = (
         <View style={[styles.rowContent, !isLast && styles.rowBorder]}>
-            <View style={styles.rowLeft}>
-                <View style={[styles.iconWrap, { backgroundColor: iconBackgroundColor ?? "#8b8b92" }]}>
-                    {icon({ size: 16, color: "#ffffff" })}
-                </View>
+            <View style={[styles.rowLeft, indented && { paddingLeft: 24 }]}>
+                {icon({ size: 20, color: theme.colors.textSecondary })}
                 <Text style={styles.rowLabel}>{label}</Text>
             </View>
             <View style={styles.rowRight}>
@@ -94,7 +100,11 @@ function SettingsRow({
     if (onPress) {
         return (
             <Pressable
-                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                style={({ pressed }) => [
+                    styles.row, 
+                    active && styles.rowActive, 
+                    pressed && styles.rowPressed
+                ]}
                 onPress={onPress}
             >
                 {content}
@@ -102,13 +112,18 @@ function SettingsRow({
         );
     }
 
-    return <View style={styles.row}>{content}</View>;
+    return <View style={[styles.row, active && styles.rowActive]}>{content}</View>;
 }
 
 function ThemeSettings() {
     const styles = useThemedStyles(createStyles);
+    const theme = useAppTheme();
     const themeMode = useThemeStore((state) => state.mode);
     const themeVariant = useThemeStore((state) => state.variant);
+    const fontPreference = useThemeStore((state) => state.fontPreference);
+
+    const [isThemeDropdownOpen, setIsThemeDropdownOpen] = React.useState(false);
+    const [isFontDropdownOpen, setIsFontDropdownOpen] = React.useState(false);
 
     const applyThemeSelection = async (mode: ThemeMode, variant: ThemeVariant) => {
         try {
@@ -121,10 +136,21 @@ function ThemeSettings() {
         }
     };
 
+    const applyFontSelection = async (nextFontPreference: AppFontPreference) => {
+        try {
+            await useThemeStore.getState().setFontPreference(nextFontPreference);
+        } catch (error) {
+            Alert.alert(
+                "Font update failed",
+                error instanceof Error ? error.message : String(error),
+            );
+        }
+    };
+
     return (
         <SettingsGroup
             title="Appearance"
-            footer="Choose your preferred theme mode and accent color. The accent color changes the primary highlights across the app."
+            footer="Choose your preferred theme mode, accent color, and font family. The selected font updates the interface across the app."
         >
             <View style={styles.segmentedRow}>
                 <View style={styles.segmentedControl}>
@@ -149,23 +175,76 @@ function ThemeSettings() {
                 </View>
             </View>
 
-            {THEME_VARIANTS.map((item, index) => {
+            <SettingsRow
+                icon={PaintbrushIcon}
+                label="Theme Color"
+                value={THEME_VARIANTS.find(t => t.value === themeVariant)?.label ?? ""}
+                onPress={() => setIsThemeDropdownOpen(!isThemeDropdownOpen)}
+                rightElement={
+                    <View style={isThemeDropdownOpen ? { transform: [{ rotate: "180deg" }] } : undefined}>
+                        <ChevronDownIcon size={16} color={theme.colors.textTertiary} />
+                    </View>
+                }
+                isLast={!isThemeDropdownOpen && !isFontDropdownOpen}
+            />
+
+            {isThemeDropdownOpen && THEME_VARIANTS.map((item, index) => {
                 const active = themeVariant === item.value;
-                const isLast = index === THEME_VARIANTS.length - 1;
+                const isLast = false;
 
                 return (
                     <SettingsRow
                         key={item.value}
-                        icon={PaletteIcon}
-                        iconBackgroundColor={item.swatch}
+                        icon={CircleIcon}
                         label={item.label}
                         isLast={isLast}
+                        active={active}
+                        indented={true}
                         onPress={() => {
                             void applyThemeSelection(themeMode, item.value);
+                            setIsThemeDropdownOpen(false);
                         }}
                         rightElement={
                             active ? (
                                 <CheckIcon size={16} color={item.swatch} />
+                            ) : undefined
+                        }
+                    />
+                );
+            })}
+
+            <SettingsRow
+                icon={TypeIcon}
+                label="Font Style"
+                value={APP_FONT_OPTIONS.find(f => f.value === fontPreference)?.label ?? ""}
+                onPress={() => setIsFontDropdownOpen(!isFontDropdownOpen)}
+                rightElement={
+                    <View style={isFontDropdownOpen ? { transform: [{ rotate: "180deg" }] } : undefined}>
+                        <ChevronDownIcon size={16} color={theme.colors.textTertiary} />
+                    </View>
+                }
+                isLast={!isFontDropdownOpen}
+            />
+
+            {isFontDropdownOpen && APP_FONT_OPTIONS.map((item, index) => {
+                const active = fontPreference === item.value;
+                const isLast = index === APP_FONT_OPTIONS.length - 1;
+
+                return (
+                    <SettingsRow
+                        key={item.value}
+                        icon={AlignLeftIcon}
+                        label={item.label}
+                        isLast={isLast}
+                        active={active}
+                        indented={true}
+                        onPress={() => {
+                            void applyFontSelection(item.value);
+                            setIsFontDropdownOpen(false);
+                        }}
+                        rightElement={
+                            active ? (
+                                <CheckIcon size={16} color={theme.colors.accent} />
                             ) : undefined
                         }
                     />
@@ -225,13 +304,11 @@ export default function SettingsScreen() {
             >
                 <SettingsRow
                     icon={BookOpenIcon}
-                    iconBackgroundColor="#34C759"
                     label="Setup Guide"
                     onPress={() => router.push("/onboarding")}
                 />
                 <SettingsRow
                     icon={BellIcon}
-                    iconBackgroundColor="#FF3B30"
                     label="Notifications"
                     isLast={true}
                     onPress={() => {
@@ -240,16 +317,10 @@ export default function SettingsScreen() {
                 />
             </SettingsGroup>
 
-            <SettingsGroup title="About">
-                <SettingsRow
-                    icon={DesktopIcon}
-                    iconBackgroundColor="#8b8b92"
-                    label="Version"
-                    value={`v${appVersion}`}
-                    isLast={true}
-                />
-            </SettingsGroup>
-        </ScrollView>
+                <View style={styles.footerWrap}>
+                    <Text style={styles.versionText}>v{appVersion}</Text>
+                </View>
+            </ScrollView>
         </>
     );
 }
@@ -258,16 +329,17 @@ function createStyles(theme: AppTheme) {
     return StyleSheet.create({
         container: {
             flex: 1,
-            backgroundColor: theme.colors.bgSecondary,
+            backgroundColor: theme.colors.bg,
         },
         content: {
+            flexGrow: 1,
             paddingTop: Constants.statusBarHeight + 16,
             paddingBottom: 48,
         },
         pageHeader: {
             flexDirection: "row",
             alignItems: "center",
-            paddingHorizontal: theme.spacing.lg,
+            paddingHorizontal: theme.spacing.xl,
             paddingBottom: theme.spacing.lg,
             gap: 12,
         },
@@ -275,11 +347,9 @@ function createStyles(theme: AppTheme) {
             width: 32,
             height: 32,
             borderRadius: 16,
-            backgroundColor: theme.colors.bgTertiary,
+            backgroundColor: "transparent",
             alignItems: "center",
             justifyContent: "center",
-            borderWidth: StyleSheet.hairlineWidth,
-            borderColor: theme.colors.border,
         },
         pageTitle: {
             fontSize: 26,
@@ -294,28 +364,31 @@ function createStyles(theme: AppTheme) {
             fontSize: 12,
             fontWeight: "600",
             color: theme.colors.textTertiary,
-            marginLeft: theme.spacing.lg,
+            marginLeft: theme.spacing.xl,
             marginBottom: 6,
             letterSpacing: 0.3,
         },
         groupFooter: {
             fontSize: 13,
             color: theme.colors.textTertiary,
-            marginHorizontal: theme.spacing.lg,
+            marginHorizontal: theme.spacing.xl,
             marginTop: 8,
             lineHeight: 18,
         },
         groupCard: {
-            backgroundColor: theme.colors.bgTertiary,
+            backgroundColor: "transparent",
             borderTopWidth: StyleSheet.hairlineWidth,
             borderBottomWidth: StyleSheet.hairlineWidth,
-            borderColor: theme.colors.border,
+            borderColor: theme.colors.borderMuted,
         },
         row: {
-            backgroundColor: theme.colors.bgTertiary,
+            backgroundColor: "transparent",
             flexDirection: "row",
             alignItems: "stretch",
-            paddingLeft: theme.spacing.md,
+            paddingLeft: theme.spacing.xl,
+        },
+        rowActive: {
+            backgroundColor: theme.colors.bgSecondary,
         },
         rowPressed: {
             backgroundColor: theme.colors.bgElevated,
@@ -335,14 +408,7 @@ function createStyles(theme: AppTheme) {
         rowLeft: {
             flexDirection: "row",
             alignItems: "center",
-            gap: 12,
-        },
-        iconWrap: {
-            width: 30,
-            height: 30,
-            borderRadius: 7,
-            alignItems: "center",
-            justifyContent: "center",
+            gap: 16,
         },
         rowLabel: {
             fontSize: 15,
@@ -360,9 +426,10 @@ function createStyles(theme: AppTheme) {
         },
         segmentedRow: {
             padding: theme.spacing.md,
+            paddingLeft: theme.spacing.xl,
             borderBottomWidth: StyleSheet.hairlineWidth,
             borderBottomColor: theme.colors.borderMuted,
-            backgroundColor: theme.colors.bgTertiary,
+            backgroundColor: "transparent",
         },
         segmentedControl: {
             flexDirection: "row",
@@ -396,6 +463,17 @@ function createStyles(theme: AppTheme) {
         },
         segmentTextActive: {
             color: "#ffffff",
+        },
+        footerWrap: {
+            alignItems: "center",
+            marginTop: "auto",
+            marginBottom: theme.spacing.lg,
+        },
+        versionText: {
+            fontSize: 13,
+            color: theme.colors.textTertiary,
+            fontWeight: "500",
+            letterSpacing: 0.5,
         },
     });
 }

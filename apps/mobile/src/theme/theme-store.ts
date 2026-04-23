@@ -3,6 +3,7 @@ import { create } from "zustand";
 import * as SecureStore from "expo-secure-store";
 
 import { applyThemeColors, type ThemeMode, type ThemeVariant } from "./colors";
+import { ensureFontAssetsLoaded, setGlobalFontPreference, type AppFontPreference } from "./typography";
 
 const THEME_PREFERENCES_KEY = "code_companion_theme_preferences";
 const LEGACY_THEME_PREFERENCES_KEY = "copilot_mobile_theme_preferences";
@@ -10,17 +11,20 @@ const LEGACY_THEME_PREFERENCES_KEY = "copilot_mobile_theme_preferences";
 type ThemePreferences = {
     mode: ThemeMode;
     variant: ThemeVariant;
+    fontPreference: AppFontPreference;
 };
 
 type ThemeStore = ThemePreferences & {
     hydrated: boolean;
     hydrate: () => Promise<void>;
     setThemePreferences: (mode: ThemeMode, variant: ThemeVariant) => Promise<void>;
+    setFontPreference: (fontPreference: AppFontPreference) => Promise<void>;
 };
 
 const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
-    mode: "dark",
+    mode: "system",
     variant: "claude",
+    fontPreference: "system",
 };
 
 async function persistThemePreferences(preferences: ThemePreferences): Promise<void> {
@@ -48,12 +52,25 @@ function readThemePreferences(rawValue: string | null): ThemePreferences {
     const value = parsed as Record<string, unknown>;
     const mode = value.mode;
     const variant = value.variant;
+    const fontPreference = value.fontPreference;
 
     if (
         (mode === "light" || mode === "dark" || mode === "system")
         && (variant === "zinc" || variant === "midnight" || variant === "claude" || variant === "ghostty")
+        && (
+            fontPreference === undefined
+            || fontPreference === "system"
+            || fontPreference === "inter"
+            || fontPreference === "poppins"
+            || fontPreference === "manrope"
+            || fontPreference === "roboto"
+        )
     ) {
-        return { mode, variant };
+        return {
+            mode,
+            variant,
+            fontPreference: fontPreference ?? DEFAULT_THEME_PREFERENCES.fontPreference,
+        };
     }
 
     return DEFAULT_THEME_PREFERENCES;
@@ -71,6 +88,8 @@ export const useThemeStore = create<ThemeStore>((set) => ({
         }
 
         const preferences = readThemePreferences(rawValue);
+        await ensureFontAssetsLoaded(preferences.fontPreference);
+        setGlobalFontPreference(preferences.fontPreference);
         applyThemeColors(preferences.mode, preferences.variant, Appearance.getColorScheme());
         set({
             ...preferences,
@@ -79,9 +98,25 @@ export const useThemeStore = create<ThemeStore>((set) => ({
     },
 
     setThemePreferences: async (mode, variant) => {
-        const preferences = { mode, variant } satisfies ThemePreferences;
+        const preferences = {
+            mode,
+            variant,
+            fontPreference: useThemeStore.getState().fontPreference,
+        } satisfies ThemePreferences;
         applyThemeColors(preferences.mode, preferences.variant, Appearance.getColorScheme());
         set(preferences);
+        await persistThemePreferences(preferences);
+    },
+
+    setFontPreference: async (fontPreference) => {
+        await ensureFontAssetsLoaded(fontPreference);
+        const preferences = {
+            mode: useThemeStore.getState().mode,
+            variant: useThemeStore.getState().variant,
+            fontPreference,
+        } satisfies ThemePreferences;
+        setGlobalFontPreference(fontPreference);
+        set({ fontPreference });
         await persistThemePreferences(preferences);
     },
 }));

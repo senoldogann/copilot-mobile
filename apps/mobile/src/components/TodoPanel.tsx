@@ -1,10 +1,12 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import type { AgentTodo } from "../stores/session-store-types";
+import { CloseIcon } from "./ProviderIcon";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 
 interface TodoPanelProps {
     todos: ReadonlyArray<AgentTodo>;
+    onDismiss: () => void;
 }
 
 function TodoStatusIcon({ status }: { status: AgentTodo["status"] }) {
@@ -48,7 +50,8 @@ function areTodosEqual(
     });
 }
 
-function TodoPanelInner({ todos }: TodoPanelProps) {
+function TodoPanelInner({ todos, onDismiss }: TodoPanelProps) {
+    const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
     const [expanded, setExpanded] = useState(false);
 
@@ -82,9 +85,22 @@ function TodoPanelInner({ todos }: TodoPanelProps) {
                         </View>
                     )}
                 </View>
-                <Text style={styles.chevron}>
-                    {expanded ? "▾" : "▸"}
-                </Text>
+                <View style={styles.headerActions}>
+                    <Pressable
+                        style={styles.dismissButton}
+                        onPress={(event) => {
+                            event.stopPropagation();
+                            onDismiss();
+                        }}
+                        hitSlop={8}
+                        accessibilityLabel="Dismiss todo list"
+                    >
+                        <CloseIcon size={14} color={theme.colors.textTertiary} />
+                    </Pressable>
+                    <Text style={styles.chevron}>
+                        {expanded ? "▾" : "▸"}
+                    </Text>
+                </View>
             </Pressable>
 
             {expanded && (
@@ -158,15 +174,16 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         width: 18,
         height: 18,
         borderWidth: 1.5,
-        borderColor: theme.colors.accent,
+        borderColor: theme.colors.border,
         borderRadius: 4,
         alignItems: "center",
         justifyContent: "center",
+        backgroundColor: theme.colors.bgTertiary,
     },
     taskIconText: {
         fontSize: 11,
         fontWeight: "600",
-        color: theme.colors.accent,
+        color: theme.colors.textSecondary,
     },
     headerTitle: {
         fontSize: 13,
@@ -177,12 +194,12 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         paddingHorizontal: 6,
         paddingVertical: 2,
         borderRadius: 10,
-        backgroundColor: theme.colors.accentMuted,
+        backgroundColor: theme.colors.bgTertiary,
     },
     badgeText: {
         fontSize: 11,
         fontWeight: "600",
-        color: theme.colors.accent,
+        color: theme.colors.textSecondary,
     },
     badgeWarning: {
         marginLeft: 4,
@@ -193,8 +210,20 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     },
     chevron: {
         fontSize: 14,
-        marginLeft: 8,
         color: theme.colors.textSecondary,
+    },
+    headerActions: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginLeft: 8,
+        gap: 8,
+    },
+    dismissButton: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        alignItems: "center",
+        justifyContent: "center",
     },
     listScroll: {
         maxHeight: 220,

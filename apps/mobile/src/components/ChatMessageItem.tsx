@@ -1,6 +1,6 @@
 // Sohbet mesaj öğesi — GitHub Copilot mobil tasarım diliyle markdown render
 
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
     View,
     Text,
@@ -8,6 +8,10 @@ import {
     Alert,
     ScrollView,
     StyleSheet,
+    Animated,
+    type StyleProp,
+    type TextStyle,
+    type GestureResponderEvent,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import * as Clipboard from "expo-clipboard";
@@ -22,6 +26,20 @@ import { ArrowUpIcon, CopyIcon } from "./ProviderIcon";
 type Props = {
     item: ChatItem;
 };
+
+const ASSISTANT_ACTION_MENU_WIDTH = 164;
+const ASSISTANT_ACTION_MENU_HEIGHT = 96;
+const ASSISTANT_ACTION_MENU_MARGIN = 10;
+
+const assistantActionMenuListeners = new Set<(itemId: string | null) => void>();
+let activeAssistantActionMenuId: string | null = null;
+
+function setActiveAssistantActionMenu(itemId: string | null): void {
+    activeAssistantActionMenuId = itemId;
+    for (const listener of assistantActionMenuListeners) {
+        listener(itemId);
+    }
+}
 
 const scrollPassThroughResponderProps = {
     onStartShouldSetResponder: () => false,
@@ -115,38 +133,54 @@ function parseFilePaths(text: string): ReadonlyArray<MarkdownSegment> {
 }
 
 // Render inline markdown segments
-function InlineMarkdown({ segments }: { segments: ReadonlyArray<MarkdownSegment> }) {
+function InlineMarkdown({
+    segments,
+    selectable = false,
+}: {
+    segments: ReadonlyArray<MarkdownSegment>;
+    selectable?: boolean;
+}) {
     const mdStyles = useThemedStyles(createMarkdownStyles);
     return (
-        <Text style={mdStyles.inlineText}>
-            {segments.map((seg, i) => {
+        <Text style={mdStyles.inlineText} selectable={selectable}>
+            <InlineMarkdownSpans segments={segments} />
+        </Text>
+    );
+}
+
+function InlineMarkdownSpans({ segments }: { segments: ReadonlyArray<MarkdownSegment> }) {
+    const mdStyles = useThemedStyles(createMarkdownStyles);
+
+    return (
+        <>
+            {segments.map((seg, index) => {
                 switch (seg.kind) {
                     case "bold":
                         return (
-                            <Text key={i} style={mdStyles.bold}>
+                            <Text key={index} style={mdStyles.bold}>
                                 {seg.value}
                             </Text>
                         );
                     case "italic":
                         return (
-                            <Text key={i} style={mdStyles.italic}>
+                            <Text key={index} style={mdStyles.italic}>
                                 {seg.value}
                             </Text>
                         );
                     case "code":
                         return (
-                            <Text key={i} style={mdStyles.inlineCode}>
+                            <Text key={index} style={mdStyles.inlineCode}>
                                 {seg.value}
                             </Text>
                         );
                     case "file":
-                        return <FileLink key={i} path={seg.value} />;
+                        return <FileLink key={index} path={seg.value} />;
                     case "text":
                     default:
-                        return <Text key={i}>{seg.value}</Text>;
+                        return seg.value;
                 }
             })}
-        </Text>
+        </>
     );
 }
 
@@ -328,6 +362,162 @@ function buildApplyPrompt(language: string, code: string): string {
     ].join("\n");
 }
 
+function copyTextToClipboard(text: string, title: string): Promise<void> {
+    return Clipboard.setStringAsync(text)
+        .then(() => undefined)
+        .catch((error) => {
+            const message = error instanceof Error ? error.message : String(error);
+            Alert.alert(title, message);
+            throw error;
+        });
+}
+
+function askAgentAboutText(text: string): boolean {
+    return insertIntoComposer({
+        mode: "append",
+        text,
+    });
+}
+
+function clamp(value: number, min: number, max: number): number {
+    return Math.min(Math.max(value, min), max);
+}
+
+type SentenceUnit = {
+    kind: MarkdownSegment["kind"];
+    char: string;
+};
+
+type SentenceChunk = {
+    key: string;
+    text: string;
+    segments: ReadonlyArray<MarkdownSegment>;
+};
+
+function coalesceSentenceUnits(units: ReadonlyArray<SentenceUnit>): ReadonlyArray<MarkdownSegment> {
+    const segments: Array<MarkdownSegment> = [];
+
+    for (const unit of units) {
+        const previous = segments[segments.length - 1];
+        if (previous !== undefined && previous.kind === unit.kind) {
+            previous.value += unit.char;
+            continue;
+        }
+
+        segments.push({ kind: unit.kind, value: unit.char });
+    }
+
+    return segments;
+}
+
+function splitSegmentsIntoSentenceChunks(segments: ReadonlyArray<MarkdownSegment>): ReadonlyArray<SentenceChunk> {
+    const units: Array<SentenceUnit> = [];
+    for (const segment of segments) {
+        for (const char of segment.value) {
+            units.push({ kind: segment.kind, char });
+        }
+    }
+
+    if (units.length === 0) {
+        return [];
+    }
+
+    const chunks: Array<SentenceChunk> = [];
+    let start = 0;
+    let index = 0;
+
+    while (index < units.length) {
+        const currentChar = units[index]?.char;
+        if (currentChar !== undefined && /[.!?]/.test(currentChar)) {
+            let lookahead = index + 1;
+            while (lookahead < units.length && /["')\]}>”’]/.test(units[lookahead]?.char ?? "")) {
+                lookahead += 1;
+            }
+
+            if (lookahead >= units.length || /\s/.test(units[lookahead]?.char ?? "")) {
+                let end = lookahead;
+                while (end < units.length && /\s/.test(units[end]?.char ?? "")) {
+                    end += 1;
+                }
+
+                const slice = units.slice(start, end);
+                const text = slice.map((unit) => unit.char).join("");
+                if (text.trim().length > 0) {
+                    chunks.push({
+                        key: `sentence-${chunks.length}`,
+                        text,
+                        segments: coalesceSentenceUnits(slice),
+                    });
+                }
+                start = end;
+                index = end;
+                continue;
+            }
+        }
+
+        index += 1;
+    }
+
+    if (start < units.length) {
+        const slice = units.slice(start);
+        const text = slice.map((unit) => unit.char).join("");
+        if (text.trim().length > 0) {
+            chunks.push({
+                key: `sentence-${chunks.length}`,
+                text,
+                segments: coalesceSentenceUnits(slice),
+            });
+        }
+    }
+
+    return chunks.length > 0
+        ? chunks
+        : [{
+            key: "sentence-0",
+            text: units.map((unit) => unit.char).join(""),
+            segments,
+        }];
+}
+
+function InteractiveMarkdownText({
+    segments,
+    textStyle,
+    onSentenceLongPress,
+}: {
+    segments: ReadonlyArray<MarkdownSegment>;
+    textStyle: StyleProp<TextStyle>;
+    onSentenceLongPress?: ((text: string, event: GestureResponderEvent) => void) | undefined;
+}) {
+    const chunks = useMemo(() => splitSegmentsIntoSentenceChunks(segments), [segments]);
+
+    return (
+        <Text style={textStyle}>
+            {chunks.map((chunk) => {
+                const trimmedText = chunk.text.trim();
+                if (trimmedText.length === 0) {
+                    return (
+                        <Text key={chunk.key}>
+                            {chunk.text}
+                        </Text>
+                    );
+                }
+
+                return (
+                    <Text
+                        key={chunk.key}
+                        suppressHighlighting
+                        onLongPress={onSentenceLongPress === undefined
+                            ? undefined
+                            : (event) => onSentenceLongPress(trimmedText, event)}
+                    >
+                        <InlineMarkdownSpans segments={chunk.segments} />
+                    </Text>
+                );
+            })}
+        </Text>
+    );
+}
+
 function CodeBlockCard({ language, code }: { language: string; code: string }) {
     const [copied, setCopied] = useState(false);
     const [queuedForApply, setQueuedForApply] = useState(false);
@@ -335,17 +525,14 @@ function CodeBlockCard({ language, code }: { language: string; code: string }) {
     const theme = useAppTheme();
 
     const handleCopy = React.useCallback(() => {
-        void Clipboard.setStringAsync(code)
+        void copyTextToClipboard(code, "Could not copy code")
             .then(() => {
                 setCopied(true);
                 setTimeout(() => {
                     setCopied(false);
                 }, 1600);
             })
-            .catch((error) => {
-                const message = error instanceof Error ? error.message : String(error);
-                Alert.alert("Could not copy code", message);
-            });
+            .catch(() => undefined);
     }, [code]);
 
     const handleApply = React.useCallback(() => {
@@ -419,9 +606,11 @@ function CodeBlockCard({ language, code }: { language: string; code: string }) {
 function MarkdownContent({
     content,
     isStreaming,
+    onSentenceLongPress,
 }: {
     content: string;
     isStreaming: boolean;
+    onSentenceLongPress?: ((text: string, event: GestureResponderEvent) => void) | undefined;
 }) {
     const mdStyles = useThemedStyles(createMarkdownStyles);
     const styles = useThemedStyles(createStyles);
@@ -438,17 +627,17 @@ function MarkdownContent({
                 switch (block.kind) {
                     case "heading":
                         return (
-                            <Text
+                            <InteractiveMarkdownText
                                 key={i}
-                                style={[
+                                textStyle={[
                                     mdStyles.heading,
                                     block.level === 1 && mdStyles.h1,
                                     block.level === 2 && mdStyles.h2,
                                     block.level === 3 && mdStyles.h3,
                                 ]}
-                            >
-                                {block.text}
-                            </Text>
+                                segments={parseInlineMarkdown(block.text)}
+                                onSentenceLongPress={onSentenceLongPress}
+                            />
                         );
                     case "code_block":
                         return (
@@ -468,7 +657,11 @@ function MarkdownContent({
                                 ]}
                             >
                                 <View style={mdStyles.listContent}>
-                                    <InlineMarkdown segments={block.segments} />
+                                    <InteractiveMarkdownText
+                                        segments={block.segments}
+                                        textStyle={mdStyles.text}
+                                        onSentenceLongPress={onSentenceLongPress}
+                                    />
                                 </View>
                             </View>
                         );
@@ -485,7 +678,11 @@ function MarkdownContent({
                                     {block.number}.
                                 </Text>
                                 <View style={mdStyles.listContent}>
-                                    <InlineMarkdown segments={block.segments} />
+                                    <InteractiveMarkdownText
+                                        segments={block.segments}
+                                        textStyle={mdStyles.text}
+                                        onSentenceLongPress={onSentenceLongPress}
+                                    />
                                 </View>
                             </View>
                         );
@@ -504,9 +701,11 @@ function MarkdownContent({
                                     <View style={mdStyles.tableHeaderRow}>
                                         {block.headers.map((header, j) => (
                                             <View key={j} style={mdStyles.tableCell}>
-                                                <Text style={mdStyles.tableHeaderText}>
-                                                    {header}
-                                                </Text>
+                                                <InteractiveMarkdownText
+                                                    textStyle={mdStyles.tableHeaderText}
+                                                    segments={[{ kind: "text", value: header }]}
+                                                    onSentenceLongPress={onSentenceLongPress}
+                                                />
                                             </View>
                                         ))}
                                     </View>
@@ -514,9 +713,11 @@ function MarkdownContent({
                                         <View key={ri} style={mdStyles.tableRow}>
                                             {row.map((cell, ci) => (
                                                 <View key={ci} style={mdStyles.tableCell}>
-                                                    <Text style={mdStyles.tableCellText}>
-                                                        {cell}
-                                                    </Text>
+                                                    <InteractiveMarkdownText
+                                                        textStyle={mdStyles.tableCellText}
+                                                        segments={[{ kind: "text", value: cell }]}
+                                                        onSentenceLongPress={onSentenceLongPress}
+                                                    />
                                                 </View>
                                             ))}
                                         </View>
@@ -529,9 +730,11 @@ function MarkdownContent({
                     case "paragraph":
                         return (
                             <View key={i} style={mdStyles.paragraph}>
-                                <Text style={mdStyles.text}>
-                                    <InlineMarkdown segments={block.segments} />
-                                </Text>
+                                <InteractiveMarkdownText
+                                    segments={block.segments}
+                                    textStyle={mdStyles.text}
+                                    onSentenceLongPress={onSentenceLongPress}
+                                />
                             </View>
                         );
                 }
@@ -569,7 +772,7 @@ function UserBubble({
                         ))}
                     </View>
                 )}
-                <Text style={styles.userText}>
+                <Text style={styles.userText} selectable>
                     {content}
                 </Text>
             </View>
@@ -585,21 +788,175 @@ function UserBubble({
 
 // Assistant message bubble with markdown rendering
 function AssistantBubble({
+    itemId,
     content,
     isStreaming,
 }: {
+    itemId: string;
     content: string;
     isStreaming: boolean;
 }) {
     const styles = useThemedStyles(createStyles);
+    const theme = useAppTheme();
+    const [showActions, setShowActions] = useState(false);
+    const [selectedText, setSelectedText] = useState("");
+    const [actionAnchor, setActionAnchor] = useState({ left: 0, top: 0 });
+    const actionMenuAnimation = React.useRef(new Animated.Value(0)).current;
+    const bubbleRef = useRef<View>(null);
+
+    useEffect(() => {
+        setShowActions(false);
+        setSelectedText("");
+        actionMenuAnimation.setValue(0);
+    }, [actionMenuAnimation, itemId]);
+
+    useEffect(() => {
+        if (!showActions) {
+            actionMenuAnimation.setValue(0);
+            return;
+        }
+
+        Animated.spring(actionMenuAnimation, {
+            toValue: 1,
+            useNativeDriver: true,
+            damping: 18,
+            stiffness: 220,
+            mass: 0.9,
+        }).start();
+    }, [actionMenuAnimation, showActions]);
+
+    useEffect(() => {
+        const handleAssistantActionMenuChange = (activeItemId: string | null) => {
+            if (activeItemId === itemId) {
+                return;
+            }
+
+            setShowActions(false);
+        };
+
+        assistantActionMenuListeners.add(handleAssistantActionMenuChange);
+        return () => {
+            assistantActionMenuListeners.delete(handleAssistantActionMenuChange);
+            if (activeAssistantActionMenuId === itemId) {
+                setActiveAssistantActionMenu(null);
+            }
+        };
+    }, [itemId]);
+
+    const handleCloseActions = React.useCallback(() => {
+        setShowActions(false);
+        if (activeAssistantActionMenuId === itemId) {
+            setActiveAssistantActionMenu(null);
+        }
+    }, [itemId]);
+
+    const handleCopy = React.useCallback(() => {
+        const nextText = selectedText.length > 0 ? selectedText : content;
+        void copyTextToClipboard(nextText, "Could not copy response")
+            .then(() => {
+                handleCloseActions();
+            })
+            .catch(() => undefined);
+    }, [content, handleCloseActions, selectedText]);
+
+    const handleAskAgent = React.useCallback(() => {
+        const nextText = selectedText.length > 0 ? selectedText : content;
+        const inserted = askAgentAboutText(nextText);
+        if (!inserted) {
+            Alert.alert("Could not add text", "Open the chat composer and try again.");
+            return;
+        }
+
+        handleCloseActions();
+    }, [content, handleCloseActions, selectedText]);
+
+    const handleOpenActions = React.useCallback((nextText: string, event: GestureResponderEvent) => {
+        if (isStreaming) {
+            return;
+        }
+
+        const trimmedText = nextText.trim();
+        if (trimmedText.length === 0) {
+            return;
+        }
+
+        const pageX = event.nativeEvent.pageX;
+        const pageY = event.nativeEvent.pageY;
+
+        bubbleRef.current?.measureInWindow((originX, originY, width, height) => {
+            const localX = pageX - originX;
+            const localY = pageY - originY;
+            const maxLeft = Math.max(0, width - ASSISTANT_ACTION_MENU_WIDTH);
+            const preferredLeft = localX - ASSISTANT_ACTION_MENU_WIDTH / 2;
+            const nextLeft = clamp(preferredLeft, 0, maxLeft);
+
+            const localPreferredTop = localY + ASSISTANT_ACTION_MENU_MARGIN;
+            const localMaxTop = Math.max(0, height - ASSISTANT_ACTION_MENU_HEIGHT);
+            const nextTop = localPreferredTop <= localMaxTop
+                ? localPreferredTop
+                : Math.max(0, localY - ASSISTANT_ACTION_MENU_HEIGHT - ASSISTANT_ACTION_MENU_MARGIN);
+
+            setSelectedText(trimmedText);
+            setActionAnchor({
+                left: clamp(nextLeft, 0, Math.max(0, width - ASSISTANT_ACTION_MENU_WIDTH)),
+                top: clamp(nextTop, 0, Math.max(0, height - ASSISTANT_ACTION_MENU_HEIGHT)),
+            });
+            setActiveAssistantActionMenu(itemId);
+            setShowActions(true);
+        });
+    }, [isStreaming, itemId]);
+
+    const animatedActionStyle = {
+        opacity: actionMenuAnimation,
+        transform: [
+            {
+                translateY: actionMenuAnimation.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-6, 0],
+                }),
+            },
+            {
+                scale: actionMenuAnimation.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [0.96, 1],
+                }),
+            },
+        ],
+    } as const;
+
     return (
         <View style={styles.assistantRow} {...scrollPassThroughResponderProps}>
             <View
+                ref={bubbleRef}
                 style={styles.assistantBubble}
-                pointerEvents="box-none"
-                {...scrollPassThroughResponderProps}
             >
-                <MarkdownContent content={content} isStreaming={isStreaming} />
+                <MarkdownContent
+                    content={content}
+                    isStreaming={isStreaming}
+                    onSentenceLongPress={handleOpenActions}
+                />
+                {showActions && !isStreaming && (
+                    <Animated.View
+                        style={[
+                            styles.assistantActions,
+                            {
+                                left: actionAnchor.left,
+                                top: actionAnchor.top,
+                            },
+                            animatedActionStyle,
+                        ]}
+                    >
+                        <Pressable style={styles.assistantActionButton} onPress={handleCopy}>
+                            <CopyIcon size={13} color={theme.colors.textSecondary} />
+                            <Text style={styles.assistantActionText}>Copy</Text>
+                        </Pressable>
+                        <View style={styles.assistantActionDivider} />
+                        <Pressable style={styles.assistantActionButton} onPress={handleAskAgent}>
+                            <ArrowUpIcon size={12} color={theme.colors.textSecondary} />
+                            <Text style={styles.assistantActionText}>Ask agent</Text>
+                        </Pressable>
+                    </Animated.View>
+                )}
             </View>
         </View>
     );
@@ -617,7 +974,7 @@ function SystemNotificationCard({ content }: { content: string }) {
                 </View>
                 <View style={styles.systemNotificationContent}>
                     <Text style={styles.systemNotificationTitle}>System notification</Text>
-                    <Text style={styles.systemNotificationText}>{content}</Text>
+                    <Text style={styles.systemNotificationText} selectable>{content}</Text>
                 </View>
             </View>
         </View>
@@ -642,6 +999,7 @@ function ChatMessageItemComponent({ item }: Props) {
                     case "assistant":
                         return (
                             <AssistantBubble
+                                itemId={item.id}
                                 content={item.content}
                                 isStreaming={item.isStreaming}
                             />
@@ -932,8 +1290,44 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         marginVertical: theme.spacing.xs,
     },
     assistantBubble: {
+        position: "relative",
         paddingVertical: theme.spacing.sm,
         paddingHorizontal: theme.spacing.lg,
+    },
+    assistantActions: {
+        position: "absolute",
+        flexDirection: "column",
+        alignItems: "stretch",
+        width: ASSISTANT_ACTION_MENU_WIDTH,
+        paddingVertical: 6,
+        borderRadius: theme.borderRadius.lg,
+        backgroundColor: theme.colors.bgSecondary,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        shadowColor: "#000",
+        shadowOpacity: theme.resolvedScheme === "light" ? 0.08 : 0.24,
+        shadowRadius: 14,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 6,
+        zIndex: 3,
+    },
+    assistantActionButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 9,
+        backgroundColor: "transparent",
+    },
+    assistantActionText: {
+        fontSize: theme.fontSize.xs,
+        fontWeight: "600",
+        color: theme.colors.textSecondary,
+    },
+    assistantActionDivider: {
+        height: StyleSheet.hairlineWidth,
+        backgroundColor: theme.colors.borderMuted,
+        marginHorizontal: 10,
     },
     systemNotificationRow: {
         paddingHorizontal: theme.spacing.md,

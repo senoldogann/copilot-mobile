@@ -5,6 +5,7 @@ import {
     NativeScrollEvent,
     NativeSyntheticEvent,
     Pressable,
+    ScrollView,
     StyleSheet,
     Text,
     View,
@@ -100,7 +101,11 @@ function SlideCard({ item, width }: { item: OnboardingSlide; width: number }) {
 
     return (
         <View style={[styles.slidePage, { width }]}>
-            <View style={styles.slideSurface}>
+            <ScrollView 
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.slideSurface}
+                bounces={false}
+            >
                 <View style={styles.iconContainer}>
                     {renderSlideIcon(item.icon, styles.iconColor.color as string)}
                 </View>
@@ -135,7 +140,7 @@ function SlideCard({ item, width }: { item: OnboardingSlide; width: number }) {
                     <CheckSquareIcon size={14} color={styles.iconColor.color as string} />
                     <Text style={styles.noteText}>{item.note}</Text>
                 </View>
-            </View>
+            </ScrollView>
         </View>
     );
 }
@@ -379,9 +384,10 @@ function createStyles(theme: AppTheme) {
             paddingHorizontal: theme.spacing.lg,
         },
         slideSurface: {
-            flex: 1,
+            flexGrow: 1,
             alignItems: "center",
             paddingHorizontal: theme.spacing.sm,
+            paddingBottom: theme.spacing.xl,
         },
         iconContainer: {
             width: 90,

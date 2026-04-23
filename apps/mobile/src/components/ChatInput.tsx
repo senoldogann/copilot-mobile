@@ -615,9 +615,120 @@ const VOICE_CONTEXTUAL_STRINGS: ReadonlyArray<string> = [
     "workspace",
 ];
 
-function resolveSpeechLocale(): string {
-    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
-    return locale.trim().length > 0 ? locale : "en-US";
+const DEFAULT_SPEECH_LOCALE = "en-US";
+
+const PREFERRED_SPEECH_LOCALES: Readonly<Record<string, string>> = {
+    en: "en-US",
+    tr: "tr-TR",
+};
+
+type SpeechLocaleResolution = {
+    requestedLocale: string;
+    resolvedLocale: string;
+    usedFallback: boolean;
+};
+
+function normalizeSpeechLocale(locale: string): string {
+    const normalizedLocale = locale.trim().replaceAll("_", "-");
+    return normalizedLocale.length > 0 ? normalizedLocale : DEFAULT_SPEECH_LOCALE;
+}
+
+function getRequestedSpeechLocale(): string {
+    return normalizeSpeechLocale(Intl.DateTimeFormat().resolvedOptions().locale);
+}
+
+function findSupportedSpeechLocale(
+    requestedLocale: string,
+    supportedLocales: ReadonlyArray<string>
+): string | null {
+    const exactMatch = supportedLocales.find((locale) => locale.toLowerCase() === requestedLocale.toLowerCase());
+    if (exactMatch !== undefined) {
+        return exactMatch;
+    }
+
+    const languageCode = requestedLocale.split("-")[0]?.toLowerCase() ?? "";
+    if (languageCode.length === 0) {
+        return null;
+    }
+
+    const preferredLocale = PREFERRED_SPEECH_LOCALES[languageCode];
+    if (preferredLocale !== undefined) {
+        const preferredMatch = supportedLocales.find((locale) => locale.toLowerCase() === preferredLocale.toLowerCase());
+        if (preferredMatch !== undefined) {
+            return preferredMatch;
+        }
+    }
+
+    const territoryDefaultLocale = `${languageCode}-${languageCode.toUpperCase()}`;
+    const territoryDefaultMatch = supportedLocales.find((locale) => (
+        locale.toLowerCase() === territoryDefaultLocale.toLowerCase()
+    ));
+    if (territoryDefaultMatch !== undefined) {
+        return territoryDefaultMatch;
+    }
+
+    const languageMatch = supportedLocales.find((locale) => (
+        locale.toLowerCase() === languageCode || locale.toLowerCase().startsWith(`${languageCode}-`)
+    ));
+    if (languageMatch !== undefined) {
+        return languageMatch;
+    }
+
+    const defaultMatch = supportedLocales.find((locale) => locale.toLowerCase() === DEFAULT_SPEECH_LOCALE.toLowerCase());
+    return defaultMatch ?? null;
+}
+
+function resolveSpeechLocale(
+    requestedLocale: string,
+    supportedLocales: ReadonlyArray<string>
+): SpeechLocaleResolution {
+    if (supportedLocales.length === 0) {
+        return {
+            requestedLocale,
+            resolvedLocale: requestedLocale,
+            usedFallback: false,
+        };
+    }
+
+    const supportedLocale = findSupportedSpeechLocale(requestedLocale, supportedLocales);
+    if (supportedLocale === null) {
+        return {
+            requestedLocale,
+            resolvedLocale: requestedLocale,
+            usedFallback: false,
+        };
+    }
+
+    return {
+        requestedLocale,
+        resolvedLocale: supportedLocale,
+        usedFallback: supportedLocale.toLowerCase() !== requestedLocale.toLowerCase(),
+    };
+}
+
+function getUniqueSpeechLocales(locales: ReadonlyArray<string>): ReadonlyArray<string> {
+    return [...new Set(locales.map((locale) => normalizeSpeechLocale(locale)))];
+}
+
+function isUnsupportedSpeechLocaleMessage(message: string): boolean {
+    const normalizedMessage = message.toLowerCase();
+    return normalizedMessage.includes("is not supported by the speech recognizer")
+        || (
+            normalizedMessage.includes("available locales")
+            && normalizedMessage.includes("locale")
+        );
+}
+
+function getVoiceInputErrorMessage(errorCode: string, rawMessage: string): string {
+    if (errorCode === "not-allowed") {
+        return "Enable microphone and speech recognition to dictate prompts.";
+    }
+
+    if (isUnsupportedSpeechLocaleMessage(rawMessage)) {
+        return "Speech recognition is not available for the current device language. Try Turkish or English in your device language settings.";
+    }
+
+    return rawMessage;
 }
 
 function replaceSelectionText(
@@ -954,6 +1065,8 @@ function ChatInputComponent({
     const inputRefState = React.useRef("");
     const selectionRef = React.useRef<InputSelection>({ start: 0, end: 0 });
     const voiceStartPendingRef = React.useRef(false);
+    const supportedSpeechLocalesRef = React.useRef<ReadonlyArray<string> | null>(null);
+    const voiceLocaleResolutionRef = React.useRef<SpeechLocaleResolution | null>(null);
     const voiceCaptureRef = React.useRef<VoiceCaptureState>({
         active: false,
         baseInput: "",
@@ -1079,8 +1192,35 @@ function ChatInputComponent({
         setSelection(nextState.selection);
     }, []);
 
+    const resolveActiveSpeechLocale = useCallback(async (): Promise<SpeechLocaleResolution> => {
+        const requestedLocale = getRequestedSpeechLocale();
+        const cachedSupportedLocales = supportedSpeechLocalesRef.current;
+        if (cachedSupportedLocales !== null) {
+            return resolveSpeechLocale(requestedLocale, cachedSupportedLocales);
+        }
+
+        try {
+            const supportedLocales = await ExpoSpeechRecognitionModule.getSupportedLocales({});
+            const normalizedLocales = getUniqueSpeechLocales(supportedLocales.locales);
+            supportedSpeechLocalesRef.current = normalizedLocales;
+            return resolveSpeechLocale(requestedLocale, normalizedLocales);
+        } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn("[ChatInput] Failed to load supported speech locales", {
+                error: message,
+                requestedLocale,
+            });
+            return {
+                requestedLocale,
+                resolvedLocale: requestedLocale,
+                usedFallback: false,
+            };
+        }
+    }, []);
+
     const resetVoiceCapture = useCallback(() => {
         voiceStartPendingRef.current = false;
+        voiceLocaleResolutionRef.current = null;
         voiceCaptureRef.current = {
             active: false,
             baseInput: "",
@@ -1110,9 +1250,18 @@ function ChatInputComponent({
 
     useSpeechRecognitionEvent("error", (event) => {
         const wasActive = voiceCaptureRef.current.active;
+        const voiceLocaleResolution = voiceLocaleResolutionRef.current;
         resetVoiceCapture();
         if (wasActive && event.error !== "aborted") {
-            Alert.alert("Voice input stopped", event.message);
+            if (voiceLocaleResolution?.usedFallback === true && isUnsupportedSpeechLocaleMessage(event.message)) {
+                Alert.alert(
+                    "Voice input stopped",
+                    "Speech recognition is not available for the selected fallback language on this device."
+                );
+                return;
+            }
+
+            Alert.alert("Voice input stopped", getVoiceInputErrorMessage(event.error, event.message));
         }
     });
 
@@ -1141,6 +1290,8 @@ function ChatInputComponent({
                 return;
             }
 
+            const localeResolution = await resolveActiveSpeechLocale();
+            voiceLocaleResolutionRef.current = localeResolution;
             voiceCaptureRef.current = {
                 active: true,
                 baseInput: inputRefState.current,
@@ -1149,7 +1300,7 @@ function ChatInputComponent({
             };
             inputRef.current?.focus();
             ExpoSpeechRecognitionModule.start({
-                lang: resolveSpeechLocale(),
+                lang: localeResolution.resolvedLocale,
                 interimResults: true,
                 maxAlternatives: 1,
                 continuous: false,
@@ -1158,10 +1309,11 @@ function ChatInputComponent({
             });
         } catch (error) {
             resetVoiceCapture();
-            const message = error instanceof Error ? error.message : String(error);
+            const rawMessage = error instanceof Error ? error.message : String(error);
+            const message = getVoiceInputErrorMessage("start_failed", rawMessage);
             Alert.alert("Could not start voice input", message);
         }
-    }, [disabled, resetVoiceCapture, voiceAvailable, voiceState]);
+    }, [disabled, resetVoiceCapture, resolveActiveSpeechLocale, voiceAvailable, voiceState]);
 
     const stopVoiceInput = useCallback(() => {
         if (voiceState === "idle" && !voiceStartPendingRef.current) {

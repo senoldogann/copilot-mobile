@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useMemo } from "react";
 import { useColorScheme } from "react-native";
+import type { TextStyle } from "react-native";
 
 import {
     borderRadius,
@@ -11,6 +12,11 @@ import {
     type ThemeVariant,
 } from "./colors";
 import { useThemeStore } from "./theme-store";
+import {
+    resolveMonospaceFontFamily,
+    resolveSansFontFamily,
+    type AppFontPreference,
+} from "./typography";
 
 export type AppTheme = {
     colors: ColorPalette;
@@ -19,8 +25,13 @@ export type AppTheme = {
     borderRadius: typeof borderRadius;
     mode: ThemeMode;
     variant: ThemeVariant;
+    fontPreference: AppFontPreference;
     resolvedScheme: "light" | "dark";
     themeKey: string;
+    typography: {
+        sans: (fontWeight: TextStyle["fontWeight"], fontStyle: TextStyle["fontStyle"]) => string | undefined;
+        mono: () => string;
+    };
 };
 
 const ThemeContext = createContext<AppTheme | null>(null);
@@ -32,6 +43,7 @@ type ThemeProviderProps = {
 export function ThemeProvider({ children }: ThemeProviderProps) {
     const mode = useThemeStore((state) => state.mode);
     const variant = useThemeStore((state) => state.variant);
+    const fontPreference = useThemeStore((state) => state.fontPreference);
     const systemScheme = useColorScheme();
 
     const theme = useMemo<AppTheme>(() => {
@@ -46,10 +58,15 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
             borderRadius,
             mode,
             variant,
+            fontPreference,
             resolvedScheme,
-            themeKey: `${mode}:${variant}:${resolvedScheme}`,
+            themeKey: `${mode}:${variant}:${fontPreference}:${resolvedScheme}`,
+            typography: {
+                sans: (fontWeight, fontStyle) => resolveSansFontFamily(fontPreference, fontWeight, fontStyle),
+                mono: () => resolveMonospaceFontFamily(),
+            },
         };
-    }, [mode, systemScheme, variant]);
+    }, [fontPreference, mode, systemScheme, variant]);
 
     return (
         <ThemeContext.Provider value={theme}>

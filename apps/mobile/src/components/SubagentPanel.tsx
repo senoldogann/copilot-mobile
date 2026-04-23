@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import { SubagentIcon } from "./Icons";
+import { CloseIcon } from "./ProviderIcon";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
 
 export type SubagentRun = {
@@ -11,6 +12,7 @@ export type SubagentRun = {
 
 type SubagentPanelProps = {
     runs: ReadonlyArray<SubagentRun>;
+    onDismiss: () => void;
 };
 
 function SubagentStatusIcon({ status }: { status: SubagentRun["status"] }) {
@@ -57,7 +59,7 @@ function areSubagentRunsEqual(
     });
 }
 
-function SubagentPanelInner({ runs }: SubagentPanelProps) {
+function SubagentPanelInner({ runs, onDismiss }: SubagentPanelProps) {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
     const [expanded, setExpanded] = useState(false);
@@ -78,7 +80,7 @@ function SubagentPanelInner({ runs }: SubagentPanelProps) {
             >
                 <View style={styles.headerLeft}>
                     <View style={styles.iconWrap}>
-                        <SubagentIcon size={14} color={theme.colors.accent} />
+                        <SubagentIcon size={14} color={theme.colors.textSecondary} />
                     </View>
                     <Text style={styles.headerTitle}>Subagents</Text>
                     <View style={styles.badge}>
@@ -97,7 +99,20 @@ function SubagentPanelInner({ runs }: SubagentPanelProps) {
                         </View>
                     )}
                 </View>
-                <Text style={styles.chevron}>{expanded ? "▾" : "▸"}</Text>
+                <View style={styles.headerActions}>
+                    <Pressable
+                        style={styles.dismissButton}
+                        onPress={(event) => {
+                            event.stopPropagation();
+                            onDismiss();
+                        }}
+                        hitSlop={8}
+                        accessibilityLabel="Dismiss subagents"
+                    >
+                        <CloseIcon size={14} color={theme.colors.textTertiary} />
+                    </Pressable>
+                    <Text style={styles.chevron}>{expanded ? "▾" : "▸"}</Text>
+                </View>
             </Pressable>
 
             {expanded && (
@@ -168,11 +183,11 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         width: 18,
         height: 18,
         borderWidth: 1.5,
-        borderColor: theme.colors.textLink,
+        borderColor: theme.colors.border,
         borderRadius: 4,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: theme.colors.accentMuted,
+        backgroundColor: theme.colors.bgTertiary,
     },
     headerTitle: {
         fontSize: 13,
@@ -183,12 +198,12 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         paddingHorizontal: 6,
         paddingVertical: 2,
         borderRadius: 10,
-        backgroundColor: theme.colors.accentMuted,
+        backgroundColor: theme.colors.bgTertiary,
     },
     badgeText: {
         fontSize: 11,
         fontWeight: "600",
-        color: theme.colors.accent,
+        color: theme.colors.textSecondary,
     },
     runningBadge: {
         backgroundColor: theme.colors.warning + "20",
@@ -198,8 +213,20 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     },
     chevron: {
         fontSize: 14,
-        marginLeft: 8,
         color: theme.colors.textSecondary,
+    },
+    headerActions: {
+        flexDirection: "row",
+        alignItems: "center",
+        marginLeft: 8,
+        gap: 8,
+    },
+    dismissButton: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        alignItems: "center",
+        justifyContent: "center",
     },
     listScroll: {
         maxHeight: 208,
@@ -237,13 +264,14 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         borderColor: theme.colors.error,
     },
     statusIconRunning: {
-        backgroundColor: theme.colors.textLink,
-        borderColor: theme.colors.textLink,
+        backgroundColor: theme.colors.bgTertiary,
+        borderColor: theme.colors.border,
     },
     runningDot: {
         width: 6,
         height: 6,
         borderRadius: 3,
+        backgroundColor: theme.colors.textSecondary,
     },
     checkmark: {
         color: theme.colors.textOnAccent,
