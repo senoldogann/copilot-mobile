@@ -1,4 +1,4 @@
-// Boş sohbet ekranı — GitHub Copilot mobil stili karşılama
+// Boş sohbet ekranı — sade bağlantı ve başlangıç yüzeyi
 
 import React from "react";
 import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
@@ -56,13 +56,6 @@ function ConnectingSpinner() {
     );
 }
 
-const companionSetupSteps = [
-    "Requires a Mac that stays powered on while you use the app.",
-    "On your Mac run npm install -g code-companion, then code-companion login and code-companion up.",
-    "Scan the QR code once to pair this iPhone with your Mac companion.",
-    "Allow notifications if you want alerts when approvals are needed or a run finishes in the background.",
-] as const;
-
 export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Props) {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
@@ -88,18 +81,8 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
                 </View>
                 <Text style={styles.title}>Connect to your Mac companion</Text>
                 <Text style={styles.subtitle}>
-                    This app is a mobile client for a Mac companion. Finish the Mac setup first, then scan the pairing QR code.
+                    Finish setup on your Mac, then scan the pairing QR code here.
                 </Text>
-                <View style={styles.requirementsCard}>
-                    {companionSetupSteps.map((step, index) => (
-                        <View key={step} style={styles.requirementRow}>
-                            <View style={styles.requirementBadge}>
-                                <Text style={styles.requirementBadgeText}>{index + 1}</Text>
-                            </View>
-                            <Text style={styles.requirementText}>{step}</Text>
-                        </View>
-                    ))}
-                </View>
                 <Pressable
                     style={({ pressed }) => [
                         styles.secondaryButton,
@@ -216,41 +199,6 @@ function createStyles(theme: AppTheme) {
             textAlign: "center",
             lineHeight: 20,
             marginBottom: 28,
-        },
-        requirementsCard: {
-            width: "100%",
-            borderRadius: theme.borderRadius.lg,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.bgSecondary,
-            padding: theme.spacing.md,
-            gap: theme.spacing.sm,
-            marginBottom: theme.spacing.lg,
-        },
-        requirementRow: {
-            flexDirection: "row",
-            alignItems: "flex-start",
-            gap: theme.spacing.sm,
-        },
-        requirementBadge: {
-            width: 22,
-            height: 22,
-            borderRadius: 11,
-            backgroundColor: theme.colors.accent,
-            justifyContent: "center",
-            alignItems: "center",
-            marginTop: 1,
-        },
-        requirementBadgeText: {
-            color: theme.colors.textOnAccent,
-            fontSize: theme.fontSize.sm,
-            fontWeight: "700",
-        },
-        requirementText: {
-            flex: 1,
-            color: theme.colors.textSecondary,
-            fontSize: theme.fontSize.sm,
-            lineHeight: 18,
         },
         secondaryButton: {
             width: "100%",

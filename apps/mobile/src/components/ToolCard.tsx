@@ -376,7 +376,29 @@ function computeDiff(oldStr: string, newStr: string, contextLines = 3): DiffLine
 
 function DiffView({ oldStr, newStr }: { oldStr: string; newStr: string }) {
     const diffStyles = useThemedStyles(createDiffStyles);
-    const lines = useMemo(() => computeDiff(oldStr, newStr), [oldStr, newStr]);
+    const [lines, setLines] = useState<ReadonlyArray<DiffLine> | null>(null);
+
+    useEffect(() => {
+        setLines(null);
+
+        const task = InteractionManager.runAfterInteractions(() => {
+            setLines(computeDiff(oldStr, newStr));
+        });
+
+        return () => {
+            task.cancel();
+        };
+    }, [oldStr, newStr]);
+
+    if (lines === null) {
+        return (
+            <View style={diffStyles.loadingWrap}>
+                <ActivityIndicator size="small" />
+                <Text style={diffStyles.loadingText}>Preparing diff…</Text>
+            </View>
+        );
+    }
+
     if (lines.length === 0) {
         return <Text style={diffStyles.empty}>No changes detected</Text>;
     }
@@ -964,6 +986,16 @@ export const ToolCard = React.memo(ToolCardComponent);
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const createDiffStyles = (theme: AppTheme) => StyleSheet.create({
+    loadingWrap: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: theme.spacing.sm,
+        paddingVertical: theme.spacing.sm,
+    },
+    loadingText: {
+        color: theme.colors.textSecondary,
+        fontSize: theme.fontSize.sm,
+    },
     container: {
         borderRadius: 6,
         borderWidth: 1,

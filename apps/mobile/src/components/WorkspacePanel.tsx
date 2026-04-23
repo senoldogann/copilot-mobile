@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, ScrollView, TextInput, Keyboard } from "react-native";
+import type { GitCommitSummary } from "@copilot-mobile/shared";
 import { BottomSheet } from "./BottomSheet";
 import { useAppTheme, type AppTheme } from "../theme/theme-context";
 import { useShallow } from "zustand/react/shallow";
@@ -13,7 +14,6 @@ import {
     pullWorkspace,
     pushWorkspace,
     refreshWorkspaceGitSummary,
-    requestWorkspaceGitSummary,
     requestWorkspaceTree,
     requestWorkspaceDiff,
     requestWorkspaceFile,
@@ -24,10 +24,10 @@ import {
 import type { WorkspaceDiffPayload, WorkspaceFilePayload } from "../services/workspace-events";
 import {
     GitBranchIcon,
-    GitCommitIcon,
     GitHubIcon,
     GitPullRequestIcon,
     GitPushIcon,
+    HistoryIcon,
     FolderFilledIcon,
     FileTypeIcon,
     MoreVerticalIcon,
@@ -37,6 +37,7 @@ import {
     AlignLeftIcon,
     DiffIcon,
     ListTreeIcon,
+    MenuListIcon,
 } from "./ProviderIcon";
 import { formatRelativeTimestamp } from "../view-models/provider-metadata";
 
@@ -68,6 +69,7 @@ const DIRECTORY_TREE_DEPTH = 2;
 const TREE_PAGE_SIZE = 200;
 const WORKSPACE_LOAD_TIMEOUT_MS = 12_000;
 const WORKSPACE_VIEWER_CACHE_TTL_MS = 30_000;
+const WORKSPACE_GIT_POLL_INTERVAL_MS = 2_500;
 
 type InlineLoadState =
     | { status: "loading" }
@@ -162,6 +164,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const [changesFilter, setChangesFilter] = useState<"uncommitted" | "recent">("uncommitted");
     const [changesFilterMenuOpen, setChangesFilterMenuOpen] = useState<boolean>(false);
     const [viewer, setViewer] = useState<{ path: string; mode: "file" | "diff" } | null>(null);
+    const [selectedCommit, setSelectedCommit] = useState<GitCommitSummary | null>(null);
     const [inlineLoad, setInlineLoad] = useState<InlineLoadState>({ status: "loading" });
     const workspaceLoadingSignature = useMemo(
         () => Object.keys(workspace.loadingTreePaths).sort().join("|"),
@@ -251,6 +254,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         setCommitMessage("");
         setChangesFilterMenuOpen(false);
         setViewer(null);
+        setSelectedCommit(null);
         setInlineLoad({ status: "loading" });
 
         if (activeSessionId === null) {
@@ -266,8 +270,22 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         if (!isConnected) return;
 
         void requestWorkspaceTree(activeSessionId, undefined, INITIAL_TREE_DEPTH, 0, TREE_PAGE_SIZE);
-        void requestWorkspaceGitSummary(activeSessionId, 10);
+        void refreshWorkspaceGitSummary(activeSessionId, 10);
     }, [visible, activeSessionId, isConnected]);
+
+    useEffect(() => {
+        if (!visible || activeSessionId === null || !isConnected || workspace.tab !== "changes") {
+            return;
+        }
+
+        const interval = setInterval(() => {
+            void refreshWorkspaceGitSummary(activeSessionId, 10);
+        }, WORKSPACE_GIT_POLL_INTERVAL_MS);
+
+        return () => {
+            clearInterval(interval);
+        };
+    }, [activeSessionId, isConnected, visible, workspace.tab]);
 
     useEffect(() => {
         if (activeSessionId === null) {
@@ -765,7 +783,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                         {changesFilter === "uncommitted" ? (
                             <DiffIcon size={14} color={segmentTitleColor} />
                         ) : (
-                            <GitCommitIcon size={14} color={segmentTitleColor} />
+                            <HistoryIcon size={14} color={segmentTitleColor} />
                         )}
                         <Text style={styles.segmentTitle}>
                             {changesFilter === "uncommitted" ? "Uncommitted" : "Recent commits"}
@@ -787,7 +805,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                                 style={({ pressed }) => [styles.popoverItem, pressed && styles.popoverItemPressed]}
                                 onPress={() => { setChangesFilter("recent"); setChangesFilterMenuOpen(false); }}
                             >
-                                <GitCommitIcon size={14} color={theme.colors.textPrimary} />
+                                <HistoryIcon size={14} color={theme.colors.textPrimary} />
                                 <Text style={styles.popoverLabel}>Recent commits</Text>
                             </Pressable>
                         </View>
@@ -828,13 +846,12 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 ) : (
                     <View style={styles.changesList}>
                         {workspace.recentCommits.map((commit) => {
-                            const visibleFiles = commit.files.slice(0, 3);
-                            const hiddenFileCount = Math.max(0, commit.files.length - visibleFiles.length);
+                            const fileCount = commit.files.length;
 
                             return (
                                 <View key={commit.hash} style={styles.commitRow}>
                                     <View style={styles.commitIconWrap}>
-                                        <GitCommitIcon size={15} color={theme.colors.textSecondary} />
+                                        <HistoryIcon size={15} color={theme.colors.textSecondary} />
                                     </View>
                                     <View style={styles.commitBody}>
                                         <View style={styles.commitHeaderRow}>
@@ -848,23 +865,21 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                                         <Text style={styles.commitMeta} numberOfLines={1}>
                                             {commit.shortHash} · {commit.author}
                                         </Text>
-                                        {visibleFiles.length > 0 && (
-                                            <View style={styles.commitFiles}>
-                                                {visibleFiles.map((filePath) => (
-                                                    <View key={`${commit.hash}:${filePath}`} style={styles.commitFileRow}>
-                                                        <FileTypeIcon name={filePath} size={14} />
-                                                        <Text style={styles.commitFileText} numberOfLines={1}>
-                                                            {filePath}
-                                                        </Text>
-                                                    </View>
-                                                ))}
-                                                {hiddenFileCount > 0 && (
-                                                    <Text style={styles.commitMoreFiles}>
-                                                        +{hiddenFileCount} more file{hiddenFileCount === 1 ? "" : "s"}
-                                                    </Text>
-                                                )}
-                                            </View>
-                                        )}
+                                        <View style={styles.commitFooterRow}>
+                                            <Text style={styles.commitFileCount}>
+                                                {fileCount} file{fileCount === 1 ? "" : "s"}
+                                            </Text>
+                                            <Pressable
+                                                style={({ pressed }) => [
+                                                    styles.commitFilesButton,
+                                                    pressed && styles.pressed,
+                                                ]}
+                                                onPress={() => setSelectedCommit(commit)}
+                                            >
+                                                <MenuListIcon size={13} color={theme.colors.textPrimary} />
+                                                <Text style={styles.commitFilesButtonText}>See files</Text>
+                                            </Pressable>
+                                        </View>
                                     </View>
                                 </View>
                             );
@@ -1001,44 +1016,107 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         </View>
     ) : null;
 
+    const commitFilesContent = selectedCommit !== null ? (
+        <View style={styles.content}>
+            <Pressable
+                style={({ pressed }) => [styles.inlineBack, pressed && { opacity: 0.6 }]}
+                onPress={() => setSelectedCommit(null)}
+            >
+                <ChevronRightIcon size={14} color={theme.colors.textSecondary} />
+                <Text style={styles.inlineBackLabel}>Back</Text>
+                <Text style={styles.inlineBackFile} numberOfLines={1}>
+                    {selectedCommit.shortHash}
+                </Text>
+            </Pressable>
+            <View style={styles.commitFilesSheetHeader}>
+                <Text style={styles.commitFilesSheetTitle} numberOfLines={2}>
+                    {selectedCommit.subject}
+                </Text>
+                <Text style={styles.commitFilesSheetMeta}>
+                    {selectedCommit.shortHash} · {selectedCommit.files.length} file{selectedCommit.files.length === 1 ? "" : "s"}
+                </Text>
+            </View>
+            <View style={styles.changesList}>
+                {selectedCommit.files.map((filePath) => {
+                    const directory = dirname(filePath);
+
+                    return (
+                        <Pressable
+                            key={`${selectedCommit.hash}:${filePath}`}
+                            style={({ pressed }) => [styles.changeRow, pressed && styles.changeRowPressed]}
+                            onPress={() => {
+                                setSelectedCommit(null);
+                                setViewer({ path: filePath, mode: "diff" });
+                            }}
+                        >
+                            <View style={styles.changeIconWrap}>
+                                <FileTypeIcon name={filePath} size={18} />
+                            </View>
+                            <View style={styles.changeText}>
+                                <Text style={styles.changeName} numberOfLines={1}>
+                                    {basename(filePath)}
+                                </Text>
+                                {directory !== null && (
+                                    <Text style={styles.changePath} numberOfLines={1}>
+                                        {directory}
+                                    </Text>
+                                )}
+                            </View>
+                        </Pressable>
+                    );
+                })}
+            </View>
+        </View>
+    ) : null;
+
     return (
-        <BottomSheet
-            visible={visible}
-            onClose={() => {
-                setViewer(null);
-                setBranchMenuOpen(false);
-                setCommitMenuOpen(false);
-                setCommitComposerOpen(false);
-                setCommitMessage("");
-                setChangesFilterMenuOpen(false);
-                onClose();
-            }}
-            iconName="folder"
-            title="Workspace"
-            subtitle={headerSubtitle}
-            stickyHeader={
-                viewer === null ? (
-                    <View style={sheetStyles.tabBar}>
-                        <TabButton
-                            label="Changes"
-                            active={workspace.tab === "changes"}
-                            renderIcon={(color) => <DiffIcon size={14} color={color} />}
-                            onPress={() => useWorkspaceStore.getState().setTab("changes")}
-                        />
-                        <TabButton
-                            label="Files"
-                            active={workspace.tab === "files"}
-                            renderIcon={(color) => <FolderFilledIcon size={14} color={color} />}
-                            onPress={() => useWorkspaceStore.getState().setTab("files")}
-                        />
-                    </View>
-                ) : undefined
-            }
-        >
-            {viewer !== null
-                ? inlineViewerContent
-                : workspace.tab === "changes" ? changesContent : filesContent}
-        </BottomSheet>
+        <>
+            <BottomSheet
+                visible={visible}
+                onClose={() => {
+                    setViewer(null);
+                    setSelectedCommit(null);
+                    setBranchMenuOpen(false);
+                    setCommitMenuOpen(false);
+                    setCommitComposerOpen(false);
+                    setCommitMessage("");
+                    setChangesFilterMenuOpen(false);
+                    onClose();
+                }}
+                iconNode={
+                    selectedCommit !== null
+                        ? <HistoryIcon size={14} color={theme.colors.textSecondary} />
+                        : undefined
+                }
+                {...(selectedCommit === null ? { iconName: "folder" as const } : {})}
+                title={selectedCommit !== null ? "Commit files" : "Workspace"}
+                subtitle={selectedCommit !== null ? selectedCommit.shortHash : headerSubtitle}
+                stickyHeader={
+                    viewer === null && selectedCommit === null ? (
+                        <View style={sheetStyles.tabBar}>
+                            <TabButton
+                                label="Changes"
+                                active={workspace.tab === "changes"}
+                                renderIcon={(color) => <DiffIcon size={14} color={color} />}
+                                onPress={() => useWorkspaceStore.getState().setTab("changes")}
+                            />
+                            <TabButton
+                                label="Files"
+                                active={workspace.tab === "files"}
+                                renderIcon={(color) => <FolderFilledIcon size={14} color={color} />}
+                                onPress={() => useWorkspaceStore.getState().setTab("files")}
+                            />
+                        </View>
+                    ) : undefined
+                }
+            >
+                {selectedCommit !== null
+                    ? commitFilesContent
+                    : viewer !== null
+                    ? inlineViewerContent
+                    : workspace.tab === "changes" ? changesContent : filesContent}
+            </BottomSheet>
+        </>
     );
 }
 
@@ -1595,25 +1673,47 @@ return StyleSheet.create({
         fontSize: theme.fontSize.xs,
         color: supportingLabelColor,
     },
-    commitFiles: {
-        gap: 4,
-        paddingTop: 2,
-    },
-    commitFileRow: {
+    commitFooterRow: {
         flexDirection: "row",
         alignItems: "center",
-        gap: 6,
+        justifyContent: "space-between",
+        gap: 12,
+        paddingTop: 2,
     },
-    commitFileText: {
+    commitFileCount: {
         flex: 1,
         fontSize: theme.fontSize.xs,
         color: theme.colors.textSecondary,
     },
-    commitMoreFiles: {
+    commitFilesButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: theme.borderRadius.full,
+        backgroundColor: theme.colors.bgElevated,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+    },
+    commitFilesButtonText: {
         fontSize: theme.fontSize.xs,
-        color: theme.colors.textTertiary,
         fontWeight: "600",
-        paddingLeft: 20,
+        color: theme.colors.textPrimary,
+    },
+    commitFilesSheetHeader: {
+        gap: 4,
+        paddingBottom: theme.spacing.sm,
+    },
+    commitFilesSheetTitle: {
+        fontSize: theme.fontSize.sm,
+        lineHeight: 20,
+        color: emphasizedLabelColor,
+        fontWeight: "700",
+    },
+    commitFilesSheetMeta: {
+        fontSize: theme.fontSize.xs,
+        color: supportingLabelColor,
     },
     changePath: { fontSize: theme.fontSize.xs, color: supportingLabelColor },
     changeRight: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },

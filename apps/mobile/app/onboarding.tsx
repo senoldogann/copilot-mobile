@@ -9,6 +9,7 @@ import {
     Text,
     View,
     useWindowDimensions,
+    Animated,
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -83,34 +84,33 @@ const slides: ReadonlyArray<OnboardingSlide> = [
 
 function renderSlideIcon(icon: OnboardingSlide["icon"], color: string): React.ReactNode {
     if (icon === "desktop") {
-        return <DesktopIcon size={18} color={color} />;
+        return <DesktopIcon size={40} color={color} />;
     }
 
     if (icon === "terminal") {
-        return <TerminalIcon size={18} color={color} />;
+        return <TerminalIcon size={40} color={color} />;
     }
 
-    return <ScanIcon size={18} color={color} />;
+    return <ScanIcon size={40} color={color} />;
 }
 
 function SlideCard({ item, width }: { item: OnboardingSlide; width: number }) {
     const styles = useThemedStyles(createStyles);
-    const accentColor = styles.stepLabel.color;
+    const accentColor = styles.iconContainer.backgroundColor as string;
 
     return (
         <View style={[styles.slidePage, { width }]}>
             <View style={styles.slideSurface}>
-                <View style={styles.stepRow}>
-                    <View style={styles.stepIconBox}>
-                        {renderSlideIcon(item.icon, accentColor)}
-                    </View>
-                    <Text style={styles.stepLabel}>{item.stepLabel}</Text>
+                <View style={styles.iconContainer}>
+                    {renderSlideIcon(item.icon, styles.iconColor.color as string)}
                 </View>
 
-                <View style={styles.copyBlock}>
-                    <Text style={styles.title}>{item.title}</Text>
-                    <Text style={styles.description}>{item.description}</Text>
+                <View style={styles.stepBadge}>
+                    <Text style={styles.stepBadgeText}>{item.stepLabel}</Text>
                 </View>
+
+                <Text style={styles.title}>{item.title}</Text>
+                <Text style={styles.description}>{item.description}</Text>
 
                 <View style={styles.pointsBlock}>
                     {item.points.map((point) => (
@@ -132,7 +132,7 @@ function SlideCard({ item, width }: { item: OnboardingSlide; width: number }) {
                 ) : null}
 
                 <View style={styles.noteRow}>
-                    <CheckSquareIcon size={13} color={accentColor} />
+                    <CheckSquareIcon size={14} color={styles.iconColor.color as string} />
                     <Text style={styles.noteText}>{item.note}</Text>
                 </View>
             </View>
@@ -249,16 +249,7 @@ export default function OnboardingScreen() {
     return (
         <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
             <View style={styles.container}>
-                <View style={styles.header}>
-                    <View style={styles.brandRow}>
-                        <AppLogoMark size={26} />
-                        <Text style={styles.brand}>Code Companion</Text>
-                    </View>
-                    <Text style={styles.headerTitle}>Set up your Mac companion</Text>
-                    <Text style={styles.headerSubtitle}>
-                        Three quick steps, then scan the QR code from your Mac.
-                    </Text>
-                </View>
+
 
                 <FlatList
                     ref={flatListRef}
@@ -278,7 +269,6 @@ export default function OnboardingScreen() {
                 />
 
                 <View style={styles.progressRow}>
-                    <Text style={styles.progressText}>{activeIndex + 1}/{slides.length}</Text>
                     <View style={styles.paginationRow}>
                         {slides.map((slide, index) => (
                             <View
@@ -299,19 +289,21 @@ export default function OnboardingScreen() {
                             onPress={() => {
                                 void handleEnableNotifications();
                             }}
-                            icon={<BellIcon size={14} color={styles.ghostButtonText.color} />}
+                            icon={<BellIcon size={16} color={styles.ghostButtonText.color} />}
                             variant="ghost"
                         />
                     ) : null}
 
                     <View style={styles.actionRow}>
-                        <FooterButton
-                            label="Back"
-                            onPress={() => scrollToIndex(activeIndex - 1)}
-                            icon={<ArrowLeftIcon size={14} color={styles.buttonText.color} />}
-                            variant="secondary"
-                            disabled={isFirstSlide}
-                        />
+                        {!isLastSlide && (
+                            <FooterButton
+                                label="Back"
+                                onPress={() => scrollToIndex(activeIndex - 1)}
+                                icon={<ArrowLeftIcon size={16} color={styles.buttonText.color} />}
+                                variant="secondary"
+                                disabled={isFirstSlide}
+                            />
+                        )}
 
                         {isLastSlide ? (
                             <View style={styles.finalActions}>
@@ -321,7 +313,7 @@ export default function OnboardingScreen() {
                                         void finishGuide("/");
                                     }}
                                     variant="secondary"
-                                    icon={<DesktopIcon size={14} color={styles.buttonText.color} />}
+                                    icon={<DesktopIcon size={16} color={styles.buttonText.color} />}
                                 />
                                 <FooterButton
                                     label="Scan QR code"
@@ -329,7 +321,7 @@ export default function OnboardingScreen() {
                                         void finishGuide("/scan");
                                     }}
                                     variant="primary"
-                                    icon={<ScanIcon size={14} color={styles.primaryButtonText.color} />}
+                                    icon={<ScanIcon size={16} color={styles.primaryButtonText.color} />}
                                 />
                             </View>
                         ) : (
@@ -337,7 +329,7 @@ export default function OnboardingScreen() {
                                 label="Next"
                                 onPress={() => scrollToIndex(activeIndex + 1)}
                                 variant="primary"
-                                icon={<ArrowRightIcon size={14} color={styles.primaryButtonText.color} />}
+                                icon={<ArrowRightIcon size={16} color={styles.primaryButtonText.color} />}
                             />
                         )}
                     </View>
@@ -349,6 +341,9 @@ export default function OnboardingScreen() {
 
 function createStyles(theme: AppTheme) {
     return StyleSheet.create({
+        iconColor: {
+            color: theme.colors.accent,
+        },
         safeArea: {
             flex: 1,
             backgroundColor: theme.colors.bg,
@@ -357,37 +352,27 @@ function createStyles(theme: AppTheme) {
             flex: 1,
             backgroundColor: theme.colors.bg,
             paddingTop: theme.spacing.md,
-            paddingBottom: theme.spacing.sm,
+            paddingBottom: 48,
         },
         header: {
             paddingHorizontal: theme.spacing.lg,
-            marginBottom: theme.spacing.md,
-            gap: 6,
+            alignItems: "center",
+            marginBottom: theme.spacing.lg,
         },
         brandRow: {
             flexDirection: "row",
             alignItems: "center",
             gap: theme.spacing.sm,
-            marginBottom: theme.spacing.xs,
+            paddingVertical: 8,
+            paddingHorizontal: 16,
+            borderRadius: 100,
+            backgroundColor: theme.colors.bgSecondary,
         },
         brand: {
-            color: theme.colors.textSecondary,
-            fontSize: theme.fontSize.sm,
-            fontWeight: "700",
-            textTransform: "uppercase",
-            letterSpacing: 0.7,
-        },
-        headerTitle: {
             color: theme.colors.textPrimary,
-            fontSize: 26,
-            lineHeight: 32,
-            fontWeight: "800",
-        },
-        headerSubtitle: {
-            color: theme.colors.textSecondary,
             fontSize: theme.fontSize.md,
-            lineHeight: 20,
-            maxWidth: 320,
+            fontWeight: "800",
+            letterSpacing: 0.5,
         },
         slidePage: {
             flex: 1,
@@ -395,62 +380,68 @@ function createStyles(theme: AppTheme) {
         },
         slideSurface: {
             flex: 1,
-            borderRadius: 22,
-            borderWidth: 1,
-            borderColor: theme.colors.borderMuted,
-            backgroundColor: theme.colors.bgSecondary,
-            paddingHorizontal: theme.spacing.lg,
-            paddingVertical: theme.spacing.lg,
-            gap: theme.spacing.lg,
-        },
-        stepRow: {
-            flexDirection: "row",
             alignItems: "center",
-            gap: theme.spacing.sm,
+            paddingHorizontal: theme.spacing.sm,
         },
-        stepIconBox: {
-            width: 34,
-            height: 34,
-            borderRadius: 10,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.bg,
+        iconContainer: {
+            width: 90,
+            height: 90,
+            borderRadius: 45,
+            backgroundColor: theme.colors.bgSecondary,
             alignItems: "center",
             justifyContent: "center",
+            marginBottom: theme.spacing.xl,
+            shadowColor: theme.colors.accent,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.1,
+            shadowRadius: 12,
+            elevation: 4,
         },
-        stepLabel: {
+        stepBadge: {
+            backgroundColor: theme.colors.accent + "1A", // 10% opacity roughly if hex
+            paddingHorizontal: 12,
+            paddingVertical: 6,
+            borderRadius: 100,
+            marginBottom: theme.spacing.md,
+        },
+        stepBadgeText: {
             color: theme.colors.accent,
             fontSize: theme.fontSize.xs,
             fontWeight: "800",
             textTransform: "uppercase",
-            letterSpacing: 0.7,
-        },
-        copyBlock: {
-            gap: theme.spacing.sm,
+            letterSpacing: 1,
         },
         title: {
             color: theme.colors.textPrimary,
-            fontSize: 24,
-            lineHeight: 30,
-            fontWeight: "800",
+            fontSize: 28,
+            lineHeight: 34,
+            fontWeight: "900",
+            textAlign: "center",
+            marginBottom: theme.spacing.sm,
         },
         description: {
             color: theme.colors.textSecondary,
-            fontSize: theme.fontSize.md,
-            lineHeight: 22,
+            fontSize: 16,
+            lineHeight: 24,
+            textAlign: "center",
+            marginBottom: theme.spacing.xl,
+            paddingHorizontal: theme.spacing.md,
         },
         pointsBlock: {
+            width: "100%",
             gap: theme.spacing.md,
+            marginBottom: theme.spacing.xl,
         },
         pointRow: {
             flexDirection: "row",
             alignItems: "flex-start",
-            gap: theme.spacing.sm,
+            gap: theme.spacing.md,
+            paddingHorizontal: theme.spacing.sm,
         },
         pointDot: {
-            width: 6,
-            height: 6,
-            borderRadius: 3,
+            width: 8,
+            height: 8,
+            borderRadius: 4,
             marginTop: 8,
             backgroundColor: theme.colors.accent,
             flexShrink: 0,
@@ -458,112 +449,115 @@ function createStyles(theme: AppTheme) {
         pointText: {
             flex: 1,
             color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.md,
-            lineHeight: 22,
+            fontSize: 16,
+            lineHeight: 24,
         },
         commandBlock: {
-            borderRadius: theme.borderRadius.lg,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.bg,
-            paddingHorizontal: theme.spacing.md,
+            width: "100%",
+            borderRadius: 16,
+            backgroundColor: theme.colors.bgSecondary,
+            paddingHorizontal: theme.spacing.lg,
             paddingVertical: theme.spacing.md,
-            gap: 10,
+            gap: 12,
+            marginBottom: theme.spacing.xl,
         },
         commandLine: {
             color: theme.colors.textPrimary,
             fontFamily: "monospace",
-            fontSize: theme.fontSize.md,
+            fontSize: 14,
             lineHeight: 20,
         },
         noteRow: {
             flexDirection: "row",
             alignItems: "flex-start",
-            gap: theme.spacing.sm,
-            paddingTop: theme.spacing.md,
-            borderTopWidth: StyleSheet.hairlineWidth,
-            borderTopColor: theme.colors.border,
+            gap: theme.spacing.md,
+            paddingHorizontal: theme.spacing.sm,
+            paddingVertical: theme.spacing.md,
+            backgroundColor: theme.colors.bgSecondary,
+            borderRadius: 12,
+            width: "100%",
         },
         noteText: {
             flex: 1,
             color: theme.colors.textSecondary,
             fontSize: theme.fontSize.sm,
-            lineHeight: 18,
+            lineHeight: 20,
         },
         progressRow: {
             alignItems: "center",
-            gap: theme.spacing.sm,
-            paddingHorizontal: theme.spacing.lg,
-            paddingTop: theme.spacing.md,
-            paddingBottom: theme.spacing.sm,
-        },
-        progressText: {
-            color: theme.colors.textTertiary,
-            fontSize: theme.fontSize.xs,
-            fontWeight: "700",
+            paddingVertical: theme.spacing.lg,
         },
         paginationRow: {
             flexDirection: "row",
             alignItems: "center",
-            gap: 8,
+            gap: 12,
         },
         paginationDot: {
-            width: 6,
-            height: 6,
-            borderRadius: 3,
+            width: 8,
+            height: 8,
+            borderRadius: 4,
             backgroundColor: theme.colors.border,
+            opacity: 0.5,
         },
         paginationDotActive: {
-            width: 18,
+            width: 24,
+            opacity: 1,
             backgroundColor: theme.colors.accent,
         },
         footer: {
             paddingHorizontal: theme.spacing.lg,
-            gap: theme.spacing.sm,
+            gap: theme.spacing.md,
+            marginBottom: 24,
         },
         actionRow: {
             flexDirection: "row",
             alignItems: "center",
-            gap: theme.spacing.sm,
+            gap: theme.spacing.md,
         },
         finalActions: {
             flex: 1,
             flexDirection: "row",
-            gap: theme.spacing.sm,
+            gap: theme.spacing.md,
         },
         buttonBase: {
-            minHeight: 42,
-            borderRadius: theme.borderRadius.md,
-            paddingHorizontal: theme.spacing.md,
+            minHeight: 52,
+            borderRadius: 100,
+            paddingHorizontal: theme.spacing.lg,
             alignItems: "center",
             justifyContent: "center",
+            flexDirection: "row",
+            flex: 1,
         },
         primaryButton: {
-            flex: 1,
             backgroundColor: theme.colors.accent,
+            shadowColor: theme.colors.accent,
+            shadowOffset: { width: 0, height: 4 },
+            shadowOpacity: 0.2,
+            shadowRadius: 8,
+            elevation: 4,
         },
         secondaryButton: {
-            minWidth: 88,
+            backgroundColor: theme.colors.bgSecondary,
             borderWidth: 1,
             borderColor: theme.colors.border,
-            backgroundColor: theme.colors.bgSecondary,
+            flex: 0,
+            minWidth: 100,
         },
         ghostButton: {
-            borderWidth: 1,
-            borderColor: theme.colors.borderMuted,
-            backgroundColor: theme.colors.bg,
+            backgroundColor: "transparent",
         },
         buttonPressed: {
-            opacity: 0.86,
+            opacity: 0.8,
+            transform: [{ scale: 0.98 }],
         },
         buttonDisabled: {
-            opacity: 0.45,
+            opacity: 0.4,
         },
         buttonContent: {
             flexDirection: "row",
             alignItems: "center",
             justifyContent: "center",
-            gap: 8,
+            gap: 10,
         },
         buttonIcon: {
             alignItems: "center",
@@ -571,7 +565,7 @@ function createStyles(theme: AppTheme) {
         },
         buttonText: {
             color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.sm,
+            fontSize: 16,
             fontWeight: "700",
         },
         primaryButtonText: {

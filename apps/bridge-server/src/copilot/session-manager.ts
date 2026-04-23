@@ -64,6 +64,8 @@ type SessionBehaviorState = {
     busy: boolean;
 };
 
+const BUSY_WATCHDOG_TIMEOUT_MS = 10 * 60 * 1000;
+
 function readToolTelemetryCount(toolTelemetry: Record<string, unknown> | undefined): number | null {
     if (toolTelemetry === undefined) {
         return null;
@@ -135,6 +137,7 @@ export function createSessionManager(
     const pendingInputs = new Map<string, PendingInput>();
     const sessionStates = new Map<string, SessionBehaviorState>();
     const abortedSessionIds = new Set<string>();
+    const busyWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>();
     const MAX_QUEUED_RESUME_MESSAGES = 200;
     let autoApproveReads = false;
     // Latest observed host session capabilities — merged per session.
@@ -206,12 +209,66 @@ export function createSessionManager(
         });
     }
 
+    function clearBusyWatchdog(sessionId: string): void {
+        const timer = busyWatchdogTimers.get(sessionId);
+        if (timer === undefined) {
+            return;
+        }
+
+        clearTimeout(timer);
+        busyWatchdogTimers.delete(sessionId);
+    }
+
+    function armBusyWatchdog(sessionId: string): void {
+        clearBusyWatchdog(sessionId);
+
+        const timer = setTimeout(() => {
+            busyWatchdogTimers.delete(sessionId);
+            const state = sessionStates.get(sessionId);
+            if (state?.busy !== true) {
+                return;
+            }
+
+            completionNotifier.recordSessionError(
+                sessionId,
+                "SESSION_STALLED",
+                "No session activity was received before the busy watchdog timeout"
+            );
+            setSessionBusy(sessionId, false);
+            send({
+                ...makeBase(),
+                type: "error",
+                payload: {
+                    code: "SESSION_STALLED",
+                    message: "The session stopped reporting activity. Retry the task or reconnect if it still appears busy.",
+                    retry: true,
+                },
+            });
+        }, BUSY_WATCHDOG_TIMEOUT_MS);
+
+        busyWatchdogTimers.set(sessionId, timer);
+    }
+
+    function noteSessionActivity(sessionId: string): void {
+        const state = sessionStates.get(sessionId);
+        if (state?.busy !== true) {
+            return;
+        }
+
+        armBusyWatchdog(sessionId);
+    }
+
     function setSessionBusy(sessionId: string, busy: boolean): void {
         const state = sessionStates.get(sessionId);
         if (state === undefined || state.busy === busy) {
             return;
         }
         state.busy = busy;
+        if (busy) {
+            armBusyWatchdog(sessionId);
+        } else {
+            clearBusyWatchdog(sessionId);
+        }
         completionNotifier.onBusyStateChanged(sessionId, busy);
         emitSessionState(sessionId);
     }
@@ -357,6 +414,7 @@ export function createSessionManager(
             if (abortedSessionIds.has(sessionId)) {
                 return;
             }
+            noteSessionActivity(sessionId);
             completionNotifier.replaceAssistantPreview(sessionId, content);
             emit({
                 ...makeBase(),
@@ -369,6 +427,7 @@ export function createSessionManager(
             if (abortedSessionIds.has(sessionId)) {
                 return;
             }
+            noteSessionActivity(sessionId);
             completionNotifier.appendAssistantPreview(sessionId, delta);
             emit({
                 ...makeBase(),
@@ -381,6 +440,7 @@ export function createSessionManager(
             if (abortedSessionIds.has(sessionId)) {
                 return;
             }
+            noteSessionActivity(sessionId);
             emit({
                 ...makeBase(),
                 type: "assistant.reasoning",
@@ -392,6 +452,7 @@ export function createSessionManager(
             if (abortedSessionIds.has(sessionId)) {
                 return;
             }
+            noteSessionActivity(sessionId);
             emit({
                 ...makeBase(),
                 type: "assistant.reasoning_delta",
@@ -403,6 +464,7 @@ export function createSessionManager(
             if (abortedSessionIds.has(sessionId)) {
                 return;
             }
+            noteSessionActivity(sessionId);
             const normalizedToolName = toolName.trim().length > 0 ? toolName : "tool";
             toolNamesByRequestId.set(requestId, normalizedToolName);
 
@@ -422,6 +484,7 @@ export function createSessionManager(
             if (abortedSessionIds.has(sessionId)) {
                 return;
             }
+            noteSessionActivity(sessionId);
             emit({
                 ...makeBase(),
                 type: "tool.execution_partial_result",
@@ -433,6 +496,7 @@ export function createSessionManager(
             if (abortedSessionIds.has(sessionId)) {
                 return;
             }
+            noteSessionActivity(sessionId);
             emit({
                 ...makeBase(),
                 type: "tool.execution_progress",
@@ -449,6 +513,7 @@ export function createSessionManager(
             if (abortedSessionIds.has(sessionId)) {
                 return;
             }
+            noteSessionActivity(sessionId);
             const normalizedToolName =
                 toolNamesByRequestId.get(requestId)
                 ?? (toolName.trim().length > 0 ? toolName : "tool");
@@ -489,6 +554,7 @@ export function createSessionManager(
         });
 
         session.onPermissionRequest(async (request: AdaptedPermissionRequest) => {
+            noteSessionActivity(sessionId);
             const requestId = request.id;
             const state = resolveState();
 
@@ -531,6 +597,7 @@ export function createSessionManager(
         });
 
         session.onUserInputRequest(async (request: AdaptedUserInputRequest) => {
+            noteSessionActivity(sessionId);
             const state = resolveState();
             if (state.permissionLevel === "autopilot") {
                 const fallbackAnswer = request.choices?.[0] ?? "";
@@ -889,6 +956,7 @@ export function createSessionManager(
                 session.close();
                 activeSessions.delete(sessionId);
             }
+            clearBusyWatchdog(sessionId);
             sessionStates.delete(sessionId);
             completionNotifier.forgetSession(sessionId);
             try {

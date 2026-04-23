@@ -6,6 +6,7 @@ import { BACKGROUND_NOTIFICATION_TASK } from "./notification-background-shared";
 
 const SESSION_EVENTS_CHANNEL_ID = "session-events";
 const MAX_LOCAL_NOTIFICATION_KEYS = 200;
+const LOCAL_NOTIFICATION_DEDUP_WINDOW_MS = 12_000;
 
 let initialized = false;
 let notificationResponseSubscription: { remove: () => void } | null = null;
@@ -15,6 +16,10 @@ let cachedRemotePushRegistration: RemotePushRegistration | null = null;
 let bridgeRegisteredPushToken: string | null = null;
 let backgroundNotificationTaskRegistered = false;
 const localNotificationKeys = new Set<string>();
+const recentRemoteNotificationKeys = new Map<string, number>();
+const recentLocalNotificationKeys = new Map<string, number>();
+
+type SessionNotificationEventType = "completion" | "permission_prompt" | "user_input_prompt";
 
 export type RemotePushRegistration = {
     provider: NotificationProvider;
@@ -177,6 +182,44 @@ function rememberLocalNotificationKey(key: string): boolean {
     }
 
     return true;
+}
+
+function pruneExpiredNotificationKeys(
+    map: Map<string, number>,
+    now: number
+): void {
+    for (const [key, timestamp] of map.entries()) {
+        if (now - timestamp >= LOCAL_NOTIFICATION_DEDUP_WINDOW_MS) {
+            map.delete(key);
+        }
+    }
+}
+
+function createSessionNotificationEventKey(sessionId: string, eventType: SessionNotificationEventType): string {
+    return `${sessionId}:${eventType}`;
+}
+
+function rememberLocalSessionNotification(key: string, now: number): boolean {
+    pruneExpiredNotificationKeys(recentLocalNotificationKeys, now);
+    const existing = recentLocalNotificationKeys.get(key);
+    if (existing !== undefined && now - existing < LOCAL_NOTIFICATION_DEDUP_WINDOW_MS) {
+        return false;
+    }
+
+    recentLocalNotificationKeys.set(key, now);
+    return true;
+}
+
+function hasRecentRemoteSessionNotification(key: string, now: number): boolean {
+    pruneExpiredNotificationKeys(recentRemoteNotificationKeys, now);
+    const existing = recentRemoteNotificationKeys.get(key);
+    return existing !== undefined && now - existing < LOCAL_NOTIFICATION_DEDUP_WINDOW_MS;
+}
+
+export function markRemoteNotificationReceived(sessionId: string, eventType: SessionNotificationEventType): void {
+    const now = Date.now();
+    pruneExpiredNotificationKeys(recentRemoteNotificationKeys, now);
+    recentRemoteNotificationKeys.set(createSessionNotificationEventKey(sessionId, eventType), now);
 }
 
 export async function initializeNotifications(): Promise<void> {
@@ -357,6 +400,7 @@ export async function notifySessionCompleted(input: {
         title: input.title,
         body: input.body,
         kind: "session-complete",
+        eventType: "completion",
     });
 }
 
@@ -365,6 +409,7 @@ export async function notifySessionActionRequired(input: {
     requestId: string;
     title: string;
     body: string;
+    eventType: "permission_prompt" | "user_input_prompt";
 }): Promise<void> {
     if (!rememberLocalNotificationKey(input.requestId)) {
         return;
@@ -375,6 +420,7 @@ export async function notifySessionActionRequired(input: {
         title: input.title,
         body: input.body,
         kind: "session-event",
+        eventType: input.eventType,
     });
 }
 
@@ -383,7 +429,18 @@ async function scheduleSessionNotification(input: {
     title: string;
     body: string;
     kind: "session-complete" | "session-event";
+    eventType: SessionNotificationEventType;
 }): Promise<void> {
+    const now = Date.now();
+    const notificationKey = createSessionNotificationEventKey(input.sessionId, input.eventType);
+    if (hasRecentRemoteSessionNotification(notificationKey, now)) {
+        return;
+    }
+
+    if (!rememberLocalSessionNotification(notificationKey, now)) {
+        return;
+    }
+
     const granted = await ensureNotificationPermission({ allowPrompt: false });
     if (!granted) {
         return;

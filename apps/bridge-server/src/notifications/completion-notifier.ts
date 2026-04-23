@@ -99,6 +99,22 @@ export function createCompletionNotifier(deps: {
         return nextState;
     }
 
+    function triggerBackgroundSyncPush(input: {
+        deviceId: string;
+        pushToken: string;
+        sessionId: string;
+        eventType: SessionPushEventType;
+    }): void {
+        void notifyForBackgroundSync(input).catch((error: unknown) => {
+            console.warn("[notifications] Background sync push crashed", {
+                sessionId: input.sessionId,
+                deviceId: input.deviceId,
+                eventType: input.eventType,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        });
+    }
+
     async function notifyForCompletedCycle(sessionId: string, snapshot: CompletedCycleSnapshot): Promise<void> {
         const latestState = sessionStates.get(sessionId);
         if (latestState === undefined || latestState.notifiedCycleId === snapshot.cycleId) {
@@ -114,7 +130,7 @@ export function createCompletionNotifier(deps: {
             return;
         }
 
-        void notifyForBackgroundSync({
+        triggerBackgroundSyncPush({
             deviceId: snapshot.deviceId,
             pushToken: registration.pushToken,
             sessionId,
@@ -185,7 +201,7 @@ export function createCompletionNotifier(deps: {
             return;
         }
 
-        void notifyForBackgroundSync({
+        triggerBackgroundSyncPush({
             deviceId: sessionState.deviceId,
             pushToken: registration.pushToken,
             sessionId: input.sessionId,

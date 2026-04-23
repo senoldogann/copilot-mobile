@@ -11,6 +11,7 @@ import { initializeAppRuntime } from "../src/services/app-runtime";
 import { loadOnboardingCompleted } from "../src/services/credentials";
 import { useThemeStore } from "../src/theme/theme-store";
 import { ThemeProvider, useAppTheme } from "../src/theme/theme-context";
+import { AnimatedSplash } from "../src/components/AnimatedSplash";
 
 export default function RootLayout() {
     const [themeReady, setThemeReady] = useState(false);
@@ -64,6 +65,7 @@ function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }
     const theme = useAppTheme();
     const pathname = usePathname();
     const router = useRouter();
+    const [splashVisible, setSplashVisible] = useState(true);
 
     useEffect(() => {
         if (onboardingCompleted || pathname === "/onboarding") {
@@ -136,6 +138,9 @@ function RootNavigator({ onboardingCompleted }: { onboardingCompleted: boolean }
                     }}
                 />
             </Stack>
+            {splashVisible && (
+                <AnimatedSplash onAnimationDone={() => setSplashVisible(false)} />
+            )}
         </>
     );
 }

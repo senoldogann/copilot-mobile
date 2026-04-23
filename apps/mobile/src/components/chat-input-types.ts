@@ -37,6 +37,7 @@ export type SlashCommand = {
 };
 
 export type AutocompleteToken =
-    | { kind: "file"; query: string; start: number; end: number }
+    | { kind: "context"; query: string; start: number; end: number }
+    | { kind: "mention"; query: string; start: number; end: number }
     | { kind: "slash"; query: string; start: number; end: number }
     | null;

@@ -1,18 +1,30 @@
 import React from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Constants from "expo-constants";
-import { useRouter } from "expo-router";
+import { Stack, useRouter } from "expo-router";
 
 import { type ThemeMode, type ThemeVariant } from "../src/theme/colors";
-import { useThemedStyles, type AppTheme } from "../src/theme/theme-context";
+import { useThemedStyles, type AppTheme, useAppTheme } from "../src/theme/theme-context";
 import { useThemeStore } from "../src/theme/theme-store";
 import { prepareNotificationPermissions } from "../src/services/notifications";
 import { syncRemoteNotificationRegistration } from "../src/services/bridge";
+import {
+    PaletteIcon,
+    MoonIcon,
+    SunIcon,
+    SmartphoneIcon,
+    BookOpenIcon,
+    BellIcon,
+    DesktopIcon,
+    ChevronRightIcon,
+    CheckIcon,
+    ArrowLeftIcon,
+} from "../src/components/ProviderIcon";
 
-const THEME_MODES: ReadonlyArray<{ value: ThemeMode; label: string }> = [
-    { value: "light", label: "Light" },
-    { value: "dark", label: "Dark" },
-    { value: "system", label: "System" },
+const THEME_MODES: ReadonlyArray<{ value: ThemeMode; label: string; icon: (props: any) => React.ReactNode }> = [
+    { value: "light", label: "Light", icon: SunIcon },
+    { value: "dark", label: "Dark", icon: MoonIcon },
+    { value: "system", label: "System", icon: SmartphoneIcon },
 ];
 
 const THEME_VARIANTS: ReadonlyArray<{ value: ThemeVariant; label: string; swatch: string }> = [
@@ -21,6 +33,77 @@ const THEME_VARIANTS: ReadonlyArray<{ value: ThemeVariant; label: string; swatch
     { value: "claude", label: "Claude", swatch: "#f78166" },
     { value: "ghostty", label: "Ghostty", swatch: "#8fb2ff" },
 ];
+
+function SettingsGroup({
+    title,
+    children,
+    footer,
+}: {
+    title?: string;
+    children: React.ReactNode;
+    footer?: string;
+}) {
+    const styles = useThemedStyles(createStyles);
+    return (
+        <View style={styles.groupContainer}>
+            {title && <Text style={styles.groupTitle}>{title.toUpperCase()}</Text>}
+            <View style={styles.groupCard}>{children}</View>
+            {footer && <Text style={styles.groupFooter}>{footer}</Text>}
+        </View>
+    );
+}
+
+function SettingsRow({
+    icon,
+    iconBackgroundColor,
+    label,
+    value,
+    rightElement,
+    onPress,
+    isLast = false,
+}: {
+    icon: (props: any) => React.ReactNode;
+    iconBackgroundColor?: string;
+    label: string;
+    value?: string;
+    rightElement?: React.ReactNode;
+    onPress?: () => void;
+    isLast?: boolean;
+}) {
+    const styles = useThemedStyles(createStyles);
+    const theme = useThemeStore((state) => state.variant);
+    const content = (
+        <View style={[styles.rowContent, !isLast && styles.rowBorder]}>
+            <View style={styles.rowLeft}>
+                <View style={[styles.iconWrap, { backgroundColor: iconBackgroundColor ?? "#8b8b92" }]}>
+                    {icon({ size: 16, color: "#ffffff" })}
+                </View>
+                <Text style={styles.rowLabel}>{label}</Text>
+            </View>
+            <View style={styles.rowRight}>
+                {value ? <Text style={styles.rowValue}>{value}</Text> : null}
+                {rightElement ? (
+                    rightElement
+                ) : onPress ? (
+                    <ChevronRightIcon size={14} color="#8b8b92" />
+                ) : null}
+            </View>
+        </View>
+    );
+
+    if (onPress) {
+        return (
+            <Pressable
+                style={({ pressed }) => [styles.row, pressed && styles.rowPressed]}
+                onPress={onPress}
+            >
+                {content}
+            </Pressable>
+        );
+    }
+
+    return <View style={styles.row}>{content}</View>;
+}
 
 function ThemeSettings() {
     const styles = useThemedStyles(createStyles);
@@ -39,56 +122,61 @@ function ThemeSettings() {
     };
 
     return (
-        <View style={styles.card}>
-            <Text style={styles.cardTitle}>Theme</Text>
-            <Text style={styles.cardDescription}>
-                Choose how the app should render and which palette to use.
-            </Text>
-
-            <View style={styles.segmentedControl}>
-                {THEME_MODES.map((item) => {
-                    const active = themeMode === item.value;
-
-                    return (
-                        <Pressable
-                            key={item.value}
-                            style={[styles.segment, active && styles.segmentActive]}
-                            onPress={() => {
-                                void applyThemeSelection(item.value, themeVariant);
-                            }}
-                        >
-                            <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
-                                {item.label}
-                            </Text>
-                        </Pressable>
-                    );
-                })}
+        <SettingsGroup
+            title="Appearance"
+            footer="Choose your preferred theme mode and accent color. The accent color changes the primary highlights across the app."
+        >
+            <View style={styles.segmentedRow}>
+                <View style={styles.segmentedControl}>
+                    {THEME_MODES.map((item) => {
+                        const active = themeMode === item.value;
+                        const Icon = item.icon;
+                        return (
+                            <Pressable
+                                key={item.value}
+                                style={[styles.segment, active && styles.segmentActive]}
+                                onPress={() => {
+                                    void applyThemeSelection(item.value, themeVariant);
+                                }}
+                            >
+                                <Icon size={14} color={active ? "#ffffff" : "#8b8b92"} />
+                                <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                                    {item.label}
+                                </Text>
+                            </Pressable>
+                        );
+                    })}
+                </View>
             </View>
 
-            <View style={styles.variantList}>
-                {THEME_VARIANTS.map((item) => {
-                    const active = themeVariant === item.value;
+            {THEME_VARIANTS.map((item, index) => {
+                const active = themeVariant === item.value;
+                const isLast = index === THEME_VARIANTS.length - 1;
 
-                    return (
-                        <Pressable
-                            key={item.value}
-                            style={[styles.variantRow, active && styles.variantRowActive]}
-                            onPress={() => {
-                                void applyThemeSelection(themeMode, item.value);
-                            }}
-                        >
-                            <View style={[styles.variantSwatch, { backgroundColor: item.swatch }]} />
-                            <Text style={styles.variantLabel}>{item.label}</Text>
-                            {active && <Text style={styles.variantCheck}>✓</Text>}
-                        </Pressable>
-                    );
-                })}
-            </View>
-        </View>
+                return (
+                    <SettingsRow
+                        key={item.value}
+                        icon={PaletteIcon}
+                        iconBackgroundColor={item.swatch}
+                        label={item.label}
+                        isLast={isLast}
+                        onPress={() => {
+                            void applyThemeSelection(themeMode, item.value);
+                        }}
+                        rightElement={
+                            active ? (
+                                <CheckIcon size={16} color={item.swatch} />
+                            ) : undefined
+                        }
+                    />
+                );
+            })}
+        </SettingsGroup>
     );
 }
 
 export default function SettingsScreen() {
+    const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
     const appVersion = Constants.expoConfig?.version ?? "0.1.0";
     const router = useRouter();
@@ -115,43 +203,54 @@ export default function SettingsScreen() {
     }
 
     return (
-        <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-            <View style={styles.pageHeader}>
-                <Text style={styles.pageTitle}>Settings</Text>
-                <Text style={styles.pageSubtitle}>
-                    Personalize the mobile bridge and setup flow.
-                </Text>
-            </View>
+        <>
+            <Stack.Screen options={{ headerShown: false }} />
+            <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+                <View style={styles.pageHeader}>
+                    <Pressable 
+                        style={({ pressed }) => [styles.backButton, pressed && { opacity: 0.7 }]} 
+                        onPress={() => router.back()}
+                        hitSlop={20}
+                    >
+                        <ArrowLeftIcon size={22} color={theme.colors.textPrimary} />
+                    </Pressable>
+                    <Text style={styles.pageTitle}>Settings</Text>
+                </View>
 
-            <ThemeSettings />
+                <ThemeSettings />
 
-            <View style={styles.card}>
-                <Text style={styles.cardTitle}>Getting Started</Text>
-                <Text style={styles.cardDescription}>
-                    Replay the onboarding slider, review the Mac companion steps, or enable notifications for background approvals and completion alerts.
-                </Text>
-                <Pressable style={styles.actionButton} onPress={() => router.push("/onboarding")}>
-                    <Text style={styles.actionButtonText}>Open onboarding</Text>
-                </Pressable>
-                <Pressable
-                    style={[styles.actionButton, styles.secondaryActionButton]}
+            <SettingsGroup
+                title="App Settings"
+                footer="Enable notifications to receive background completion alerts."
+            >
+                <SettingsRow
+                    icon={BookOpenIcon}
+                    iconBackgroundColor="#34C759"
+                    label="Setup Guide"
+                    onPress={() => router.push("/onboarding")}
+                />
+                <SettingsRow
+                    icon={BellIcon}
+                    iconBackgroundColor="#FF3B30"
+                    label="Notifications"
+                    isLast={true}
                     onPress={() => {
                         void handleEnableNotifications();
                     }}
-                >
-                    <Text style={[styles.actionButtonText, styles.secondaryActionButtonText]}>
-                        Enable notifications
-                    </Text>
-                </Pressable>
-            </View>
+                />
+            </SettingsGroup>
 
-            <View style={styles.card}>
-                <Text style={styles.cardTitle}>Version</Text>
-                <View style={styles.versionPill}>
-                    <Text style={styles.versionText}>v{appVersion}</Text>
-                </View>
-            </View>
+            <SettingsGroup title="About">
+                <SettingsRow
+                    icon={DesktopIcon}
+                    iconBackgroundColor="#8b8b92"
+                    label="Version"
+                    value={`v${appVersion}`}
+                    isLast={true}
+                />
+            </SettingsGroup>
         </ScrollView>
+        </>
     );
 }
 
@@ -162,141 +261,141 @@ function createStyles(theme: AppTheme) {
             backgroundColor: theme.colors.bgSecondary,
         },
         content: {
-            paddingHorizontal: theme.spacing.md,
-            paddingTop: 22,
-            paddingBottom: 36,
-            gap: theme.spacing.md,
+            paddingTop: Constants.statusBarHeight + 16,
+            paddingBottom: 48,
         },
         pageHeader: {
-            paddingHorizontal: theme.spacing.xs,
-            paddingBottom: theme.spacing.xs,
-            gap: 4,
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: theme.spacing.lg,
+            paddingBottom: theme.spacing.lg,
+            gap: 12,
+        },
+        backButton: {
+            width: 32,
+            height: 32,
+            borderRadius: 16,
+            backgroundColor: theme.colors.bgTertiary,
+            alignItems: "center",
+            justifyContent: "center",
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.colors.border,
         },
         pageTitle: {
-            fontSize: 24,
-            lineHeight: 30,
+            fontSize: 26,
+            lineHeight: 40,
             fontWeight: "700",
             color: theme.colors.textPrimary,
         },
-        pageSubtitle: {
-            fontSize: theme.fontSize.sm,
-            lineHeight: 20,
+        groupContainer: {
+            marginBottom: theme.spacing.xl,
+        },
+        groupTitle: {
+            fontSize: 12,
+            fontWeight: "600",
+            color: theme.colors.textTertiary,
+            marginLeft: theme.spacing.lg,
+            marginBottom: 6,
+            letterSpacing: 0.3,
+        },
+        groupFooter: {
+            fontSize: 13,
+            color: theme.colors.textTertiary,
+            marginHorizontal: theme.spacing.lg,
+            marginTop: 8,
+            lineHeight: 18,
+        },
+        groupCard: {
+            backgroundColor: theme.colors.bgTertiary,
+            borderTopWidth: StyleSheet.hairlineWidth,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.colors.border,
+        },
+        row: {
+            backgroundColor: theme.colors.bgTertiary,
+            flexDirection: "row",
+            alignItems: "stretch",
+            paddingLeft: theme.spacing.md,
+        },
+        rowPressed: {
+            backgroundColor: theme.colors.bgElevated,
+        },
+        rowContent: {
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingVertical: 12,
+            paddingRight: theme.spacing.md,
+        },
+        rowBorder: {
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.borderMuted,
+        },
+        rowLeft: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 12,
+        },
+        iconWrap: {
+            width: 30,
+            height: 30,
+            borderRadius: 7,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        rowLabel: {
+            fontSize: 15,
+            color: theme.colors.textPrimary,
+            fontWeight: "500",
+        },
+        rowRight: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 8,
+        },
+        rowValue: {
+            fontSize: 15,
             color: theme.colors.textSecondary,
         },
-        card: {
-            backgroundColor: theme.colors.bgSecondary,
-            borderWidth: 1,
-            borderColor: theme.colors.borderMuted,
-            borderRadius: theme.borderRadius.md,
+        segmentedRow: {
             padding: theme.spacing.md,
-            gap: theme.spacing.md,
-        },
-        cardTitle: {
-            fontSize: theme.fontSize.base,
-            fontWeight: "700",
-            color: theme.colors.textPrimary,
-        },
-        cardDescription: {
-            fontSize: theme.fontSize.sm,
-            lineHeight: 20,
-            color: theme.colors.textSecondary,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.borderMuted,
+            backgroundColor: theme.colors.bgTertiary,
         },
         segmentedControl: {
             flexDirection: "row",
-            gap: theme.spacing.sm,
+            backgroundColor: theme.colors.bgSecondary,
+            padding: 3,
+            borderRadius: 8,
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: theme.colors.borderMuted,
         },
         segment: {
             flex: 1,
-            minHeight: 38,
-            borderRadius: theme.borderRadius.sm,
-            borderWidth: 1,
-            borderColor: theme.colors.borderMuted,
-            alignItems: "center",
-            justifyContent: "center",
-            backgroundColor: theme.colors.bgTertiary,
-        },
-        segmentActive: {
-            backgroundColor: theme.colors.accentMuted,
-            borderColor: theme.colors.accent,
-        },
-        segmentText: {
-            color: theme.colors.textSecondary,
-            fontSize: theme.fontSize.sm,
-            fontWeight: "600",
-        },
-        segmentTextActive: {
-            color: theme.colors.textPrimary,
-        },
-        variantList: {
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            borderRadius: theme.borderRadius.md,
-            overflow: "hidden",
-        },
-        variantRow: {
             flexDirection: "row",
             alignItems: "center",
-            gap: theme.spacing.sm,
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: 11,
-            backgroundColor: theme.colors.bgTertiary,
-            borderTopWidth: 1,
-            borderTopColor: theme.colors.borderMuted,
-        },
-        variantRowActive: {
-            backgroundColor: theme.colors.bgElevated,
-        },
-        variantSwatch: {
-            width: 18,
-            height: 18,
-            borderRadius: theme.borderRadius.full,
-        },
-        variantLabel: {
-            flex: 1,
-            color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.sm,
-            fontWeight: "600",
-        },
-        variantCheck: {
-            color: theme.colors.accent,
-            fontSize: theme.fontSize.md,
-            fontWeight: "700",
-        },
-        actionButton: {
-            minHeight: 42,
-            borderRadius: theme.borderRadius.sm,
-            backgroundColor: theme.colors.accent,
-            alignItems: "center",
             justifyContent: "center",
-            paddingHorizontal: theme.spacing.md,
+            gap: 6,
+            paddingVertical: 8,
+            borderRadius: 6,
         },
-        secondaryActionButton: {
-            backgroundColor: theme.colors.bgTertiary,
-            borderWidth: 1,
-            borderColor: theme.colors.borderMuted,
+        segmentActive: {
+            backgroundColor: theme.colors.accent,
+            shadowColor: "#000",
+            shadowOffset: { width: 0, height: 1 },
+            shadowOpacity: 0.1,
+            shadowRadius: 2,
+            elevation: 2,
         },
-        actionButtonText: {
-            color: theme.colors.textOnAccent,
-            fontSize: theme.fontSize.sm,
-            fontWeight: "700",
-        },
-        secondaryActionButtonText: {
-            color: theme.colors.textPrimary,
-        },
-        versionText: {
+        segmentText: {
+            fontSize: 13,
+            fontWeight: "600",
             color: theme.colors.textSecondary,
-            fontSize: theme.fontSize.sm,
-            fontWeight: "500",
-            letterSpacing: 0.2,
         },
-        versionPill: {
-            alignSelf: "flex-start",
-            borderRadius: theme.borderRadius.full,
-            borderWidth: 1,
-            borderColor: theme.colors.borderMuted,
-            backgroundColor: theme.colors.bgTertiary,
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: 7,
+        segmentTextActive: {
+            color: "#ffffff",
         },
     });
 }

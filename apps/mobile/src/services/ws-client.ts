@@ -376,9 +376,9 @@ export function createWSClient(config: WSClientConfig) {
     }
 
     function connectToURL(url: string, options: ResumeOptions): void {
-        cleanup();
         reconnectOnClose = options.reconnectOnFailure;
         reportConnectionErrors = options.reportErrors;
+        cleanup();
         setState("connecting");
 
         if (transportMode === "relay" && relayAccessToken === null) {

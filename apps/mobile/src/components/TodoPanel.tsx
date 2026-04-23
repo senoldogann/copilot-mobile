@@ -62,7 +62,7 @@ function TodoPanelInner({ todos }: TodoPanelProps) {
             <Pressable
                 style={styles.header}
                 onPress={() => setExpanded((v) => !v)}
-                accessibilityLabel={expanded ? "Todo listesini gizle" : "Todo listesini göster"}
+                accessibilityLabel={expanded ? "Hide todo list" : "Show todo list"}
             >
                 <View style={styles.headerLeft}>
                     <View style={styles.taskIcon}>
@@ -77,7 +77,7 @@ function TodoPanelInner({ todos }: TodoPanelProps) {
                     {inProgressCount > 0 && (
                         <View style={[styles.badge, styles.badgeWarning]}>
                             <Text style={[styles.badgeText, styles.badgeWarningText]}>
-                                {inProgressCount} aktif
+                                {inProgressCount} active
                             </Text>
                         </View>
                     )}
@@ -115,7 +115,7 @@ function TodoPanelInner({ todos }: TodoPanelProps) {
                                     {todo.content}
                                 </Text>
                                 {todo.priority === "high" && (
-                                    <Text style={styles.priorityTag}>yüksek öncelik</Text>
+                                    <Text style={styles.priorityTag}>high priority</Text>
                                 )}
                             </View>
                         </View>

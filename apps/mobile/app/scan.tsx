@@ -77,7 +77,7 @@ export default function ScanScreen() {
             const qrPayloadResult = qrPayloadSchema.safeParse(parsed);
 
             if (!qrPayloadResult.success) {
-                Alert.alert("Invalid QR Code", "This QR code does not belong to your desktop companion.", [
+                Alert.alert("Invalid QR Code", "This QR code does not belong to your Mac companion.", [
                     { text: "Retry", onPress: () => setScanned(false) },
                 ]);
                 return;
@@ -131,7 +131,7 @@ export default function ScanScreen() {
                     Camera access is needed to scan QR codes.
                 </Text>
                 <Pressable style={styles.button} onPress={requestPermission}>
-                    <Text style={styles.buttonText}>Grant Permission</Text>
+                    <Text style={styles.buttonText}>Allow Camera Access</Text>
                 </Pressable>
             </View>
         );
@@ -167,7 +167,7 @@ export default function ScanScreen() {
                             ]}
                             onPress={() => router.push("/onboarding")}
                         >
-                            <Text style={styles.secondaryButtonText}>Need setup help?</Text>
+                            <Text style={styles.secondaryButtonText}>Review setup steps</Text>
                         </Pressable>
                     </>
                 )}

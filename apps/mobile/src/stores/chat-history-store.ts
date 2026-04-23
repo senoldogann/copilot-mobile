@@ -44,6 +44,7 @@ export type ChatHistoryStore = {
         sessionId: string,
         workspaceRoot: string | null
     ) => void;
+    finalizeStreamingForSession: (sessionId: string) => void;
     removeBySessionId: (sessionId: string) => void;
     hydrate: () => Promise<void>;
 };
@@ -501,6 +502,29 @@ export const useChatHistoryStore = create<ChatHistoryStore>((set, get) => ({
                     : c
             ),
         }));
+        schedulePersist(get());
+    },
+
+    finalizeStreamingForSession: (sessionId) => {
+        set((state) => {
+            const conversationId = state.conversations.find((c) => c.sessionId === sessionId)?.id;
+            if (conversationId === undefined) return state;
+
+            const items = state.conversationItems[conversationId];
+            if (items === undefined) return state;
+
+            return {
+                conversationItems: {
+                    ...state.conversationItems,
+                    [conversationId]: items.map((item) => {
+                        if (item.type === "assistant" || item.type === "thinking") {
+                            return { ...item, isStreaming: false };
+                        }
+                        return item;
+                    }),
+                },
+            };
+        });
         schedulePersist(get());
     },
 

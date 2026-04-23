@@ -3,6 +3,7 @@ import * as Notifications from "expo-notifications";
 import { listSessions, prefetchSessionState, tryResumeFromStoredCredentials } from "./bridge";
 import { useSessionStore } from "../stores/session-store";
 import { BACKGROUND_NOTIFICATION_TASK } from "./notification-background-shared";
+import { markRemoteNotificationReceived } from "./notifications";
 
 const BACKGROUND_SYNC_DEDUP_WINDOW_MS = 10_000;
 
@@ -108,6 +109,7 @@ if (!TaskManager.isTaskDefined(BACKGROUND_NOTIFICATION_TASK)) {
 
             lastBackgroundSyncSignature = syncSignature;
             lastBackgroundSyncAt = now;
+            markRemoteNotificationReceived(payload.sessionId, payload.eventType);
 
             try {
                 await performBackgroundSessionSync(payload.sessionId);

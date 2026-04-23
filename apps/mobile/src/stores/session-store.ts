@@ -356,8 +356,11 @@ export const useSessionStore = create<SessionStore>((set) => ({
                 const nextContent = content.trim().length > 0 ? content : last.content;
 
                 if (nextContent.trim().length === 0) {
-                    items.pop();
-                    return { chatItems: items, isAssistantTyping: false, currentIntent: null };
+                    return {
+                        chatItems: items.slice(0, -1),
+                        isAssistantTyping: false,
+                        currentIntent: null,
+                    };
                 }
 
                 items[items.length - 1] = {

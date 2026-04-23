@@ -59,6 +59,13 @@
           "microphonePermission": false
         }
       ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Microphone access is required to dictate prompts in chat",
+          "speechRecognitionPermission": "Speech recognition is required to turn your voice into prompt text"
+        }
+      ],
       "expo-secure-store",
       [
         "expo-notifications",

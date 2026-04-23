@@ -5,17 +5,20 @@ import {
     View,
     Text,
     Pressable,
-    Modal,
+    Alert,
     ScrollView,
     StyleSheet,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import * as Clipboard from "expo-clipboard";
 import type { SessionMessageAttachment } from "@copilot-mobile/shared";
+import { insertIntoComposer } from "../services/composer-events";
 import type { ChatItem } from "../stores/session-store-types";
 import { ThinkingBubble } from "./ThinkingBubble";
 import { ToolCard } from "./ToolCard";
 import { FileContentViewer } from "./FileContentViewer";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
+import { ArrowUpIcon, CopyIcon } from "./ProviderIcon";
 type Props = {
     item: ChatItem;
 };
@@ -313,6 +316,105 @@ function parseMarkdown(content: string): ReadonlyArray<MarkdownBlock> {
     return blocks;
 }
 
+function buildApplyPrompt(language: string, code: string): string {
+    const languageSuffix = language.trim().length > 0 ? language.trim() : "text";
+    return [
+        "Apply this code block in the correct file.",
+        "Adjust imports, surrounding code, and any small syntax differences if needed.",
+        "",
+        `\`\`\`${languageSuffix}`,
+        code,
+        "```",
+    ].join("\n");
+}
+
+function CodeBlockCard({ language, code }: { language: string; code: string }) {
+    const [copied, setCopied] = useState(false);
+    const [queuedForApply, setQueuedForApply] = useState(false);
+    const mdStyles = useThemedStyles(createMarkdownStyles);
+    const theme = useAppTheme();
+
+    const handleCopy = React.useCallback(() => {
+        void Clipboard.setStringAsync(code)
+            .then(() => {
+                setCopied(true);
+                setTimeout(() => {
+                    setCopied(false);
+                }, 1600);
+            })
+            .catch((error) => {
+                const message = error instanceof Error ? error.message : String(error);
+                Alert.alert("Could not copy code", message);
+            });
+    }, [code]);
+
+    const handleApply = React.useCallback(() => {
+        const inserted = insertIntoComposer({
+            mode: "append",
+            text: buildApplyPrompt(language, code),
+        });
+        if (!inserted) {
+            Alert.alert("Could not add code", "Open the chat composer and try again.");
+            return;
+        }
+        setQueuedForApply(true);
+        setTimeout(() => {
+            setQueuedForApply(false);
+        }, 1600);
+    }, [code, language]);
+
+    return (
+        <View style={mdStyles.codeBlock}>
+            <View style={mdStyles.codeHeader}>
+                <View style={mdStyles.codeHeaderMeta}>
+                    {language.length > 0 && (
+                        <Text style={mdStyles.codeLanguage}>
+                            {language}
+                        </Text>
+                    )}
+                </View>
+                <View style={mdStyles.codeActions}>
+                    <Pressable style={mdStyles.codeActionButton} onPress={handleCopy}>
+                        <CopyIcon
+                            size={13}
+                            color={copied ? theme.colors.success : theme.colors.textTertiary}
+                        />
+                        <Text style={[
+                            mdStyles.codeActionText,
+                            copied && mdStyles.codeActionTextActive,
+                        ]}>
+                            {copied ? "Copied" : "Copy"}
+                        </Text>
+                    </Pressable>
+                    <Pressable style={mdStyles.codeActionButton} onPress={handleApply}>
+                        <ArrowUpIcon
+                            size={12}
+                            color={queuedForApply ? theme.colors.success : theme.colors.textTertiary}
+                        />
+                        <Text style={[
+                            mdStyles.codeActionText,
+                            queuedForApply && mdStyles.codeActionTextActive,
+                        ]}>
+                            {queuedForApply ? "Added" : "Apply"}
+                        </Text>
+                    </Pressable>
+                </View>
+            </View>
+            <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                directionalLockEnabled
+                nestedScrollEnabled
+                canCancelContentTouches
+            >
+                <Text style={mdStyles.codeText}>
+                    {code}
+                </Text>
+            </ScrollView>
+        </View>
+    );
+}
+
 // Render markdown blocks
 function MarkdownContent({
     content,
@@ -350,24 +452,11 @@ function MarkdownContent({
                         );
                     case "code_block":
                         return (
-                            <View key={i} style={mdStyles.codeBlock}>
-                                {block.language.length > 0 && (
-                                    <Text style={mdStyles.codeLanguage}>
-                                        {block.language}
-                                    </Text>
-                                )}
-                                <ScrollView
-                                    horizontal
-                                    showsHorizontalScrollIndicator={false}
-                                    directionalLockEnabled
-                                    nestedScrollEnabled
-                                    canCancelContentTouches
-                                >
-                                    <Text style={mdStyles.codeText}>
-                                        {block.code}
-                                    </Text>
-                                </ScrollView>
-                            </View>
+                            <CodeBlockCard
+                                key={i}
+                                language={block.language}
+                                code={block.code}
+                            />
                         );
                     case "bullet":
                         return (
@@ -638,12 +727,46 @@ const createMarkdownStyles = (theme: AppTheme) => StyleSheet.create({
         padding: theme.spacing.md,
         marginVertical: theme.spacing.xs,
     },
+    codeHeader: {
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "space-between",
+        gap: theme.spacing.sm,
+        marginBottom: 10,
+    },
+    codeHeaderMeta: {
+        flex: 1,
+        minWidth: 0,
+    },
     codeLanguage: {
         fontSize: theme.fontSize.xs,
         color: theme.colors.textTertiary,
-        marginBottom: 6,
         textTransform: "uppercase",
         letterSpacing: 0.5,
+    },
+    codeActions: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 8,
+    },
+    codeActionButton: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 5,
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: theme.borderRadius.full,
+        backgroundColor: theme.colors.bgElevated,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+    },
+    codeActionText: {
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
+        fontWeight: "600",
+    },
+    codeActionTextActive: {
+        color: theme.colors.success,
     },
     codeText: {
         fontFamily: "monospace",

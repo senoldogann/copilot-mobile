@@ -264,6 +264,9 @@ export function createToolbarStyles(theme: AppTheme) {
         toolBtnActive: {
             backgroundColor: theme.colors.accentMuted,
         },
+        toolBtnRecording: {
+            backgroundColor: theme.colors.accent,
+        },
         modelPill: {
             flexDirection: "row",
             alignItems: "center",
@@ -573,6 +576,9 @@ export function createAutocompleteStyles(theme: AppTheme) {
             color: theme.colors.textTertiary,
         },
         item: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
             paddingHorizontal: theme.spacing.md,
             paddingVertical: 10,
             borderBottomWidth: StyleSheet.hairlineWidth,
@@ -580,6 +586,15 @@ export function createAutocompleteStyles(theme: AppTheme) {
         },
         itemPressed: {
             backgroundColor: theme.colors.bgOverlay,
+        },
+        itemIcon: {
+            width: 18,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        itemBody: {
+            flex: 1,
+            minWidth: 0,
         },
         label: {
             fontSize: theme.fontSize.sm,
@@ -590,6 +605,12 @@ export function createAutocompleteStyles(theme: AppTheme) {
             fontSize: theme.fontSize.xs,
             color: theme.colors.textTertiary,
             marginTop: 2,
+        },
+        category: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textTertiary,
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
         },
     });
 }

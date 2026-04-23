@@ -113,7 +113,7 @@ export function notifyIfBackgroundCompletion(sessionId: string): void {
         ? sanitizeNotificationText(latestAssistant.content)
         : cachedAssistantContent !== undefined
             ? sanitizeNotificationText(cachedAssistantContent)
-        : "Open Code Companion to review the latest session output.";
+        : "Open Code Companion to review the latest session result.";
 
     latestAssistantContentBySession.delete(sessionId);
 

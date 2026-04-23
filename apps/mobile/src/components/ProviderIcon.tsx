@@ -249,6 +249,59 @@ export function BellIcon({ size = 16, color = "#a0a3a2" }: { size?: number; colo
     );
 }
 
+export function CopyIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Rect x="9" y="8" width="11" height="12" rx="2.5" />
+                <Path d="M15 8V6.5A2.5 2.5 0 0 0 12.5 4h-6A2.5 2.5 0 0 0 4 6.5v9A2.5 2.5 0 0 0 6.5 18H9" />
+            </G>
+        </Svg>
+    );
+}
+
+export function MicrophoneIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Rect x="9" y="3" width="6" height="11" rx="3" />
+                <Path d="M6 11a6 6 0 0 0 12 0" />
+                <Path d="M12 17v4" />
+                <Path d="M8.5 21h7" />
+            </G>
+        </Svg>
+    );
+}
+
+export function HashIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M9 3 7 21M17 3l-2 18M4 9h18M3 15h18"
+                stroke={color}
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </Svg>
+    );
+}
+
+export function AtIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M16 12.5v-1a4 4 0 1 0-1.2 2.9c.7.7 1.6 1.1 2.6 1.1 2.1 0 3.6-1.7 3.6-4.2A9 9 0 1 0 12 21"
+                stroke={color}
+                strokeWidth={1.8}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+            <Circle cx="12" cy="11.5" r="2.3" stroke={color} strokeWidth={1.8} />
+        </Svg>
+    );
+}
+
 export function GitHubIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
     return (
         <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -420,6 +473,18 @@ export function GitCommitIcon({ size = 13, color = "#a0a3a2" }: { size?: number;
             <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
                 <Path d="M12 5v3M12 16v3M8 12H5M19 12h-3M9 12h6" />
                 <Circle cx="12" cy="12" r="3" />
+            </G>
+        </Svg>
+    );
+}
+
+export function HistoryIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M3 12a9 9 0 1 0 3-6.7" />
+                <Path d="M3 4v5h5" />
+                <Path d="M12 7v5l3 2" />
             </G>
         </Svg>
     );
@@ -748,3 +813,63 @@ export function ZapIcon({ size = 14, color = "#a0a3a2" }: { size?: number; color
         </Svg>
     );
 }
+
+export function PaletteIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 14c0 1.6-1.4 3-3 3h-1c-1 0-2 1-2 2a2 2 0 0 1-2 2 8 8 0 0 1-8-8zM6 10a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM11 7a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM16 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"
+                stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none"
+            />
+        </Svg>
+    );
+}
+
+export function MoonIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"
+                stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none"
+            />
+        </Svg>
+    );
+}
+
+export function SunIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Circle cx="12" cy="12" r="4" />
+                <Path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
+            </G>
+        </Svg>
+    );
+}
+
+export function SmartphoneIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Rect x="5" y="2" width="14" height="20" rx="2" ry="2" />
+                <Path d="M12 18h.01" />
+            </G>
+        </Svg>
+    );
+}
+
+export function BookOpenIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"
+                stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none"
+            />
+            <Path
+                d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"
+                stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none"
+            />
+        </Svg>
+    );
+}
+

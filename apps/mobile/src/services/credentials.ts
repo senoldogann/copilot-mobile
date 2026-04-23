@@ -128,27 +128,101 @@ async function readOnboardingStateFile(): Promise<boolean> {
     }
 }
 
+async function writeSecureStoreValue(
+    storageKey: string,
+    value: string | null
+): Promise<void> {
+    if (value === null) {
+        await SecureStore.deleteItemAsync(storageKey);
+        return;
+    }
+
+    await SecureStore.setItemAsync(storageKey, value);
+}
+
+async function restoreSecureStorePair(
+    key: SecureStoreKeyPair,
+    previousPrimaryValue: string | null,
+    previousLegacyValue: string | null
+): Promise<void> {
+    await writeSecureStoreValue(key.primary, previousPrimaryValue);
+    await writeSecureStoreValue(key.legacy, previousLegacyValue);
+}
+
 async function setItem(key: SecureStoreKeyPair, value: string): Promise<void> {
-    await SecureStore.setItemAsync(key.primary, value);
-    await SecureStore.setItemAsync(key.legacy, value);
+    const previousPrimaryValue = await SecureStore.getItemAsync(key.primary);
+    const previousLegacyValue = await SecureStore.getItemAsync(key.legacy);
+
+    try {
+        await writeSecureStoreValue(key.primary, value);
+        await writeSecureStoreValue(key.legacy, value);
+    } catch (error) {
+        try {
+            await restoreSecureStorePair(key, previousPrimaryValue, previousLegacyValue);
+        } catch (restoreError) {
+            throw new Error(
+                `Failed to restore credential keys after write error (${key.primary}, ${key.legacy}): ${
+                    restoreError instanceof Error ? restoreError.message : String(restoreError)
+                }`
+            );
+        }
+
+        throw new Error(
+            `Failed to persist credential keys atomically (${key.primary}, ${key.legacy}): ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+    }
 }
 
 async function getItem(key: SecureStoreKeyPair): Promise<string | null> {
     const primaryValue = await SecureStore.getItemAsync(key.primary);
-    if (primaryValue !== null) {
+    const legacyValue = await SecureStore.getItemAsync(key.legacy);
+
+    if (primaryValue !== null && legacyValue !== null) {
+        if (primaryValue !== legacyValue) {
+            await setItem(key, primaryValue);
+        }
         return primaryValue;
     }
 
-    const legacyValue = await SecureStore.getItemAsync(key.legacy);
     if (legacyValue !== null) {
-        await SecureStore.setItemAsync(key.primary, legacyValue);
+        await setItem(key, legacyValue);
+        return legacyValue;
     }
-    return legacyValue;
+
+    if (primaryValue !== null) {
+        await setItem(key, primaryValue);
+        return primaryValue;
+    }
+
+    return null;
 }
 
 async function removeItem(key: SecureStoreKeyPair): Promise<void> {
-    await SecureStore.deleteItemAsync(key.primary);
-    await SecureStore.deleteItemAsync(key.legacy);
+    const previousPrimaryValue = await SecureStore.getItemAsync(key.primary);
+    const previousLegacyValue = await SecureStore.getItemAsync(key.legacy);
+
+    try {
+        await writeSecureStoreValue(key.primary, null);
+        await writeSecureStoreValue(key.legacy, null);
+    } catch (error) {
+        try {
+            await restoreSecureStorePair(key, previousPrimaryValue, previousLegacyValue);
+        } catch (restoreError) {
+            throw new Error(
+                `Failed to restore credential keys after delete error (${key.primary}, ${key.legacy}): ${
+                    restoreError instanceof Error ? restoreError.message : String(restoreError)
+                }`
+            );
+        }
+
+        throw new Error(
+            `Failed to delete credential keys atomically (${key.primary}, ${key.legacy}): ${
+                error instanceof Error ? error.message : String(error)
+            }`
+        );
+    }
 }
 
 export async function saveCredentials(creds: StoredCredentials): Promise<void> {

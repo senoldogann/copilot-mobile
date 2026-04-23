@@ -794,7 +794,10 @@ export function handleServerMessage(message: ServerMessage): void {
             } else {
                 notifyIfBackgroundCompletion(message.payload.sessionId);
             }
-            if (!isActiveSession(message.payload.sessionId)) break;
+            if (!isActiveSession(message.payload.sessionId)) {
+                useChatHistoryStore.getState().finalizeStreamingForSession(message.payload.sessionId);
+                break;
+            }
             sessionStore.setAssistantTyping(false);
             if (!abortInFlight) {
                 sessionStore.setAbortRequested(false);
@@ -948,6 +951,7 @@ export function handleServerMessage(message: ServerMessage): void {
                     requestId: message.payload.requestId,
                     title: readSessionNotificationTitle(message.payload.sessionId, "Approval needed"),
                     body: `Approval needed: ${promptSummary}`,
+                    eventType: "permission_prompt",
                 });
             }
             break;
@@ -969,6 +973,7 @@ export function handleServerMessage(message: ServerMessage): void {
                     requestId: message.payload.requestId,
                     title: readSessionNotificationTitle(message.payload.sessionId, "Input needed"),
                     body: `Input needed: ${message.payload.prompt}`,
+                    eventType: "user_input_prompt",
                 });
             }
             break;

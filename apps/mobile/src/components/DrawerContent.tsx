@@ -83,6 +83,7 @@ type ChatActionMenuState = {
     subtitle: string | null;
     showHeaderDivider: boolean;
     items: ReadonlyArray<ChatActionMenuItem>;
+    anchor?: { x: number; y: number };
 };
 
 function basenamePath(value: string): string {
@@ -555,7 +556,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         void deleteSessionsBulk(allSessionIds);
     };
 
-    const openWorkspaceMenu = (group: WorkspaceGroup) => {
+    const openWorkspaceMenu = (group: WorkspaceGroup, anchor?: { x: number; y: number }) => {
         if (workspaceSelectionMode !== null && workspaceSelectionMode !== group.workspace) {
             cancelWorkspaceSelectionMode();
         }
@@ -567,6 +568,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
             title: group.displayName,
             subtitle: "Workspace actions",
             showHeaderDivider: false,
+            ...(anchor ? { anchor } : {}),
             items: [
                 {
                     key: "new-chat",
@@ -595,11 +597,12 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         });
     };
 
-    const openGlobalDrawerMenu = () => {
+    const openGlobalDrawerMenu = (anchor?: { x: number; y: number }) => {
         openChatActionMenu({
             title: "Chat actions",
             subtitle: "Projects panel actions",
             showHeaderDivider: true,
+            ...(anchor ? { anchor } : {}),
             items: [
                 {
                     key: "refresh-chats",
@@ -936,12 +939,14 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         conversationId: string | null,
         title: string,
         preview: string,
-        workspaceRoot: string | null
+        workspaceRoot: string | null,
+        anchor?: { x: number; y: number }
     ) => {
         openChatActionMenu({
             title: title.length > 0 ? title : "Chat",
             subtitle: "Chat actions",
             showHeaderDivider: false,
+            ...(anchor ? { anchor } : {}),
             items: [
                 {
                     key: "rename",
@@ -979,12 +984,14 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         sessionId: string | null,
         title: string,
         preview: string,
-        workspaceRoot: string | null
+        workspaceRoot: string | null,
+        anchor?: { x: number; y: number }
     ) => {
         openChatActionMenu({
             title: title.length > 0 ? title : "Archived",
             subtitle: "Archived chat actions",
             showHeaderDivider: false,
+            ...(anchor ? { anchor } : {}),
             items: [
                 {
                     key: "rename",
@@ -1022,12 +1029,14 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
         sessionId: string | null,
         title: string,
         preview: string,
-        workspaceRoot: string | null
+        workspaceRoot: string | null,
+        anchor?: { x: number; y: number }
     ) => {
         openChatActionMenu({
             title: title.length > 0 ? title : "Cloud conversation",
             subtitle: "Cloud chat actions",
             showHeaderDivider: false,
+            ...(anchor ? { anchor } : {}),
             items: [
                 {
                     key: "rename",
@@ -1516,12 +1525,13 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                             </Pressable>
                                             <Pressable
                                                 style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
-                                                onPress={() => openCloudConversationMenu(
+                                                onPress={(e) => openCloudConversationMenu(
                                                     conversation.id,
                                                     remoteSessionAvailable ? conversation.sessionId : null,
                                                     conversation.title,
                                                     conversation.preview,
                                                     conversation.workspaceRoot,
+                                                    { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }
                                                 )}
                                                 hitSlop={8}
                                                 accessibilityLabel="More actions"
@@ -1585,12 +1595,13 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                                     handleSelectDraft(conversation.id);
                                                 }
                                             }}
-                                            onLongPress={() => openArchivedMenu(
+                                            onLongPress={(e) => openArchivedMenu(
                                                 conversation.id,
                                                 conversation.sessionId,
                                                 conversation.title,
                                                 conversation.preview,
                                                 conversation.workspaceRoot,
+                                                { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }
                                             )}
                                             accessibilityLabel={conversation.title}
                                         >
@@ -1604,12 +1615,13 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                         </Pressable>
                                         <Pressable
                                             style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
-                                            onPress={() => openArchivedMenu(
+                                            onPress={(e) => openArchivedMenu(
                                                 conversation.id,
                                                 conversation.sessionId,
                                                 conversation.title,
                                                 conversation.preview,
                                                 conversation.workspaceRoot,
+                                                { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }
                                             )}
                                             hitSlop={8}
                                             accessibilityLabel="More actions"
@@ -1651,8 +1663,21 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 animationType="fade"
                 onRequestClose={closeChatActionMenu}
             >
-                <Pressable style={styles.actionMenuOverlay} onPress={closeChatActionMenu}>
-                    <Pressable style={styles.actionMenuCard} onPress={(event) => event.stopPropagation()}>
+                <Pressable 
+                    style={[styles.actionMenuOverlay, chatActionMenu?.anchor ? { backgroundColor: "transparent" } : undefined]} 
+                    onPress={closeChatActionMenu}
+                >
+                    <Pressable 
+                        style={[
+                            styles.actionMenuCard,
+                            chatActionMenu?.anchor ? {
+                                position: "absolute",
+                                top: Math.min(chatActionMenu.anchor.y + 10, 600),
+                                left: Math.max(10, chatActionMenu.anchor.x - 240),
+                            } : undefined
+                        ]} 
+                        onPress={(event) => event.stopPropagation()}
+                    >
                         <View
                             style={[
                                 styles.actionMenuHeader,
@@ -2233,9 +2258,10 @@ return StyleSheet.create({
         paddingTop: 72,
     },
     actionMenuCard: {
-        alignSelf: "stretch",
+        width: 260,
+        alignSelf: "center",
         maxHeight: 420,
-        borderRadius: theme.borderRadius.xl,
+        borderRadius: theme.borderRadius.lg,
         backgroundColor: theme.colors.bgElevated,
         borderWidth: 1,
         borderColor: theme.colors.border,

@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import * as ImagePicker from "expo-image-picker";
+import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { useSessionStore } from "../stores/session-store";
 import { deriveAvailableReasoningEfforts } from "../stores/session-store-helpers";
 import { useWorkspaceStore } from "../stores/workspace-store";
@@ -29,6 +30,7 @@ import {
     updatePermissionLevel,
     updateSessionMode,
 } from "../services/bridge";
+import { subscribeComposerInsert } from "../services/composer-events";
 import { useAppTheme, useThemedStyles } from "../theme/theme-context";
 import type {
     AutocompleteToken,
@@ -61,6 +63,12 @@ import {
     ShieldCheckIcon,
     ZapIcon,
     AgentIcon,
+    MicrophoneIcon,
+    HashIcon,
+    AtIcon,
+    FileTextIcon,
+    TerminalIcon,
+    GitHubIcon,
 } from "./ProviderIcon";
 import { ReasoningEffortIcon } from "./Icons";
 
@@ -533,6 +541,121 @@ function formatCtxWindow(tokens: number): string {
     return String(tokens);
 }
 
+type AutocompleteSuggestion = {
+    label: string;
+    value: string;
+    hint?: string;
+    category?: string;
+    icon: React.ReactNode;
+};
+
+type InputSelection = {
+    start: number;
+    end: number;
+};
+
+type VoiceCaptureState = {
+    active: boolean;
+    baseInput: string;
+    baseSelection: InputSelection;
+    transcript: string;
+};
+
+const PARTICIPANT_SUGGESTIONS: ReadonlyArray<AutocompleteSuggestion> = [
+    {
+        label: "@workspace",
+        value: "@workspace ",
+        hint: "Ask about your project, files, and code structure",
+        category: "Participant",
+        icon: <AtIcon size={14} color="#a0a3a2" />,
+    },
+    {
+        label: "@terminal",
+        value: "@terminal ",
+        hint: "Focus the prompt on terminal output and shell work",
+        category: "Participant",
+        icon: <TerminalIcon size={14} color="#f78166" />,
+    },
+    {
+        label: "@github",
+        value: "@github ",
+        hint: "Use GitHub-aware context for issues, PRs, and repository questions",
+        category: "Participant",
+        icon: <GitHubIcon size={14} color="#a0a3a2" />,
+    },
+];
+
+const CONTEXT_SUGGESTIONS: ReadonlyArray<AutocompleteSuggestion> = [
+    {
+        label: "#codebase",
+        value: "#codebase ",
+        hint: "Reference the wider workspace instead of a single file",
+        category: "Context",
+        icon: <HashIcon size={14} color="#a0a3a2" />,
+    },
+    {
+        label: "#terminal",
+        value: "#terminal ",
+        hint: "Include recent terminal context in the next prompt",
+        category: "Context",
+        icon: <TerminalIcon size={14} color="#f78166" />,
+    },
+];
+
+const VOICE_CONTEXTUAL_STRINGS: ReadonlyArray<string> = [
+    "TypeScript",
+    "JavaScript",
+    "React Native",
+    "Expo",
+    "pnpm",
+    "tsx",
+    "props",
+    "state",
+    "component",
+    "workspace",
+];
+
+function resolveSpeechLocale(): string {
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    return locale.trim().length > 0 ? locale : "en-US";
+}
+
+function replaceSelectionText(
+    input: string,
+    selection: InputSelection,
+    insertedText: string
+): { text: string; selection: InputSelection } {
+    const start = Math.max(0, Math.min(selection.start, input.length));
+    const end = Math.max(start, Math.min(selection.end, input.length));
+    const nextText = `${input.slice(0, start)}${insertedText}${input.slice(end)}`;
+    const nextCursor = start + insertedText.length;
+    return {
+        text: nextText,
+        selection: { start: nextCursor, end: nextCursor },
+    };
+}
+
+function appendComposerText(currentInput: string, text: string): { text: string; selection: InputSelection } {
+    const prefix = currentInput.trim().length === 0
+        ? ""
+        : currentInput.endsWith("\n")
+            ? "\n"
+            : "\n\n";
+    const nextText = `${currentInput}${prefix}${text}`;
+    const nextCursor = nextText.length;
+    return {
+        text: nextText,
+        selection: { start: nextCursor, end: nextCursor },
+    };
+}
+
+function isLegacyFileMentionQuery(query: string): boolean {
+    return query.includes("/")
+        || query.includes(".")
+        || query.startsWith("..")
+        || query.startsWith("./");
+}
+
 const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     // Chat management
     { command: "/clear", description: "Start new chat, archive current", category: "chat" },
@@ -568,7 +691,23 @@ const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     { command: "/help", description: "Show help and available commands", category: "help" },
 ];
 
-// Detect @file or /command token by scanning backward from cursor position.
+function shouldSearchWorkspaceFiles(token: AutocompleteToken): boolean {
+    if (token === null) {
+        return false;
+    }
+
+    if (token.kind === "context") {
+        return true;
+    }
+
+    if (token.kind === "mention") {
+        return isLegacyFileMentionQuery(token.query);
+    }
+
+    return false;
+}
+
+// Detect #context, @participant, or /command token by scanning backward from cursor position.
 function detectAutocompleteToken(text: string, cursor: number): AutocompleteToken {
     if (cursor <= 0) return null;
     let i = cursor - 1;
@@ -576,11 +715,15 @@ function detectAutocompleteToken(text: string, cursor: number): AutocompleteToke
         const ch = text[i];
         if (ch === undefined) break;
         if (ch === " " || ch === "\n" || ch === "\t") return null;
-        if (ch === "@") {
-            // Accept @ start only at line/word boundaries.
+        if (ch === "#") {
             const prev = i > 0 ? text[i - 1] : undefined;
             if (prev !== undefined && prev !== " " && prev !== "\n" && prev !== "\t") return null;
-            return { kind: "file", query: text.slice(i + 1, cursor), start: i, end: cursor };
+            return { kind: "context", query: text.slice(i + 1, cursor), start: i, end: cursor };
+        }
+        if (ch === "@") {
+            const prev = i > 0 ? text[i - 1] : undefined;
+            if (prev !== undefined && prev !== " " && prev !== "\n" && prev !== "\t") return null;
+            return { kind: "mention", query: text.slice(i + 1, cursor), start: i, end: cursor };
         }
         if (ch === "/") {
             const prev = i > 0 ? text[i - 1] : undefined;
@@ -796,6 +939,7 @@ function ChatInputComponent({
     const autocompleteStyles = useThemedStyles(createAutocompleteStyles);
     const queuedDraftStyles = useThemedStyles(createQueuedDraftStyles);
     const contextStyles = useThemedStyles(createContextStyles);
+    const inputRef = React.useRef<TextInput>(null);
     const [input, setInput] = useState("");
     const [isFocused, setIsFocused] = useState(false);
     const [images, setImages] = useState<Array<ImageAttachment>>([]);
@@ -803,9 +947,19 @@ function ChatInputComponent({
     const [showEffortPicker, setShowEffortPicker] = useState(false);
     const [showSendMenu, setShowSendMenu] = useState(false);
     const [showContextWindowSheet, setShowContextWindowSheet] = useState(false);
-    const [selection, setSelection] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+    const [selection, setSelection] = useState<InputSelection>({ start: 0, end: 0 });
     const [workspaceFileMatches, setWorkspaceFileMatches] = useState<ReadonlyArray<string>>([]);
+    const [voiceState, setVoiceState] = useState<"idle" | "starting" | "recording">("idle");
     const lastSendSignatureRef = React.useRef<{ signature: string; sentAt: number } | null>(null);
+    const inputRefState = React.useRef("");
+    const selectionRef = React.useRef<InputSelection>({ start: 0, end: 0 });
+    const voiceStartPendingRef = React.useRef(false);
+    const voiceCaptureRef = React.useRef<VoiceCaptureState>({
+        active: false,
+        baseInput: "",
+        baseSelection: { start: 0, end: 0 },
+        transcript: "",
+    });
     const workspaceTree = useWorkspaceStore((s) => s.tree);
     const activeSessionId = useSessionStore((s) => s.activeSessionId);
     const connectionState = useConnectionStore((s) => s.state);
@@ -826,6 +980,15 @@ function ChatInputComponent({
     );
     const currentModel = models.find((m) => m.id === selectedModel);
     const effortInfo = deriveAvailableReasoningEfforts(currentModel);
+    const voiceAvailable = useMemo(() => ExpoSpeechRecognitionModule.isRecognitionAvailable(), []);
+
+    useEffect(() => {
+        inputRefState.current = input;
+    }, [input]);
+
+    useEffect(() => {
+        selectionRef.current = selection;
+    }, [selection]);
 
     const handleSend = useCallback(
         (mode: SendMode) => {
@@ -886,13 +1049,149 @@ function ChatInputComponent({
         setShowSendMenu((previous) => !previous);
     }, []);
 
-    // Autocomplete tokeni: @file veya /command.
+    const applyComposerInsert = useCallback((request: { text: string; mode: "replace-selection" | "append" }) => {
+        const currentInput = inputRefState.current;
+        const currentSelection = selectionRef.current;
+        const nextState = request.mode === "append"
+            ? appendComposerText(currentInput, request.text)
+            : replaceSelectionText(currentInput, currentSelection, request.text);
+        setInput(nextState.text);
+        setSelection(nextState.selection);
+        InteractionManager.runAfterInteractions(() => {
+            inputRef.current?.focus();
+        });
+        return true;
+    }, []);
+
+    useEffect(() => {
+        return subscribeComposerInsert(applyComposerInsert);
+    }, [applyComposerInsert]);
+
+    const applyVoiceTranscript = useCallback((transcript: string) => {
+        const capture = voiceCaptureRef.current;
+        if (!capture.active) {
+            return;
+        }
+
+        voiceCaptureRef.current = { ...capture, transcript };
+        const nextState = replaceSelectionText(capture.baseInput, capture.baseSelection, transcript);
+        setInput(nextState.text);
+        setSelection(nextState.selection);
+    }, []);
+
+    const resetVoiceCapture = useCallback(() => {
+        voiceStartPendingRef.current = false;
+        voiceCaptureRef.current = {
+            active: false,
+            baseInput: "",
+            baseSelection: { start: 0, end: 0 },
+            transcript: "",
+        };
+        setVoiceState("idle");
+    }, []);
+
+    useSpeechRecognitionEvent("start", () => {
+        if (!voiceCaptureRef.current.active) {
+            return;
+        }
+
+        voiceStartPendingRef.current = false;
+        setVoiceState("recording");
+    });
+
+    useSpeechRecognitionEvent("result", (event) => {
+        const transcript = event.results.map((result) => result.transcript).join(" ").trim();
+        applyVoiceTranscript(transcript);
+    });
+
+    useSpeechRecognitionEvent("end", () => {
+        resetVoiceCapture();
+    });
+
+    useSpeechRecognitionEvent("error", (event) => {
+        const wasActive = voiceCaptureRef.current.active;
+        resetVoiceCapture();
+        if (wasActive && event.error !== "aborted") {
+            Alert.alert("Voice input stopped", event.message);
+        }
+    });
+
+    const startVoiceInput = useCallback(async () => {
+        if (disabled || voiceState !== "idle" || voiceStartPendingRef.current) {
+            return;
+        }
+
+        if (!voiceAvailable) {
+            Alert.alert("Voice input unavailable", "Speech recognition is not available on this device.");
+            return;
+        }
+
+        voiceStartPendingRef.current = true;
+        setVoiceState("starting");
+
+        try {
+            const permission = await ExpoSpeechRecognitionModule.requestPermissionsAsync();
+            if (!permission.granted) {
+                voiceStartPendingRef.current = false;
+                setVoiceState("idle");
+                Alert.alert(
+                    "Microphone access required",
+                    "Enable microphone and speech recognition to dictate prompts."
+                );
+                return;
+            }
+
+            voiceCaptureRef.current = {
+                active: true,
+                baseInput: inputRefState.current,
+                baseSelection: selectionRef.current,
+                transcript: "",
+            };
+            inputRef.current?.focus();
+            ExpoSpeechRecognitionModule.start({
+                lang: resolveSpeechLocale(),
+                interimResults: true,
+                maxAlternatives: 1,
+                continuous: false,
+                addsPunctuation: true,
+                contextualStrings: [...VOICE_CONTEXTUAL_STRINGS],
+            });
+        } catch (error) {
+            resetVoiceCapture();
+            const message = error instanceof Error ? error.message : String(error);
+            Alert.alert("Could not start voice input", message);
+        }
+    }, [disabled, resetVoiceCapture, voiceAvailable, voiceState]);
+
+    const stopVoiceInput = useCallback(() => {
+        if (voiceState === "idle" && !voiceStartPendingRef.current) {
+            return;
+        }
+
+        try {
+            ExpoSpeechRecognitionModule.abort();
+            resetVoiceCapture();
+        } catch (error) {
+            resetVoiceCapture();
+            const message = error instanceof Error ? error.message : String(error);
+            Alert.alert("Could not stop voice input", message);
+        }
+    }, [resetVoiceCapture, voiceState]);
+
+    const handleVoiceToggle = useCallback(() => {
+        if (voiceState === "idle") {
+            void startVoiceInput();
+            return;
+        }
+
+        stopVoiceInput();
+    }, [startVoiceInput, stopVoiceInput, voiceState]);
+
     const activeToken = useMemo<AutocompleteToken>(
         () => detectAutocompleteToken(input, selection.start),
         [input, selection.start]
     );
 
-    // File path list from workspace tree for @files autocomplete.
     const filePaths = useMemo<ReadonlyArray<string>>(() => {
         const out: Array<string> = [];
         collectFilePaths(workspaceTree, out);
@@ -900,7 +1199,11 @@ function ChatInputComponent({
     }, [workspaceTree]);
 
     useEffect(() => {
-        if (activeToken?.kind !== "file") {
+        if (!shouldSearchWorkspaceFiles(activeToken)) {
+            setWorkspaceFileMatches([]);
+            return;
+        }
+        if (activeToken === null) {
             setWorkspaceFileMatches([]);
             return;
         }
@@ -911,10 +1214,14 @@ function ChatInputComponent({
             return;
         }
         void requestWorkspaceTree(activeSessionId, undefined, 5);
-    }, [activeToken?.kind, activeSessionId, connectionState, workspaceTree, filePaths.length]);
+    }, [activeSessionId, activeToken, connectionState, filePaths.length, workspaceTree]);
 
     useEffect(() => {
-        if (activeToken?.kind !== "file") {
+        if (!shouldSearchWorkspaceFiles(activeToken)) {
+            setWorkspaceFileMatches([]);
+            return;
+        }
+        if (activeToken === null) {
             setWorkspaceFileMatches([]);
             return;
         }
@@ -947,22 +1254,61 @@ function ChatInputComponent({
         };
     }, [activeSessionId, activeToken, connectionState]);
 
-    // Suggestions filtered by token type (including slash + skill commands).
-    const suggestions = useMemo<ReadonlyArray<{ label: string; value: string; hint?: string }>>(() => {
-        if (activeToken === null) return [];
+    const suggestions = useMemo<ReadonlyArray<AutocompleteSuggestion>>(() => {
+        if (activeToken === null) {
+            return [];
+        }
+
         const query = activeToken.query.toLowerCase();
-        if (activeToken.kind === "file") {
-            return [...new Set([
+        if (activeToken.kind === "context") {
+            const contextMatches = CONTEXT_SUGGESTIONS.filter((item) =>
+                item.label.slice(1).toLowerCase().includes(query)
+            );
+            const fileMatches = [...new Set([
                 ...filePaths.filter((p) => pathMatchesQuery(p, query)),
                 ...workspaceFileMatches,
             ])]
                 .slice(0, 8)
-                .map((p) => ({ label: p, value: `@${p} ` }));
+                .map((p) => ({
+                    label: `#${p}`,
+                    value: `#${p} `,
+                    hint: "Reference this file in the next prompt",
+                    category: "File",
+                    icon: <FileTextIcon size={14} color={theme.colors.textTertiary} />,
+                }));
+            return [...contextMatches, ...fileMatches].slice(0, 10);
         }
-        // Slash mode: static commands first, then skill-derived commands.
+
+        if (activeToken.kind === "mention") {
+            const participantMatches = PARTICIPANT_SUGGESTIONS.filter((item) =>
+                item.label.slice(1).toLowerCase().includes(query)
+            );
+            const legacyFileMatches = !isLegacyFileMentionQuery(activeToken.query)
+                ? []
+                : [...new Set([
+                    ...filePaths.filter((p) => pathMatchesQuery(p, query)),
+                    ...workspaceFileMatches,
+                ])]
+                    .slice(0, 8)
+                    .map((p) => ({
+                        label: `@${p}`,
+                        value: `@${p} `,
+                        hint: "Legacy file reference",
+                        category: "File",
+                        icon: <FileTextIcon size={14} color={theme.colors.textTertiary} />,
+                    }));
+            return [...participantMatches, ...legacyFileMatches].slice(0, 10);
+        }
+
         const staticMatches = SLASH_COMMANDS
             .filter((c) => c.command.slice(1).toLowerCase().startsWith(query))
-            .map((c) => ({ label: c.command, value: `${c.command} `, hint: c.description }));
+            .map((c) => ({
+                label: c.command,
+                value: `${c.command} `,
+                hint: c.description,
+                category: "Command",
+                icon: <SlidersIcon size={13} color={theme.colors.textTertiary} />,
+            }));
 
         const skillMatches = skills
             .filter((s) => s.name.toLowerCase().startsWith(query))
@@ -970,10 +1316,12 @@ function ChatInputComponent({
                 label: `/${s.name}`,
                 value: `/${s.name} `,
                 hint: s.description.length > 0 ? s.description : "Agent skill",
+                category: "Skill",
+                icon: <AgentIcon size={13} color={theme.colors.textTertiary} />,
             }));
 
         return [...staticMatches, ...skillMatches].slice(0, 10);
-    }, [activeToken, filePaths, skills, workspaceFileMatches]);
+    }, [activeToken, filePaths, skills, theme.colors.textTertiary, workspaceFileMatches]);
 
     // Apply selected suggestion: replace token and move cursor to end.
     const applySuggestion = useCallback((value: string) => {
@@ -1107,12 +1455,20 @@ function ChatInputComponent({
             setShowSendMenu(false);
             setShowContextWindowSheet(false);
             setIsFocused(false);
+            if (voiceCaptureRef.current.active) {
+                ExpoSpeechRecognitionModule.abort();
+                resetVoiceCapture();
+            }
         });
 
         return () => {
             subscription.remove();
+            if (voiceCaptureRef.current.active) {
+                ExpoSpeechRecognitionModule.abort();
+                resetVoiceCapture();
+            }
         };
-    }, []);
+    }, [resetVoiceCapture]);
 
     const canSend = input.trim().length > 0 && !disabled;
 
@@ -1288,9 +1644,17 @@ function ChatInputComponent({
                                 ]}
                                 onPress={() => applySuggestion(s.value)}
                             >
-                                <Text style={autocompleteStyles.label} numberOfLines={1}>{s.label}</Text>
-                                {s.hint !== undefined && (
-                                    <Text style={autocompleteStyles.hint} numberOfLines={1}>{s.hint}</Text>
+                                <View style={autocompleteStyles.itemIcon}>
+                                    {s.icon}
+                                </View>
+                                <View style={autocompleteStyles.itemBody}>
+                                    <Text style={autocompleteStyles.label} numberOfLines={1}>{s.label}</Text>
+                                    {s.hint !== undefined && (
+                                        <Text style={autocompleteStyles.hint} numberOfLines={1}>{s.hint}</Text>
+                                    )}
+                                </View>
+                                {s.category !== undefined && (
+                                    <Text style={autocompleteStyles.category} numberOfLines={1}>{s.category}</Text>
                                 )}
                             </Pressable>
                         ))}
@@ -1309,12 +1673,13 @@ function ChatInputComponent({
                     />
                 )}
                 <TextInput
+                    ref={inputRef}
                     style={styles.textInput}
                     value={input}
                     onChangeText={setInput}
                     selection={selection}
                     onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
-                    placeholder="Message, @files, /commands"
+                    placeholder="Message, #files, @participants, /commands"
                     placeholderTextColor={theme.colors.textTertiary}
                     multiline
                     maxLength={10000}
@@ -1340,6 +1705,23 @@ function ChatInputComponent({
                         accessibilityLabel="Attach image"
                     >
                         <CirclePlusIcon size={16} color={theme.colors.textSecondary} />
+                    </Pressable>
+
+                    <Pressable
+                        style={[
+                            toolbarStyles.toolBtn,
+                            voiceState !== "idle" && toolbarStyles.toolBtnRecording,
+                            !voiceAvailable && toolbarStyles.toolBtnDimmed,
+                        ]}
+                        onPress={handleVoiceToggle}
+                        disabled={disabled || !voiceAvailable}
+                        hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
+                        accessibilityLabel={voiceState === "idle" ? "Start voice input" : "Stop voice input"}
+                    >
+                        <MicrophoneIcon
+                            size={15}
+                            color={voiceState !== "idle" ? theme.colors.textOnAccent : theme.colors.textSecondary}
+                        />
                     </Pressable>
 
                     {/* Model selector pill */}

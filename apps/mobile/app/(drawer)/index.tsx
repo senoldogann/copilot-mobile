@@ -951,7 +951,7 @@ export default function ChatScreen() {
 
             if (totalAttachmentChars > MAX_TOTAL_ATTACHMENT_BASE64_CHARS) {
                 useConnectionStore.getState().setError(
-                    "Seçilen görseller bridge aktarım limitini aşıyor. Daha küçük veya daha az görsel seçin."
+                    "Selected images exceed the bridge transfer limit. Choose fewer images or smaller files."
                 );
                 return;
             }
