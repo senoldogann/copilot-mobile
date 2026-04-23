@@ -401,10 +401,10 @@ function rememberWorkspaceDirectory(workspaceRoot: string | undefined): void {
 
 function requestWorkspaceSnapshot(sessionId: string): void {
     void import("./bridge").then(({
-        requestWorkspaceGitSummary,
+        refreshWorkspaceGitSummary,
         requestWorkspaceTree,
     }) => Promise.all([
-        requestWorkspaceGitSummary(sessionId, 10),
+        refreshWorkspaceGitSummary(sessionId, 10),
         requestWorkspaceTree(sessionId, undefined, 2, 0, 200),
     ]));
 }
@@ -1220,8 +1220,8 @@ export function handleServerMessage(message: ServerMessage): void {
             const workspaceStore = useWorkspaceStore.getState();
             workspaceStore.setWorkspaceBranchSwitchResult(message.payload);
             if (message.payload.success) {
-                void import("./bridge").then(({ requestWorkspaceGitSummary }) =>
-                    requestWorkspaceGitSummary(message.payload.sessionId, 10)
+                void import("./bridge").then(({ refreshWorkspaceGitSummary }) =>
+                    refreshWorkspaceGitSummary(message.payload.sessionId, 10)
                 );
             }
             break;

@@ -76,10 +76,52 @@ import {
     isSubagentToolName,
 } from "../../src/utils/tool-introspection";
 
+const CHAT_LIST_DRAW_DISTANCE = 320;
+
 function basename(path: string): string {
     const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
     const segments = normalized.split("/").filter(Boolean);
     return segments[segments.length - 1] ?? path;
+}
+
+function isTaskCompleteTool(toolName: string): boolean {
+    return toolName.trim().toLowerCase() === "task_complete";
+}
+
+function getChatItemType(item: ChatItem): string {
+    if (item.type === "assistant") {
+        return item.isStreaming ? "assistant_streaming" : "assistant";
+    }
+
+    if (item.type === "thinking") {
+        return item.isStreaming ? "thinking_streaming" : "thinking";
+    }
+
+    if (item.type !== "tool") {
+        return item.type;
+    }
+
+    if (isTaskCompleteTool(item.toolName)) {
+        return "tool_task_complete";
+    }
+
+    if (item.status === "running") {
+        return "tool_running";
+    }
+
+    if (item.status === "failed") {
+        return "tool_failed";
+    }
+
+    if (item.status === "no_results") {
+        return "tool_no_results";
+    }
+
+    if ((item.progressMessages?.length ?? 0) > 0 || item.partialOutput !== undefined) {
+        return "tool_detailed";
+    }
+
+    return "tool";
 }
 
 function buildSubagentRuns(
@@ -473,16 +515,6 @@ const ChatHeader = React.memo(function ChatHeader() {
                         style={headerStyles.gitMenuCard}
                         onPress={(e) => e.stopPropagation()}
                     >
-                        <View style={headerStyles.gitMenuHeader}>
-                            <View style={headerStyles.gitMenuTitleRow}>
-                                <GitHubIcon size={15} color={theme.colors.textSecondary} />
-                                <Text style={headerStyles.gitMenuTitle}>Repository actions</Text>
-                            </View>
-                            <Text style={headerStyles.gitMenuSubtitle} numberOfLines={1}>
-                                {repoName} · {branchName}
-                            </Text>
-                        </View>
-
                         <Pressable
                             style={({ pressed }) => [
                                 headerStyles.menuItem,
@@ -1200,7 +1232,7 @@ export default function ChatScreen() {
                                     data={chatItems as ChatItem[]}
                                     renderItem={renderItem}
                                     keyExtractor={keyExtractor}
-                                    getItemType={(item) => item.type}
+                                    getItemType={getChatItemType}
                                     style={styles.messageList}
                                     contentContainerStyle={styles.messageListContent}
                                     onScroll={handleScroll}
@@ -1210,7 +1242,7 @@ export default function ChatScreen() {
                                     keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
                                     keyboardShouldPersistTaps="always"
                                     ListFooterComponent={activityFooter}
-                                    drawDistance={600}
+                                    drawDistance={CHAT_LIST_DRAW_DISTANCE}
                                 />
                                 {showScrollToBottom && (
                                     <Pressable

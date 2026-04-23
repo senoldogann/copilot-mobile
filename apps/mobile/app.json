@@ -9,7 +9,9 @@
     "userInterfaceStyle": "automatic",
     "scheme": "code-companion",
     "splash": {
-      "backgroundColor": "#1e1e1e"
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#161918"
     },
     "ios": {
       "supportsTablet": true,
@@ -28,7 +30,8 @@
     },
     "android": {
       "adaptiveIcon": {
-        "backgroundColor": "#1e1e1e"
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#161918"
       },
       "package": "dev.senoldogan.codecompanion",
       "permissions": [
@@ -60,7 +63,8 @@
       [
         "expo-notifications",
         {
-          "color": "#161918",
+          "icon": "./assets/notification-icon.png",
+          "color": "#74D6B3",
           "enableBackgroundRemoteNotifications": true
         }
       ]

@@ -12,6 +12,7 @@ import {
     commitWorkspace,
     pullWorkspace,
     pushWorkspace,
+    refreshWorkspaceGitSummary,
     requestWorkspaceGitSummary,
     requestWorkspaceTree,
     requestWorkspaceDiff,
@@ -37,6 +38,7 @@ import {
     DiffIcon,
     ListTreeIcon,
 } from "./ProviderIcon";
+import { formatRelativeTimestamp } from "../view-models/provider-metadata";
 
 type Props = {
     visible: boolean;
@@ -56,11 +58,64 @@ function dirname(path: string): string | null {
     return normalized.slice(0, idx);
 }
 
+function formatCommitTimestamp(timestamp: number, now: number): string {
+    return formatRelativeTimestamp(timestamp, now).replace(" ago", "");
+}
+
 type ViewMode = "paragraph" | "diff" | "tree";
 const INITIAL_TREE_DEPTH = 2;
 const DIRECTORY_TREE_DEPTH = 2;
 const TREE_PAGE_SIZE = 200;
 const WORKSPACE_LOAD_TIMEOUT_MS = 12_000;
+const WORKSPACE_VIEWER_CACHE_TTL_MS = 30_000;
+
+type InlineLoadState =
+    | { status: "loading" }
+    | { status: "ready"; body: string; truncated: boolean }
+    | { status: "error"; message: string };
+
+type ViewerCacheEntry = Extract<InlineLoadState, { status: "ready" }> & {
+    expiresAt: number;
+};
+
+const workspaceViewerCache = new Map<string, ViewerCacheEntry>();
+
+function createViewerCacheKey(sessionId: string, mode: "file" | "diff", path: string): string {
+    return `${sessionId}:${mode}:${path}`;
+}
+
+function readViewerCache(key: string): Extract<InlineLoadState, { status: "ready" }> | null {
+    const entry = workspaceViewerCache.get(key);
+    if (entry === undefined) {
+        return null;
+    }
+
+    if (entry.expiresAt <= Date.now()) {
+        workspaceViewerCache.delete(key);
+        return null;
+    }
+
+    return {
+        status: "ready",
+        body: entry.body,
+        truncated: entry.truncated,
+    };
+}
+
+function writeViewerCache(key: string, payload: Extract<InlineLoadState, { status: "ready" }>): void {
+    workspaceViewerCache.set(key, {
+        ...payload,
+        expiresAt: Date.now() + WORKSPACE_VIEWER_CACHE_TTL_MS,
+    });
+}
+
+function clearViewerCacheForSession(sessionId: string): void {
+    for (const key of workspaceViewerCache.keys()) {
+        if (key.startsWith(`${sessionId}:`)) {
+            workspaceViewerCache.delete(key);
+        }
+    }
+}
 
 function WorkspacePanelComponent({ visible, onClose }: Props) {
     const theme = useAppTheme();
@@ -107,20 +162,31 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const [changesFilter, setChangesFilter] = useState<"uncommitted" | "recent">("uncommitted");
     const [changesFilterMenuOpen, setChangesFilterMenuOpen] = useState<boolean>(false);
     const [viewer, setViewer] = useState<{ path: string; mode: "file" | "diff" } | null>(null);
-    // Inline viewer load state — avoids nested Modal problem on iOS
-    type InlineLoadState =
-        | { status: "loading" }
-        | { status: "ready"; body: string; truncated: boolean }
-        | { status: "error"; message: string };
     const [inlineLoad, setInlineLoad] = useState<InlineLoadState>({ status: "loading" });
     const workspaceLoadingSignature = useMemo(
         () => Object.keys(workspace.loadingTreePaths).sort().join("|"),
         [workspace.loadingTreePaths],
     );
+    const workspaceContentSignature = useMemo(
+        () => JSON.stringify({
+            branch: workspace.branch,
+            uncommitted: workspace.uncommittedChanges.map((change) => `${change.status}:${change.path}`),
+            commits: workspace.recentCommits.map((commit) => `${commit.hash}:${commit.committedAt}`),
+        }),
+        [workspace.branch, workspace.recentCommits, workspace.uncommittedChanges],
+    );
 
     // Load diff/file whenever viewer changes
     useEffect(() => {
         if (viewer === null || activeSessionId === null) return;
+
+        const cacheKey = createViewerCacheKey(activeSessionId, viewer.mode, viewer.path);
+        const cached = readViewerCache(cacheKey);
+        if (cached !== null) {
+            setInlineLoad(cached);
+            return;
+        }
+
         setInlineLoad({ status: "loading" });
 
         const timeout = setTimeout(() => {
@@ -141,11 +207,13 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 if (payload.error !== undefined) {
                     setInlineLoad({ status: "error", message: payload.error });
                 } else {
-                    setInlineLoad({
+                    const nextState: Extract<InlineLoadState, { status: "ready" }> = {
                         status: "ready",
                         body: payload.diff.length > 0 ? payload.diff : "(No changes)",
                         truncated: false,
-                    });
+                    };
+                    writeViewerCache(cacheKey, nextState);
+                    setInlineLoad(nextState);
                 }
             });
             void requestWorkspaceDiff(activeSessionId, viewer.path);
@@ -157,11 +225,13 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 if (payload.error !== undefined) {
                     setInlineLoad({ status: "error", message: payload.error });
                 } else {
-                    setInlineLoad({
+                    const nextState: Extract<InlineLoadState, { status: "ready" }> = {
                         status: "ready",
                         body: payload.content,
                         truncated: payload.truncated,
-                    });
+                    };
+                    writeViewerCache(cacheKey, nextState);
+                    setInlineLoad(nextState);
                 }
             });
             void requestWorkspaceFile(activeSessionId, viewer.path);
@@ -198,6 +268,14 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         void requestWorkspaceTree(activeSessionId, undefined, INITIAL_TREE_DEPTH, 0, TREE_PAGE_SIZE);
         void requestWorkspaceGitSummary(activeSessionId, 10);
     }, [visible, activeSessionId, isConnected]);
+
+    useEffect(() => {
+        if (activeSessionId === null) {
+            return;
+        }
+
+        clearViewerCacheForSession(activeSessionId);
+    }, [activeSessionId, workspaceContentSignature]);
 
     useEffect(() => {
         if (!visible || activeSessionId === null || !isConnected) {
@@ -252,8 +330,9 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 .setError("Reconnect to the bridge to refresh workspace changes and files.");
             return;
         }
+        clearViewerCacheForSession(activeSessionId);
         void requestWorkspaceTree(activeSessionId, undefined, INITIAL_TREE_DEPTH, 0, TREE_PAGE_SIZE);
-        void requestWorkspaceGitSummary(activeSessionId, 10);
+        void refreshWorkspaceGitSummary(activeSessionId, 10);
     }, [activeSessionId, isConnected]);
 
     const handlePull = useCallback(() => {
@@ -362,6 +441,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const segmentTitleColor = theme.resolvedScheme === "light"
         ? theme.colors.textAssistant
         : theme.colors.textPrimary;
+    const commitListNow = Date.now();
 
     const renderChangeRow = useCallback((change: (typeof workspace.uncommittedChanges)[number]) => {
         const name = basename(change.path);
@@ -747,21 +827,48 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     <EmptyState text="No recent commits." />
                 ) : (
                     <View style={styles.changesList}>
-                        {workspace.recentCommits.map((commit) => (
-                            <View key={commit.hash} style={styles.changeRow}>
-                                <View style={styles.changeIconWrap}>
-                                    <GitCommitIcon size={14} color={theme.colors.textSecondary} />
+                        {workspace.recentCommits.map((commit) => {
+                            const visibleFiles = commit.files.slice(0, 3);
+                            const hiddenFileCount = Math.max(0, commit.files.length - visibleFiles.length);
+
+                            return (
+                                <View key={commit.hash} style={styles.commitRow}>
+                                    <View style={styles.commitIconWrap}>
+                                        <GitCommitIcon size={15} color={theme.colors.textSecondary} />
+                                    </View>
+                                    <View style={styles.commitBody}>
+                                        <View style={styles.commitHeaderRow}>
+                                            <Text style={styles.commitSubject} numberOfLines={2}>
+                                                {commit.subject}
+                                            </Text>
+                                            <Text style={styles.commitTime} numberOfLines={1}>
+                                                {formatCommitTimestamp(commit.committedAt, commitListNow)}
+                                            </Text>
+                                        </View>
+                                        <Text style={styles.commitMeta} numberOfLines={1}>
+                                            {commit.shortHash} · {commit.author}
+                                        </Text>
+                                        {visibleFiles.length > 0 && (
+                                            <View style={styles.commitFiles}>
+                                                {visibleFiles.map((filePath) => (
+                                                    <View key={`${commit.hash}:${filePath}`} style={styles.commitFileRow}>
+                                                        <FileTypeIcon name={filePath} size={14} />
+                                                        <Text style={styles.commitFileText} numberOfLines={1}>
+                                                            {filePath}
+                                                        </Text>
+                                                    </View>
+                                                ))}
+                                                {hiddenFileCount > 0 && (
+                                                    <Text style={styles.commitMoreFiles}>
+                                                        +{hiddenFileCount} more file{hiddenFileCount === 1 ? "" : "s"}
+                                                    </Text>
+                                                )}
+                                            </View>
+                                        )}
+                                    </View>
                                 </View>
-                                <View style={styles.changeText}>
-                                    <Text style={styles.changeName} numberOfLines={1}>
-                                        {commit.subject}
-                                    </Text>
-                                    <Text style={styles.changePath} numberOfLines={1}>
-                                        {commit.shortHash} · {commit.author}
-                                    </Text>
-                                </View>
-                            </View>
-                        ))}
+                            );
+                        })}
                     </View>
                 )
             ) : workspace.uncommittedChanges.length === 0 ? (
@@ -1448,6 +1555,65 @@ return StyleSheet.create({
         fontSize: theme.fontSize.sm,
         color: emphasizedLabelColor,
         fontWeight: "600",
+    },
+    commitRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 10,
+        paddingVertical: 10,
+        paddingHorizontal: 4,
+    },
+    commitIconWrap: {
+        width: 22,
+        alignItems: "center",
+        justifyContent: "flex-start",
+        paddingTop: 2,
+    },
+    commitBody: {
+        flex: 1,
+        gap: 4,
+    },
+    commitHeaderRow: {
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: 8,
+    },
+    commitSubject: {
+        flex: 1,
+        fontSize: theme.fontSize.sm,
+        color: emphasizedLabelColor,
+        fontWeight: "600",
+        lineHeight: 19,
+    },
+    commitTime: {
+        flexShrink: 0,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
+        fontWeight: "600",
+    },
+    commitMeta: {
+        fontSize: theme.fontSize.xs,
+        color: supportingLabelColor,
+    },
+    commitFiles: {
+        gap: 4,
+        paddingTop: 2,
+    },
+    commitFileRow: {
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 6,
+    },
+    commitFileText: {
+        flex: 1,
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textSecondary,
+    },
+    commitMoreFiles: {
+        fontSize: theme.fontSize.xs,
+        color: theme.colors.textTertiary,
+        fontWeight: "600",
+        paddingLeft: 20,
     },
     changePath: { fontSize: theme.fontSize.xs, color: supportingLabelColor },
     changeRight: { flexDirection: "row", alignItems: "center", gap: 6, flexShrink: 0 },

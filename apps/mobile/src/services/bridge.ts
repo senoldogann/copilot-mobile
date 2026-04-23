@@ -63,6 +63,8 @@ const DELETE_SESSION_MAX_TIMEOUT_MS = 20_000;
 const DELETE_SESSION_PER_ITEM_TIMEOUT_MS = 300;
 const DELETE_SESSION_REFRESH_INTERVAL_MS = 300;
 const DELETE_SESSION_SEND_DELAY_MS = 40;
+const WORKSPACE_GIT_SUMMARY_THROTTLE_MS = 8_000;
+const workspaceGitSummaryRequestTimestamps = new Map<string, number>();
 
 export type RemoteDeleteSessionsResult = {
     deletedSessionIds: ReadonlyArray<string>;
@@ -654,6 +656,31 @@ export async function requestWorkspaceGitSummary(
     sessionId: string,
     commitLimit?: number
 ): Promise<void> {
+    const lastRequestedAt = workspaceGitSummaryRequestTimestamps.get(sessionId);
+    const now = Date.now();
+    if (
+        lastRequestedAt !== undefined
+        && now - lastRequestedAt < WORKSPACE_GIT_SUMMARY_THROTTLE_MS
+    ) {
+        return;
+    }
+
+    workspaceGitSummaryRequestTimestamps.set(sessionId, now);
+    await sendWorkspaceGitSummaryRequest(sessionId, commitLimit);
+}
+
+export async function refreshWorkspaceGitSummary(
+    sessionId: string,
+    commitLimit?: number
+): Promise<void> {
+    workspaceGitSummaryRequestTimestamps.delete(sessionId);
+    await sendWorkspaceGitSummaryRequest(sessionId, commitLimit);
+}
+
+async function sendWorkspaceGitSummaryRequest(
+    sessionId: string,
+    commitLimit?: number
+): Promise<void> {
     const c = getClient();
     const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setGitLoading(true);
@@ -663,6 +690,7 @@ export async function requestWorkspaceGitSummary(
             ...(commitLimit !== undefined ? { commitLimit } : {}),
         });
     } catch (error) {
+        workspaceGitSummaryRequestTimestamps.delete(sessionId);
         workspaceStore.setGitLoading(false);
         workspaceStore.setError(
             `Failed to request workspace changes: ${error instanceof Error ? error.message : String(error)}`

@@ -29,15 +29,19 @@
         <array>
           <string>code-companion</string>
           <string>dev.senoldogan.codecompanion</string>
-          <string>copilot-mobile</string>
-          <string>dev.senoldogan.copilot-mobile</string>
+        </array>
+      </dict>
+      <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>exp+code-companion</string>
         </array>
       </dict>
     </array>
     <key>CFBundleVersion</key>
     <string>1</string>
     <key>LSMinimumSystemVersion</key>
-    <string>15.1</string>
+    <string>12.0</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
     <key>NSAppTransportSecurity</key>
@@ -51,11 +55,13 @@
       <string>_react-native._tcp</string>
     </array>
     <key>NSCameraUsageDescription</key>
-    <string>Camera permission is required for QR code scanning</string>
+    <string>Camera access is required to scan the QR code shown by your Mac companion</string>
     <key>NSFaceIDUsageDescription</key>
-    <string>Allow Code Companion to use Face ID when biometric authentication is available.</string>
+    <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
     <key>NSLocalNetworkUsageDescription</key>
-    <string>Local network access helps your iPhone connect to your desktop companion during setup</string>
+    <string>Local network access helps your iPhone discover and connect to your Mac companion during setup</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Photo library access is required to attach images to your chat</string>
     <key>NSUserActivityTypes</key>
@@ -64,6 +70,11 @@
     </array>
     <key>RCTNewArchEnabled</key>
     <true/>
+    <key>UIBackgroundModes</key>
+    <array>
+      <string>fetch</string>
+      <string>remote-notification</string>
+    </array>
     <key>UILaunchStoryboardName</key>
     <string>SplashScreen</string>
     <key>UIRequiredDeviceCapabilities</key>
@@ -72,10 +83,6 @@
     </array>
     <key>UIRequiresFullScreen</key>
     <false/>
-    <key>UIBackgroundModes</key>
-    <array>
-      <string>remote-notification</string>
-    </array>
     <key>UIStatusBarStyle</key>
     <string>UIStatusBarStyleDefault</string>
     <key>UISupportedInterfaceOrientations</key>

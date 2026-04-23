@@ -2,7 +2,7 @@
 // Inline SVGs so no raster assets are needed.
 
 import React from "react";
-import Svg, { Path, Circle, G } from "react-native-svg";
+import Svg, { Path, Circle, G, Rect } from "react-native-svg";
 
 export type Provider = "copilot" | "openai" | "anthropic" | "google" | "xai" | "meta" | "mistral" | "generic";
 
@@ -180,6 +180,71 @@ export function ArrowUpIcon({ size = 16, color = "#ffffff" }: { size?: number; c
                 strokeLinecap="round"
                 strokeLinejoin="round"
             />
+        </Svg>
+    );
+}
+
+export function ArrowLeftIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M19 12H5m0 0 6-6m-6 6 6 6"
+                stroke={color}
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </Svg>
+    );
+}
+
+export function ArrowRightIcon({ size = 16, color = "#ffffff" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <Path
+                d="M5 12h14m0 0-6-6m6 6-6 6"
+                stroke={color}
+                strokeWidth={2.2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+            />
+        </Svg>
+    );
+}
+
+export function DesktopIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Rect x="3" y="4" width="18" height="12" rx="2.5" />
+                <Path d="M9 20h6" />
+                <Path d="M12 16v4" />
+            </G>
+        </Svg>
+    );
+}
+
+export function ScanIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M7 3H5a2 2 0 0 0-2 2v2" />
+                <Path d="M17 3h2a2 2 0 0 1 2 2v2" />
+                <Path d="M7 21H5a2 2 0 0 1-2-2v-2" />
+                <Path d="M17 21h2a2 2 0 0 0 2-2v-2" />
+                <Path d="M8 8h1.5v8H8zM11.25 8h4.5M11.25 12h4.5M11.25 16h4.5" />
+            </G>
+        </Svg>
+    );
+}
+
+export function BellIcon({ size = 16, color = "#a0a3a2" }: { size?: number; color?: string }) {
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+            <G stroke={color} strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round" fill="none">
+                <Path d="M6 9a6 6 0 0 1 12 0v4l2 3H4l2-3V9Z" />
+                <Path d="M10 19a2 2 0 0 0 4 0" />
+            </G>
         </Svg>
     );
 }

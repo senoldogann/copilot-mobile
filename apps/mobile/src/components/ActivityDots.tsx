@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from "react";
 import { View, Text, Animated, StyleSheet } from "react-native";
 import { useThemedStyles, type AppTheme } from "../theme/theme-context";
+import { useAppIsActive } from "../services/app-visibility";
 
 type Props = {
     active: boolean;
@@ -37,7 +38,7 @@ function Dot({ delay, active }: { delay: number; active: boolean }) {
         );
         loop.start();
         return () => loop.stop();
-    }, [anim, delay, active]);
+    }, [active, anim, delay]);
 
     const opacity = active
         ? anim.interpolate({ inputRange: [0, 1], outputRange: [0.35, 1.0] })
@@ -55,16 +56,19 @@ function Dot({ delay, active }: { delay: number; active: boolean }) {
 
 export function ActivityDots({ active, intent }: Props) {
     const styles = useThemedStyles(createStyles);
+    const appIsActive = useAppIsActive();
     if (!active) {
         return null;
     }
 
+    const shouldAnimate = active && appIsActive;
+
     return (
         <View style={styles.container}>
             <View style={styles.dotsRow}>
-                <Dot delay={0} active={active} />
-                <Dot delay={160} active={active} />
-                <Dot delay={320} active={active} />
+                <Dot delay={0} active={shouldAnimate} />
+                <Dot delay={160} active={shouldAnimate} />
+                <Dot delay={320} active={shouldAnimate} />
             </View>
             {active && intent !== undefined && intent !== null && intent.length > 0 && (
                 <Text style={styles.intent} numberOfLines={1}>{intent}</Text>

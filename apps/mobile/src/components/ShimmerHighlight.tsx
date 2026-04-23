@@ -10,6 +10,7 @@ import Animated, {
     withTiming,
 } from "react-native-reanimated";
 import Svg, { Defs, LinearGradient, Mask, Rect, Stop, Text as SvgText } from "react-native-svg";
+import { useAppIsActive } from "../services/app-visibility";
 
 const AnimatedRect = Animated.createAnimatedComponent(Rect);
 
@@ -35,10 +36,12 @@ export function SunshineText({ active, text, textStyle, style, numberOfLines }: 
     const sweepX = useSharedValue(-BAND);
     const maskId = useRef(`msk_${Math.random().toString(36).slice(2, 8)}`).current;
     const gradId = useRef(`mgr_${Math.random().toString(36).slice(2, 8)}`).current;
+    const appIsActive = useAppIsActive();
+    const shouldAnimate = active && appIsActive;
 
     useEffect(() => {
         cancelAnimation(sweepX);
-        if (!active || dims.width <= 0) {
+        if (!shouldAnimate || dims.width <= 0) {
             sweepX.value = -BAND;
             return;
         }
@@ -49,7 +52,7 @@ export function SunshineText({ active, text, textStyle, style, numberOfLines }: 
             false,
         );
         return () => cancelAnimation(sweepX);
-    }, [active, dims.width, sweepX]);
+    }, [dims.width, shouldAnimate, sweepX]);
 
     const bandProps = useAnimatedProps(() => ({ x: sweepX.value }));
 
@@ -76,7 +79,7 @@ export function SunshineText({ active, text, textStyle, style, numberOfLines }: 
 
     return (
         <View style={style} onLayout={handleLayout}>
-            {!active || dims.width === 0 || dims.height === 0 ? (
+            {!shouldAnimate || dims.width === 0 || dims.height === 0 ? (
                 <Text style={textStyle} numberOfLines={numberOfLines ?? 1}>{text}</Text>
             ) : (
                 <Svg width={dims.width} height={dims.height}>
@@ -122,10 +125,12 @@ type ShimmerTextProps = {
 export function ShimmerText({ active, style, children }: ShimmerTextProps) {
     const [width, setWidth] = useState(0);
     const offsetX = useSharedValue(-BAND);
+    const appIsActive = useAppIsActive();
+    const shouldAnimate = active && appIsActive;
 
     useEffect(() => {
         cancelAnimation(offsetX);
-        if (!active || width <= 0) {
+        if (!shouldAnimate || width <= 0) {
             offsetX.value = -BAND;
             return;
         }
@@ -136,7 +141,7 @@ export function ShimmerText({ active, style, children }: ShimmerTextProps) {
             false,
         );
         return () => cancelAnimation(offsetX);
-    }, [active, width, offsetX]);
+    }, [offsetX, shouldAnimate, width]);
 
     const animStyle = useAnimatedStyle(() => ({
         transform: [{ translateX: offsetX.value }],
@@ -148,7 +153,7 @@ export function ShimmerText({ active, style, children }: ShimmerTextProps) {
             onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
         >
             {children}
-            {active && width > 0 && (
+            {shouldAnimate && width > 0 && (
                 <Animated.View
                     pointerEvents="none"
                     style={[StyleSheet.absoluteFill, animStyle, { width: BAND }]}

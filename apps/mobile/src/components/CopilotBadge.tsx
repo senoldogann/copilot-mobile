@@ -1,15 +1,12 @@
 import React from "react";
 import { View } from "react-native";
-import { AgentIcon } from "./ProviderIcon";
-import { useAppTheme } from "../theme/theme-context";
+import { AppLogoMark } from "./AppLogo";
 
 type Props = {
     size?: number;
-    iconSize?: number;
 };
 
-export function CopilotBadge({ size = 28, iconSize = 16 }: Props) {
-    const theme = useAppTheme();
+export function CopilotBadge({ size = 28 }: Props) {
     return (
         <View
             style={[
@@ -24,7 +21,7 @@ export function CopilotBadge({ size = 28, iconSize = 16 }: Props) {
                 },
             ]}
         >
-            <AgentIcon size={iconSize} color={theme.colors.textPrimary} />
+            <AppLogoMark size={size} />
         </View>
     );
 }

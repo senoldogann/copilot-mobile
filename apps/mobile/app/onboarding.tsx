@@ -12,189 +12,178 @@ import {
 } from "react-native";
 import { useRouter } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { saveOnboardingCompleted } from "../src/services/credentials";
 import { prepareNotificationPermissions } from "../src/services/notifications";
 import { syncRemoteNotificationRegistration } from "../src/services/bridge";
-import { saveOnboardingCompleted } from "../src/services/credentials";
 import {
+    ArrowLeftIcon,
+    ArrowRightIcon,
+    BellIcon,
     CheckSquareIcon,
-    ShieldCheckIcon,
-    SparklesIcon,
+    DesktopIcon,
+    ScanIcon,
     TerminalIcon,
-    ZapIcon,
 } from "../src/components/ProviderIcon";
-import { useAppTheme, useThemedStyles, type AppTheme } from "../src/theme/theme-context";
+import { AppLogoMark } from "../src/components/AppLogo";
+import { useThemedStyles, type AppTheme } from "../src/theme/theme-context";
 
 type OnboardingSlide = {
     id: string;
     stepLabel: string;
     title: string;
     description: string;
-    bullets?: ReadonlyArray<string>;
+    points: ReadonlyArray<string>;
+    note: string;
+    icon: "desktop" | "terminal" | "scan";
     commands?: ReadonlyArray<string>;
-    footer?: string;
-    accent: "accent" | "link" | "success";
-    icon: "sparkles" | "terminal" | "zap" | "shield";
 };
 
 const slides: ReadonlyArray<OnboardingSlide> = [
     {
-        id: "welcome",
+        id: "how-it-works",
         stepLabel: "Step 1",
-        title: "Your Mac runs the session",
-        description: "This iPhone app is a remote client. The active coding session stays on your Mac.",
-        bullets: [
+        title: "Your Mac runs the coding session",
+        description: "This iPhone app is the remote companion. The real session stays on your Mac.",
+        points: [
             "Keep your Mac powered on, signed in, and online.",
-            "Your phone only mirrors the session and sends actions back.",
-            "After the first pairing, reconnect works through the relay.",
+            "Your phone mirrors activity and sends actions back.",
         ],
-        footer: "You only need to complete this guide once per install.",
-        accent: "accent",
-        icon: "sparkles",
+        note: "You only need to pair this iPhone once.",
+        icon: "desktop",
     },
     {
-        id: "mac-setup",
+        id: "install",
         stepLabel: "Step 2",
         title: "Install the Mac companion",
-        description: "Open Terminal on the Mac you want to use, then run these commands in order.",
+        description: "Run these commands on the Mac you want to control from your phone.",
+        points: [
+            "The last command starts the companion and shows the pairing QR code.",
+        ],
+        note: "Use the same Mac later when you want to resume sessions.",
+        icon: "terminal",
         commands: [
             "npm install -g code-companion",
             "code-companion login",
             "code-companion up",
         ],
-        footer: "`up` starts the companion and shows the pairing QR code.",
-        accent: "link",
-        icon: "terminal",
     },
     {
-        id: "pairing",
+        id: "pair-and-alerts",
         stepLabel: "Step 3",
-        title: "Pair this iPhone once",
-        description: "When your Mac shows the QR code, scan it here to connect this phone.",
-        bullets: [
-            "Open the scanner from the last step of this guide.",
-            "Use the QR code produced by `code-companion up`.",
-            "After pairing, the app can reconnect while your Mac stays available.",
+        title: "Scan once and optionally enable alerts",
+        description: "Scan the QR code from your Mac, then allow alerts if you want approval and completion updates in the background.",
+        points: [
+            "Use the QR code shown by `code-companion up`.",
+            "Notifications are optional and can also be enabled later in Settings.",
         ],
-        footer: "You can reopen this setup guide any time from Settings.",
-        accent: "accent",
-        icon: "shield",
-    },
-    {
-        id: "alerts",
-        stepLabel: "Step 4",
-        title: "Enable alerts if you want background updates",
-        description: "Notifications are optional, but useful when approvals are needed or a run finishes while the app is in the background.",
-        bullets: [
-            "Approval requests can reach you while the phone is locked.",
-            "Completed or failed runs can send a background alert.",
-            "You can change this later from Settings or iPhone Settings.",
-        ],
-        footer: "We ask for this permission with context here instead of on first launch.",
-        accent: "success",
-        icon: "zap",
+        note: "After pairing, reconnect works as long as your Mac companion is available.",
+        icon: "scan",
     },
 ];
 
-function getAccentColor(theme: AppTheme, accent: OnboardingSlide["accent"]): string {
-    if (accent === "link") {
-        return theme.colors.textLink;
+function renderSlideIcon(icon: OnboardingSlide["icon"], color: string): React.ReactNode {
+    if (icon === "desktop") {
+        return <DesktopIcon size={18} color={color} />;
     }
 
-    if (accent === "success") {
-        return theme.colors.success;
-    }
-
-    return theme.colors.accent;
-}
-
-function SlideIcon({ icon, color }: { icon: OnboardingSlide["icon"]; color: string }) {
     if (icon === "terminal") {
-        return <TerminalIcon size={22} color={color} />;
+        return <TerminalIcon size={18} color={color} />;
     }
 
-    if (icon === "zap") {
-        return <ZapIcon size={22} color={color} />;
-    }
-
-    if (icon === "shield") {
-        return <ShieldCheckIcon size={22} color={color} />;
-    }
-
-    return <SparklesIcon size={22} color={color} />;
+    return <ScanIcon size={18} color={color} />;
 }
 
-function SlideCard({
-    slide,
-    width,
-}: {
-    slide: OnboardingSlide;
-    width: number;
-}) {
+function SlideCard({ item, width }: { item: OnboardingSlide; width: number }) {
     const styles = useThemedStyles(createStyles);
-    const theme = useAppTheme();
-    const accentColor = getAccentColor(theme, slide.accent);
+    const accentColor = styles.stepLabel.color;
 
     return (
         <View style={[styles.slidePage, { width }]}>
-            <View style={[styles.card, { borderColor: `${accentColor}30` }]}>
-                <View style={styles.cardTop}>
-                    <View style={styles.cardHeader}>
-                        <View
-                            style={[
-                                styles.iconBadge,
-                                {
-                                    backgroundColor: `${accentColor}16`,
-                                    borderColor: `${accentColor}32`,
-                                },
-                            ]}
-                        >
-                            <SlideIcon icon={slide.icon} color={accentColor} />
-                        </View>
-                        <View style={styles.headerTextBlock}>
-                            <Text style={[styles.stepLabel, { color: accentColor }]}>
-                                {slide.stepLabel}
-                            </Text>
-                            <Text style={styles.title}>{slide.title}</Text>
-                        </View>
+            <View style={styles.slideSurface}>
+                <View style={styles.stepRow}>
+                    <View style={styles.stepIconBox}>
+                        {renderSlideIcon(item.icon, accentColor)}
                     </View>
-
-                    <Text style={styles.description}>{slide.description}</Text>
-
-                    {slide.bullets !== undefined && (
-                        <View style={styles.section}>
-                            {slide.bullets.map((bullet) => (
-                                <View key={bullet} style={styles.bulletRow}>
-                                    <View
-                                        style={[
-                                            styles.bulletDot,
-                                            { backgroundColor: accentColor },
-                                        ]}
-                                    />
-                                    <Text style={styles.bulletText}>{bullet}</Text>
-                                </View>
-                            ))}
-                        </View>
-                    )}
-
-                    {slide.commands !== undefined && (
-                        <View style={styles.commandBlock}>
-                            {slide.commands.map((command) => (
-                                <Text key={command} style={styles.commandLine}>
-                                    {command}
-                                </Text>
-                            ))}
-                        </View>
-                    )}
+                    <Text style={styles.stepLabel}>{item.stepLabel}</Text>
                 </View>
 
-                {slide.footer !== undefined && (
-                    <View style={styles.footerNote}>
-                        <CheckSquareIcon size={14} color={accentColor} />
-                        <Text style={styles.footerNoteText}>{slide.footer}</Text>
+                <View style={styles.copyBlock}>
+                    <Text style={styles.title}>{item.title}</Text>
+                    <Text style={styles.description}>{item.description}</Text>
+                </View>
+
+                <View style={styles.pointsBlock}>
+                    {item.points.map((point) => (
+                        <View key={point} style={styles.pointRow}>
+                            <View style={styles.pointDot} />
+                            <Text style={styles.pointText}>{point}</Text>
+                        </View>
+                    ))}
+                </View>
+
+                {item.commands !== undefined ? (
+                    <View style={styles.commandBlock}>
+                        {item.commands.map((command) => (
+                            <Text key={command} style={styles.commandLine}>
+                                {command}
+                            </Text>
+                        ))}
                     </View>
-                )}
+                ) : null}
+
+                <View style={styles.noteRow}>
+                    <CheckSquareIcon size={13} color={accentColor} />
+                    <Text style={styles.noteText}>{item.note}</Text>
+                </View>
             </View>
         </View>
+    );
+}
+
+function FooterButton({
+    label,
+    onPress,
+    icon,
+    variant,
+    disabled,
+}: {
+    label: string;
+    onPress: () => void;
+    icon?: React.ReactNode;
+    variant: "primary" | "secondary" | "ghost";
+    disabled?: boolean;
+}) {
+    const styles = useThemedStyles(createStyles);
+    const isPrimary = variant === "primary";
+    const isGhost = variant === "ghost";
+
+    return (
+        <Pressable
+            disabled={disabled}
+            onPress={onPress}
+            style={({ pressed }) => [
+                styles.buttonBase,
+                isPrimary && styles.primaryButton,
+                variant === "secondary" && styles.secondaryButton,
+                isGhost && styles.ghostButton,
+                disabled && styles.buttonDisabled,
+                pressed && !disabled && styles.buttonPressed,
+            ]}
+        >
+            <View style={styles.buttonContent}>
+                {icon !== undefined ? <View style={styles.buttonIcon}>{icon}</View> : null}
+                <Text
+                    style={[
+                        styles.buttonText,
+                        isPrimary && styles.primaryButtonText,
+                        isGhost && styles.ghostButtonText,
+                        disabled && styles.buttonTextDisabled,
+                    ]}
+                >
+                    {label}
+                </Text>
+            </View>
+        </Pressable>
     );
 }
 
@@ -261,25 +250,21 @@ export default function OnboardingScreen() {
         <SafeAreaView style={styles.safeArea} edges={["top", "bottom"]}>
             <View style={styles.container}>
                 <View style={styles.header}>
-                    <View style={styles.headerCopy}>
+                    <View style={styles.brandRow}>
+                        <AppLogoMark size={26} />
                         <Text style={styles.brand}>Code Companion</Text>
-                        <Text style={styles.headerTitle}>Set up your Mac companion once</Text>
-                        <Text style={styles.headerSubtitle}>
-                            Follow the steps, then scan the QR code from your Mac.
-                        </Text>
                     </View>
-                    <View style={styles.stepPill}>
-                        <Text style={styles.stepPillText}>{activeIndex + 1}/{slides.length}</Text>
-                    </View>
+                    <Text style={styles.headerTitle}>Set up your Mac companion</Text>
+                    <Text style={styles.headerSubtitle}>
+                        Three quick steps, then scan the QR code from your Mac.
+                    </Text>
                 </View>
 
                 <FlatList
                     ref={flatListRef}
                     data={slides}
                     keyExtractor={(item) => item.id}
-                    renderItem={({ item }) => (
-                        <SlideCard slide={item} width={slideWidth} />
-                    )}
+                    renderItem={({ item }) => <SlideCard item={item} width={slideWidth} />}
                     horizontal
                     pagingEnabled
                     bounces={false}
@@ -292,92 +277,68 @@ export default function OnboardingScreen() {
                     })}
                 />
 
-                <View style={styles.paginationRow}>
-                    {slides.map((slide, index) => {
-                        const active = index === activeIndex;
-                        return (
+                <View style={styles.progressRow}>
+                    <Text style={styles.progressText}>{activeIndex + 1}/{slides.length}</Text>
+                    <View style={styles.paginationRow}>
+                        {slides.map((slide, index) => (
                             <View
                                 key={slide.id}
                                 style={[
                                     styles.paginationDot,
-                                    active && styles.paginationDotActive,
+                                    index === activeIndex && styles.paginationDotActive,
                                 ]}
                             />
-                        );
-                    })}
+                        ))}
+                    </View>
                 </View>
 
                 <View style={styles.footer}>
-                    <Pressable
-                        style={({ pressed }) => [
-                            styles.utilityButton,
-                            pressed && styles.utilityButtonPressed,
-                        ]}
-                        onPress={() => {
-                            void handleEnableNotifications();
-                        }}
-                    >
-                        <Text style={styles.utilityButtonText}>
-                            {isRequestingNotifications ? "Checking alerts..." : "Enable alerts"}
-                        </Text>
-                    </Pressable>
+                    {isLastSlide ? (
+                        <FooterButton
+                            label={isRequestingNotifications ? "Checking alerts..." : "Enable alerts"}
+                            onPress={() => {
+                                void handleEnableNotifications();
+                            }}
+                            icon={<BellIcon size={14} color={styles.ghostButtonText.color} />}
+                            variant="ghost"
+                        />
+                    ) : null}
 
                     <View style={styles.actionRow}>
-                        <Pressable
-                            style={({ pressed }) => [
-                                styles.secondaryButton,
-                                isFirstSlide && styles.secondaryButtonDisabled,
-                                pressed && !isFirstSlide && styles.secondaryButtonPressed,
-                            ]}
-                            disabled={isFirstSlide}
+                        <FooterButton
+                            label="Back"
                             onPress={() => scrollToIndex(activeIndex - 1)}
-                        >
-                            <Text
-                                style={[
-                                    styles.secondaryButtonText,
-                                    isFirstSlide && styles.secondaryButtonTextDisabled,
-                                ]}
-                            >
-                                Back
-                            </Text>
-                        </Pressable>
+                            icon={<ArrowLeftIcon size={14} color={styles.buttonText.color} />}
+                            variant="secondary"
+                            disabled={isFirstSlide}
+                        />
 
                         {isLastSlide ? (
                             <View style={styles.finalActions}>
-                                <Pressable
-                                    style={({ pressed }) => [
-                                        styles.secondaryButton,
-                                        styles.finalSecondaryButton,
-                                        pressed && styles.secondaryButtonPressed,
-                                    ]}
+                                <FooterButton
+                                    label="Open app"
                                     onPress={() => {
                                         void finishGuide("/");
                                     }}
-                                >
-                                    <Text style={styles.secondaryButtonText}>Open app</Text>
-                                </Pressable>
-                                <Pressable
-                                    style={({ pressed }) => [
-                                        styles.primaryButton,
-                                        pressed && styles.primaryButtonPressed,
-                                    ]}
+                                    variant="secondary"
+                                    icon={<DesktopIcon size={14} color={styles.buttonText.color} />}
+                                />
+                                <FooterButton
+                                    label="Scan QR code"
                                     onPress={() => {
                                         void finishGuide("/scan");
                                     }}
-                                >
-                                    <Text style={styles.primaryButtonText}>Scan QR code</Text>
-                                </Pressable>
+                                    variant="primary"
+                                    icon={<ScanIcon size={14} color={styles.primaryButtonText.color} />}
+                                />
                             </View>
                         ) : (
-                            <Pressable
-                                style={({ pressed }) => [
-                                    styles.primaryButton,
-                                    pressed && styles.primaryButtonPressed,
-                                ]}
+                            <FooterButton
+                                label="Next"
                                 onPress={() => scrollToIndex(activeIndex + 1)}
-                            >
-                                <Text style={styles.primaryButtonText}>Next</Text>
-                            </Pressable>
+                                variant="primary"
+                                icon={<ArrowRightIcon size={14} color={styles.primaryButtonText.color} />}
+                            />
                         )}
                     </View>
                 </View>
@@ -395,91 +356,77 @@ function createStyles(theme: AppTheme) {
         container: {
             flex: 1,
             backgroundColor: theme.colors.bg,
-            paddingTop: theme.spacing.sm,
+            paddingTop: theme.spacing.md,
             paddingBottom: theme.spacing.sm,
         },
         header: {
-            flexDirection: "row",
-            alignItems: "flex-start",
-            justifyContent: "space-between",
             paddingHorizontal: theme.spacing.lg,
             marginBottom: theme.spacing.md,
-            gap: theme.spacing.md,
+            gap: 6,
         },
-        headerCopy: {
-            flex: 1,
-            gap: 4,
+        brandRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.sm,
+            marginBottom: theme.spacing.xs,
         },
         brand: {
             color: theme.colors.textSecondary,
             fontSize: theme.fontSize.sm,
             fontWeight: "700",
             textTransform: "uppercase",
-            letterSpacing: 0.8,
+            letterSpacing: 0.7,
         },
         headerTitle: {
             color: theme.colors.textPrimary,
-            fontSize: 24,
-            lineHeight: 30,
+            fontSize: 26,
+            lineHeight: 32,
             fontWeight: "800",
         },
         headerSubtitle: {
             color: theme.colors.textSecondary,
             fontSize: theme.fontSize.md,
             lineHeight: 20,
-        },
-        stepPill: {
-            paddingHorizontal: theme.spacing.md,
-            paddingVertical: 8,
-            borderRadius: theme.borderRadius.full,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.bgSecondary,
-        },
-        stepPillText: {
-            color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.sm,
-            fontWeight: "700",
+            maxWidth: 320,
         },
         slidePage: {
             flex: 1,
             paddingHorizontal: theme.spacing.lg,
         },
-        card: {
+        slideSurface: {
             flex: 1,
-            borderRadius: 24,
+            borderRadius: 22,
             borderWidth: 1,
+            borderColor: theme.colors.borderMuted,
             backgroundColor: theme.colors.bgSecondary,
-            padding: theme.spacing.lg,
-            justifyContent: "space-between",
-            gap: theme.spacing.md,
+            paddingHorizontal: theme.spacing.lg,
+            paddingVertical: theme.spacing.lg,
+            gap: theme.spacing.lg,
         },
-        cardTop: {
-            gap: theme.spacing.md,
-        },
-        cardHeader: {
+        stepRow: {
             flexDirection: "row",
-            alignItems: "flex-start",
-            gap: theme.spacing.md,
+            alignItems: "center",
+            gap: theme.spacing.sm,
         },
-        iconBadge: {
-            width: 48,
-            height: 48,
-            borderRadius: 14,
+        stepIconBox: {
+            width: 34,
+            height: 34,
+            borderRadius: 10,
             borderWidth: 1,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.bg,
             alignItems: "center",
             justifyContent: "center",
-            flexShrink: 0,
-        },
-        headerTextBlock: {
-            flex: 1,
-            gap: 4,
         },
         stepLabel: {
+            color: theme.colors.accent,
             fontSize: theme.fontSize.xs,
             fontWeight: "800",
             textTransform: "uppercase",
-            letterSpacing: 0.8,
+            letterSpacing: 0.7,
+        },
+        copyBlock: {
+            gap: theme.spacing.sm,
         },
         title: {
             color: theme.colors.textPrimary,
@@ -492,22 +439,23 @@ function createStyles(theme: AppTheme) {
             fontSize: theme.fontSize.md,
             lineHeight: 22,
         },
-        section: {
-            gap: 12,
+        pointsBlock: {
+            gap: theme.spacing.md,
         },
-        bulletRow: {
+        pointRow: {
             flexDirection: "row",
             alignItems: "flex-start",
             gap: theme.spacing.sm,
         },
-        bulletDot: {
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            marginTop: 7,
+        pointDot: {
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            marginTop: 8,
+            backgroundColor: theme.colors.accent,
             flexShrink: 0,
         },
-        bulletText: {
+        pointText: {
             flex: 1,
             color: theme.colors.textPrimary,
             fontSize: theme.fontSize.md,
@@ -528,113 +476,111 @@ function createStyles(theme: AppTheme) {
             fontSize: theme.fontSize.md,
             lineHeight: 20,
         },
-        footerNote: {
+        noteRow: {
             flexDirection: "row",
             alignItems: "flex-start",
             gap: theme.spacing.sm,
-            paddingTop: theme.spacing.sm,
+            paddingTop: theme.spacing.md,
             borderTopWidth: StyleSheet.hairlineWidth,
             borderTopColor: theme.colors.border,
         },
-        footerNoteText: {
+        noteText: {
             flex: 1,
             color: theme.colors.textSecondary,
             fontSize: theme.fontSize.sm,
             lineHeight: 18,
         },
+        progressRow: {
+            alignItems: "center",
+            gap: theme.spacing.sm,
+            paddingHorizontal: theme.spacing.lg,
+            paddingTop: theme.spacing.md,
+            paddingBottom: theme.spacing.sm,
+        },
+        progressText: {
+            color: theme.colors.textTertiary,
+            fontSize: theme.fontSize.xs,
+            fontWeight: "700",
+        },
         paginationRow: {
             flexDirection: "row",
-            justifyContent: "center",
             alignItems: "center",
             gap: 8,
-            marginTop: theme.spacing.md,
-            marginBottom: theme.spacing.md,
         },
         paginationDot: {
-            width: 7,
-            height: 7,
-            borderRadius: 3.5,
+            width: 6,
+            height: 6,
+            borderRadius: 3,
             backgroundColor: theme.colors.border,
         },
         paginationDotActive: {
-            width: 20,
+            width: 18,
             backgroundColor: theme.colors.accent,
         },
         footer: {
             paddingHorizontal: theme.spacing.lg,
-            gap: theme.spacing.md,
-        },
-        utilityButton: {
-            minHeight: 46,
-            borderRadius: theme.borderRadius.lg,
-            borderWidth: 1,
-            borderColor: theme.colors.border,
-            backgroundColor: theme.colors.bgSecondary,
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: theme.spacing.lg,
-        },
-        utilityButtonPressed: {
-            opacity: 0.84,
-        },
-        utilityButtonText: {
-            color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.md,
-            fontWeight: "700",
+            gap: theme.spacing.sm,
         },
         actionRow: {
             flexDirection: "row",
             alignItems: "center",
-            gap: theme.spacing.md,
+            gap: theme.spacing.sm,
         },
         finalActions: {
             flex: 1,
             flexDirection: "row",
-            gap: theme.spacing.md,
+            gap: theme.spacing.sm,
+        },
+        buttonBase: {
+            minHeight: 42,
+            borderRadius: theme.borderRadius.md,
+            paddingHorizontal: theme.spacing.md,
+            alignItems: "center",
+            justifyContent: "center",
         },
         primaryButton: {
             flex: 1,
-            minHeight: 52,
-            borderRadius: theme.borderRadius.lg,
             backgroundColor: theme.colors.accent,
-            alignItems: "center",
-            justifyContent: "center",
-            paddingHorizontal: theme.spacing.lg,
-        },
-        primaryButtonPressed: {
-            opacity: 0.88,
-        },
-        primaryButtonText: {
-            color: theme.colors.textOnAccent,
-            fontSize: theme.fontSize.md,
-            fontWeight: "800",
         },
         secondaryButton: {
-            minWidth: 92,
-            minHeight: 52,
-            borderRadius: theme.borderRadius.lg,
+            minWidth: 88,
             borderWidth: 1,
             borderColor: theme.colors.border,
             backgroundColor: theme.colors.bgSecondary,
+        },
+        ghostButton: {
+            borderWidth: 1,
+            borderColor: theme.colors.borderMuted,
+            backgroundColor: theme.colors.bg,
+        },
+        buttonPressed: {
+            opacity: 0.86,
+        },
+        buttonDisabled: {
+            opacity: 0.45,
+        },
+        buttonContent: {
+            flexDirection: "row",
             alignItems: "center",
             justifyContent: "center",
-            paddingHorizontal: theme.spacing.lg,
+            gap: 8,
         },
-        finalSecondaryButton: {
-            flex: 1,
+        buttonIcon: {
+            alignItems: "center",
+            justifyContent: "center",
         },
-        secondaryButtonPressed: {
-            opacity: 0.84,
-        },
-        secondaryButtonDisabled: {
-            opacity: 0.4,
-        },
-        secondaryButtonText: {
+        buttonText: {
             color: theme.colors.textPrimary,
-            fontSize: theme.fontSize.md,
+            fontSize: theme.fontSize.sm,
             fontWeight: "700",
         },
-        secondaryButtonTextDisabled: {
+        primaryButtonText: {
+            color: theme.colors.textOnAccent,
+        },
+        ghostButtonText: {
+            color: theme.colors.textSecondary,
+        },
+        buttonTextDisabled: {
             color: theme.colors.textTertiary,
         },
     });

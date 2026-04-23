@@ -4,6 +4,7 @@ import React from "react";
 import { View, Text, Pressable, StyleSheet, Animated } from "react-native";
 import { useRouter } from "expo-router";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
+import { useAppIsActive } from "../services/app-visibility";
 import {
     WifiOffIcon,
     TerminalIcon,
@@ -25,8 +26,15 @@ function ConnectingSpinner() {
     const theme = useAppTheme();
     const connectStyles = useThemedStyles(createConnectStyles);
     const spinAnim = React.useRef(new Animated.Value(0)).current;
+    const appIsActive = useAppIsActive();
 
     React.useEffect(() => {
+        if (!appIsActive) {
+            spinAnim.stopAnimation();
+            spinAnim.setValue(0);
+            return;
+        }
+
         const loop = Animated.loop(
             Animated.timing(spinAnim, {
                 toValue: 1,
@@ -36,7 +44,7 @@ function ConnectingSpinner() {
         );
         loop.start();
         return () => loop.stop();
-    }, [spinAnim]);
+    }, [appIsActive, spinAnim]);
 
     const rotation = spinAnim.interpolate({
         inputRange: [0, 1],
@@ -117,7 +125,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
     return (
         <View style={styles.container}>
             <View style={styles.logoContainer}>
-                <CopilotBadge size={64} iconSize={36} />
+                <CopilotBadge size={64} />
             </View>
             <Text style={styles.title}>Code Companion</Text>
             <Text style={styles.subtitle}>
