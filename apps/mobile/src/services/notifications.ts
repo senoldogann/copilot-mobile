@@ -147,6 +147,20 @@ function readNotificationPlatform(): NotificationPlatform {
     return Platform.OS === "android" ? "android" : "ios";
 }
 
+function readRemotePushRegistrationError(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    const normalizedMessage = message.toLowerCase();
+
+    if (
+        Platform.OS === "ios"
+        && normalizedMessage.includes("aps-environment")
+    ) {
+        return "iOS push notifications are not enabled for this build. Enable the Push Notifications capability for the app identifier, then rebuild the app with a provisioning profile that includes the aps-environment entitlement.";
+    }
+
+    return message;
+}
+
 function rememberLocalNotificationKey(key: string): boolean {
     if (localNotificationKeys.has(key)) {
         return false;
@@ -275,7 +289,7 @@ export async function resolveRemotePushAvailability(
         };
     } catch (error) {
         useConnectionStore.getState().setError(
-            `Failed to register remote notifications: ${error instanceof Error ? error.message : String(error)}`
+            `Failed to register remote notifications: ${readRemotePushRegistrationError(error)}`
         );
         return { kind: "unavailable" };
     }
