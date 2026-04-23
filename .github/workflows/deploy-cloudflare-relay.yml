@@ -2,6 +2,12 @@ name: Deploy Cloudflare Relay
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "apps/cloudflare-relay/**"
+      - ".github/workflows/deploy-cloudflare-relay.yml"
 
 concurrency:
   group: deploy-cloudflare-relay-${{ github.ref }}
@@ -47,13 +53,13 @@ jobs:
         run: pnpm --filter @copilot-mobile/cloudflare-relay typecheck
 
       - name: Dry-run relay deploy
-        run: pnpm --filter @copilot-mobile/cloudflare-relay check
+        run: pnpm --filter @copilot-mobile/cloudflare-relay run check
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
       - name: Deploy relay worker
-        run: pnpm --filter @copilot-mobile/cloudflare-relay deploy
+        run: pnpm --filter @copilot-mobile/cloudflare-relay run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
