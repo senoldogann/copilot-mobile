@@ -18,6 +18,7 @@ export type {
     SessionContext,
     WorkspaceTreeNode,
     GitFileChange,
+    GitCommitFileChange,
     GitCommitSummary,
     GitBranchSummary,
     WorkspaceOperation,

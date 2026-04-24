@@ -70,7 +70,8 @@ const DIRECTORY_TREE_DEPTH = 2;
 const TREE_PAGE_SIZE = 200;
 const WORKSPACE_LOAD_TIMEOUT_MS = 12_000;
 const WORKSPACE_VIEWER_CACHE_TTL_MS = 30_000;
-const WORKSPACE_GIT_POLL_INTERVAL_MS = 2_500;
+const WORKSPACE_GIT_POLL_INTERVAL_MS = 6_000;
+const COMMIT_TIME_TICK_MS = 60_000;
 
 type InlineLoadState =
     | { status: "loading" }
@@ -83,8 +84,14 @@ type ViewerCacheEntry = Extract<InlineLoadState, { status: "ready" }> & {
 
 const workspaceViewerCache = new Map<string, ViewerCacheEntry>();
 
-function createViewerCacheKey(sessionId: string, mode: "file" | "diff", path: string): string {
-    return `${sessionId}:${mode}:${path}`;
+type WorkspaceViewer = {
+    path: string;
+    mode: "file" | "diff";
+    commitHash?: string;
+};
+
+function createViewerCacheKey(sessionId: string, viewer: WorkspaceViewer): string {
+    return `${sessionId}:${viewer.mode}:${viewer.commitHash ?? "working-tree"}:${viewer.path}`;
 }
 
 function readViewerCache(key: string): Extract<InlineLoadState, { status: "ready" }> | null {
@@ -166,9 +173,10 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const [commitMessage, setCommitMessage] = useState("");
     const [changesFilter, setChangesFilter] = useState<"uncommitted" | "recent">("uncommitted");
     const [changesFilterMenuOpen, setChangesFilterMenuOpen] = useState<boolean>(false);
-    const [viewer, setViewer] = useState<{ path: string; mode: "file" | "diff" } | null>(null);
+    const [viewer, setViewer] = useState<WorkspaceViewer | null>(null);
     const [selectedCommit, setSelectedCommit] = useState<GitCommitSummary | null>(null);
     const [inlineLoad, setInlineLoad] = useState<InlineLoadState>({ status: "loading" });
+    const [commitListNow, setCommitListNow] = useState(Date.now());
     const workspaceLoadingSignature = useMemo(
         () => Object.keys(workspace.loadingTreePaths).sort().join("|"),
         [workspace.loadingTreePaths],
@@ -186,7 +194,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     useEffect(() => {
         if (viewer === null || activeSessionId === null) return;
 
-        const cacheKey = createViewerCacheKey(activeSessionId, viewer.mode, viewer.path);
+        const cacheKey = createViewerCacheKey(activeSessionId, viewer);
         const cached = readViewerCache(cacheKey);
         if (cached !== null) {
             setInlineLoad(cached);
@@ -207,7 +215,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         };
 
         if (viewer.mode === "diff") {
-            const unsub = onWorkspaceDiffResponse(activeSessionId, viewer.path, (payload: WorkspaceDiffPayload) => {
+            const unsub = onWorkspaceDiffResponse(activeSessionId, viewer.path, viewer.commitHash, (payload: WorkspaceDiffPayload) => {
                 finish();
                 unsub();
                 if (payload.error !== undefined) {
@@ -222,7 +230,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     setInlineLoad(nextState);
                 }
             });
-            void requestWorkspaceDiff(activeSessionId, viewer.path);
+            void requestWorkspaceDiff(activeSessionId, viewer.path, viewer.commitHash);
             return () => { finish(); unsub(); };
         } else {
             const unsub = onWorkspaceFileResponse(activeSessionId, viewer.path, (payload: WorkspaceFilePayload) => {
@@ -244,7 +252,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             return () => { finish(); unsub(); };
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [viewer?.path, viewer?.mode, activeSessionId]);
+    }, [viewer?.path, viewer?.mode, viewer?.commitHash, activeSessionId]);
 
     useEffect(() => {
         if (!visible) return;
@@ -280,7 +288,13 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     }, [visible, activeSessionId, isConnected]);
 
     useEffect(() => {
-        if (!visible || activeSessionId === null || !isConnected || workspace.tab !== "changes") {
+        if (
+            !visible
+            || activeSessionId === null
+            || !isConnected
+            || workspace.tab !== "changes"
+            || changesFilter === "recent"
+        ) {
             return;
         }
 
@@ -291,7 +305,22 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         return () => {
             clearInterval(interval);
         };
-    }, [activeSessionId, isConnected, visible, workspace.tab]);
+    }, [activeSessionId, changesFilter, isConnected, visible, workspace.tab]);
+
+    useEffect(() => {
+        if (!visible || workspace.tab !== "changes" || changesFilter !== "recent") {
+            return;
+        }
+
+        setCommitListNow(Date.now());
+        const interval = setInterval(() => {
+            setCommitListNow(Date.now());
+        }, COMMIT_TIME_TICK_MS);
+
+        return () => {
+            clearInterval(interval);
+        };
+    }, [changesFilter, visible, workspace.tab]);
 
     useEffect(() => {
         if (activeSessionId === null) {
@@ -513,8 +542,6 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
     const segmentTitleColor = theme.resolvedScheme === "light"
         ? theme.colors.textAssistant
         : theme.colors.textPrimary;
-    const commitListNow = Date.now();
-
     const renderChangeRow = useCallback((change: (typeof workspace.uncommittedChanges)[number]) => {
         const name = basename(change.path);
         const dir = dirname(change.path);
@@ -1154,6 +1181,10 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             <View style={styles.changesList}>
                 {selectedCommit.files.map((filePath) => {
                     const directory = dirname(filePath);
+                    const fileChange = selectedCommit.fileChanges?.find((change) => change.path === filePath);
+                    const additions = fileChange?.additions ?? 0;
+                    const deletions = fileChange?.deletions ?? 0;
+                    const hasStats = additions > 0 || deletions > 0;
 
                     return (
                         <Pressable
@@ -1161,7 +1192,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                             style={({ pressed }) => [styles.changeRow, pressed && styles.changeRowPressed]}
                             onPress={() => {
                                 setSelectedCommit(null);
-                                setViewer({ path: filePath, mode: "file" });
+                                setViewer({ path: filePath, mode: "diff", commitHash: selectedCommit.hash });
                             }}
                         >
                             <View style={styles.changeIconWrap}>
@@ -1177,6 +1208,12 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                                     </Text>
                                 )}
                             </View>
+                            {hasStats && (
+                                <View style={styles.diffStats}>
+                                    <Text style={styles.diffAdd}>+{additions}</Text>
+                                    <Text style={styles.diffDel}>-{deletions}</Text>
+                                </View>
+                            )}
                         </Pressable>
                     );
                 })}

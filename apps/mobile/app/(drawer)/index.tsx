@@ -77,6 +77,7 @@ import {
 } from "../../src/utils/tool-introspection";
 
 const CHAT_LIST_DRAW_DISTANCE = 320;
+const ACTIVE_TURN_VISUAL_GRACE_MS = 25_000;
 
 function basename(path: string): string {
     const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -741,6 +742,9 @@ export default function ChatScreen() {
     const stableSubagentRunsRef = useRef<ReadonlyArray<SubagentRun>>([]);
     const stableAgentTodosRef = useRef<ReadonlyArray<AgentTodo>>([]);
     const stablePanelSessionIdRef = useRef<string | null>(null);
+    const previousActiveTurnSourceRef = useRef(false);
+    const activeTurnGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const [activeTurnGraceUntil, setActiveTurnGraceUntil] = useState(0);
 
     // Store'lardan state
     const chatItems = useSessionStore((s) => s.chatItems);
@@ -778,8 +782,40 @@ export default function ChatScreen() {
         connectionState === "connecting" || connectionState === "connected";
     const inputDisabled = !isConnected || isSessionLoading;
     const isActiveSessionBusy = activeSessionId !== null && busySessions[activeSessionId] === true;
-    const isActiveTurnRunning = isTyping || isActiveSessionBusy;
+    const isActiveTurnSource = isTyping || isActiveSessionBusy || isAbortPending;
+    const isActiveTurnRunning = isActiveTurnSource || activeTurnGraceUntil > Date.now();
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
+
+    useEffect(() => {
+        if (activeTurnGraceTimerRef.current !== null) {
+            clearTimeout(activeTurnGraceTimerRef.current);
+            activeTurnGraceTimerRef.current = null;
+        }
+
+        if (isActiveTurnSource) {
+            previousActiveTurnSourceRef.current = true;
+            setActiveTurnGraceUntil(0);
+            return undefined;
+        }
+
+        if (previousActiveTurnSourceRef.current) {
+            previousActiveTurnSourceRef.current = false;
+            const nextGraceUntil = Date.now() + ACTIVE_TURN_VISUAL_GRACE_MS;
+            setActiveTurnGraceUntil(nextGraceUntil);
+            activeTurnGraceTimerRef.current = setTimeout(() => {
+                setActiveTurnGraceUntil(0);
+                activeTurnGraceTimerRef.current = null;
+            }, ACTIVE_TURN_VISUAL_GRACE_MS);
+        }
+
+        return () => {
+            if (activeTurnGraceTimerRef.current !== null) {
+                clearTimeout(activeTurnGraceTimerRef.current);
+                activeTurnGraceTimerRef.current = null;
+            }
+        };
+    }, [activeSessionId, isActiveTurnSource]);
+
     const activeAgentItems = useMemo(
         () => getActiveAgentItems(chatItems, isTyping),
         [chatItems, isTyping],

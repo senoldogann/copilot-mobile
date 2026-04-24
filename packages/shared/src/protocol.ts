@@ -91,6 +91,12 @@ export type GitFileChange = {
     deletions?: number | undefined;
 };
 
+export type GitCommitFileChange = {
+    path: string;
+    additions?: number | undefined;
+    deletions?: number | undefined;
+};
+
 export type GitCommitSummary = {
     hash: string;
     shortHash: string;
@@ -98,6 +104,7 @@ export type GitCommitSummary = {
     author: string;
     committedAt: number;
     files: ReadonlyArray<string>;
+    fileChanges: ReadonlyArray<GitCommitFileChange>;
 };
 
 export type GitBranchSummary = {
@@ -265,6 +272,7 @@ export type WorkspaceDiffRequestMessage = BaseBridgeMessage & {
     payload: {
         sessionId: string;
         workspaceRelativePath: string;
+        commitHash?: string;
     };
 };
 
@@ -273,6 +281,7 @@ export type WorkspaceDiffResponseMessage = BaseBridgeMessage & {
     payload: {
         sessionId: string;
         workspaceRelativePath: string;
+        commitHash?: string;
         diff: string;
         error?: string;
     };

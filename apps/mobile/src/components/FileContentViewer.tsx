@@ -132,6 +132,7 @@ export function FileContentViewer(props: Props): React.JSX.Element {
                     const unsubscribeDiff = onWorkspaceDiffResponse(
                         activeSessionId,
                         resolvedPath,
+                        undefined,
                         (payload: WorkspaceDiffPayload) => {
                             finish();
                             if (payload.error !== undefined) {

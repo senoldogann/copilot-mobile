@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import type {
     GitBranchSummary,
+    GitCommitFileChange,
     GitCommitSummary,
     GitFileChange,
     SessionContext,
@@ -612,13 +613,33 @@ function parseGitLog(stdout: string): Array<GitCommitSummary> {
             return [];
         }
 
+        const fileChanges = fileLines
+            .filter((line) => line.length > 0)
+            .flatMap((line): Array<GitCommitFileChange> => {
+                const [rawAdditions = "", rawDeletions = "", ...pathParts] = line.split("\t");
+                const path = pathParts.join("\t");
+                if (path.length === 0) {
+                    return [];
+                }
+
+                const additions = Number.parseInt(rawAdditions, 10);
+                const deletions = Number.parseInt(rawDeletions, 10);
+
+                return [{
+                    path,
+                    ...(!Number.isNaN(additions) ? { additions } : {}),
+                    ...(!Number.isNaN(deletions) ? { deletions } : {}),
+                }];
+            });
+
         return [{
             hash,
             shortHash: hash.slice(0, 7),
             subject,
             author,
             committedAt: Number.parseInt(timestamp, 10) * 1000,
-            files: fileLines.filter((line) => line.length > 0),
+            files: fileChanges.map((file) => file.path),
+            fileChanges,
         }];
     });
 }
@@ -777,7 +798,7 @@ export async function buildWorkspaceGitSummary(
         `--max-count=${normalizedCommitLimit}`,
         "--date=unix",
         "--pretty=format:%x1e%H%x1f%ct%x1f%an%x1f%s",
-        "--name-only",
+        "--numstat",
         "--no-renames",
     ]);
     if (!logResult.success) {
@@ -1036,9 +1057,14 @@ export async function readWorkspaceFile(
 
 // Uncommitted değişikliklerin unified diff'ini döndür. Untracked dosyalar için `diff --no-index`
 // kullanarak tamamen ekleme olarak gösterir.
+function assertSafeCommitHash(commitHash: string): boolean {
+    return /^[0-9a-fA-F]{7,40}$/.test(commitHash);
+}
+
 export async function readWorkspaceDiff(
     context: SessionContext,
-    workspaceRelativePath: string
+    workspaceRelativePath: string,
+    commitHash?: string
 ): Promise<{ diff: string; error?: string }> {
     const root = resolveWorkspaceRoot(context);
     const absPath = resolve(root, workspaceRelativePath);
@@ -1062,6 +1088,29 @@ export async function readWorkspaceDiff(
     }
 
     const relPath = toPosixRelativePath(root, absPath);
+
+    if (commitHash !== undefined) {
+        if (!assertSafeCommitHash(commitHash)) {
+            return { diff: "", error: "Invalid commit hash" };
+        }
+
+        const committed = await runGit(root, [
+            "show",
+            "--no-color",
+            "--format=",
+            "--patch",
+            "--no-ext-diff",
+            commitHash,
+            "--",
+            relPath,
+        ]);
+
+        if (committed.success || committed.exitCode === 1) {
+            return { diff: committed.stdout };
+        }
+
+        return { diff: "", error: committed.stderr || committed.message || "git show failed" };
+    }
 
     // Önce tracked mi untracked mi olduğunu belirle.
     const lsFiles = await runGit(root, ["ls-files", "--error-unmatch", "--", relPath]);

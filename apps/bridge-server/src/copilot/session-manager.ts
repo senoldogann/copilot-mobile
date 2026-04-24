@@ -1470,7 +1470,8 @@ export function createSessionManager(
 
         async readWorkspaceDiff(
             sessionId: string,
-            workspaceRelativePath: string
+            workspaceRelativePath: string,
+            commitHash?: string
         ): Promise<void> {
             const context = getSessionContext(sessionId);
             if (context === undefined) {
@@ -1480,6 +1481,7 @@ export function createSessionManager(
                     payload: {
                         sessionId,
                         workspaceRelativePath,
+                        ...(commitHash !== undefined ? { commitHash } : {}),
                         diff: "",
                         error: "SESSION_NOT_FOUND",
                     },
@@ -1487,13 +1489,14 @@ export function createSessionManager(
                 return;
             }
 
-            const result = await readWorkspaceDiff(context, workspaceRelativePath);
+            const result = await readWorkspaceDiff(context, workspaceRelativePath, commitHash);
             send({
                 ...makeBase(),
                 type: "workspace.diff.response",
                 payload: {
                     sessionId,
                     workspaceRelativePath,
+                    ...(commitHash !== undefined ? { commitHash } : {}),
                     diff: result.diff,
                     ...(result.error !== undefined ? { error: result.error } : {}),
                 },

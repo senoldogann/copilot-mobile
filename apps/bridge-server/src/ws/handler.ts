@@ -528,7 +528,8 @@ export function createMessageHandler(
                 case "workspace.diff.request":
                     return sessionManager.readWorkspaceDiff(
                         message.payload.sessionId,
-                        message.payload.workspaceRelativePath
+                        message.payload.workspaceRelativePath,
+                        message.payload.commitHash
                     );
 
                 default:

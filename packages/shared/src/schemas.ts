@@ -75,6 +75,11 @@ const gitCommitSummarySchema = z.object({
     author: z.string().min(1),
     committedAt: z.number().int().nonnegative(),
     files: z.array(z.string().min(1)).readonly(),
+    fileChanges: z.array(z.object({
+        path: z.string().min(1),
+        additions: z.number().int().nonnegative().optional(),
+        deletions: z.number().int().nonnegative().optional(),
+    })).readonly(),
 });
 
 const gitBranchSummarySchema = z.object({
@@ -561,6 +566,7 @@ const workspaceDiffResponseSchema = baseBridgeMessageSchema.extend({
     payload: z.object({
         sessionId: z.string().min(1),
         workspaceRelativePath: z.string().min(1),
+        commitHash: z.string().min(1).optional(),
         diff: z.string(),
         error: z.string().optional(),
     }),
@@ -839,6 +845,7 @@ const workspaceDiffRequestSchema = baseBridgeMessageSchema.extend({
     payload: z.object({
         sessionId: z.string().min(1),
         workspaceRelativePath: z.string().min(1),
+        commitHash: z.string().min(1).optional(),
     }),
 });
 

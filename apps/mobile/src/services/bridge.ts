@@ -904,16 +904,18 @@ export async function requestWorkspaceFile(
 
 export async function requestWorkspaceDiff(
     sessionId: string,
-    workspaceRelativePath: string
+    workspaceRelativePath: string,
+    commitHash?: string
 ): Promise<void> {
     const c = getClient();
     try {
         await c.sendMessage("workspace.diff.request", {
             sessionId,
             workspaceRelativePath,
+            ...(commitHash !== undefined ? { commitHash } : {}),
         });
     } catch (error) {
-        dispatchWorkspaceDiffResponse(sessionId, workspaceRelativePath, {
+        dispatchWorkspaceDiffResponse(sessionId, workspaceRelativePath, commitHash, {
             diff: "",
             error: error instanceof Error ? error.message : String(error),
         });

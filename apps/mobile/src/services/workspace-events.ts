@@ -49,6 +49,14 @@ function createWorkspaceEventKey(sessionId: string, workspaceRelativePath: strin
     return `${sessionId}\u0000${workspaceRelativePath}`;
 }
 
+function createWorkspaceDiffEventKey(
+    sessionId: string,
+    workspaceRelativePath: string,
+    commitHash: string | undefined
+): string {
+    return `${sessionId}\u0000${workspaceRelativePath}\u0000${commitHash ?? ""}`;
+}
+
 export function onWorkspaceFileResponse(
     sessionId: string,
     workspaceRelativePath: string,
@@ -83,9 +91,10 @@ export function dispatchWorkspaceFileResponse(
 export function onWorkspaceDiffResponse(
     sessionId: string,
     workspaceRelativePath: string,
+    commitHash: string | undefined,
     cb: DiffResponseListener
 ): () => void {
-    const key = createWorkspaceEventKey(sessionId, workspaceRelativePath);
+    const key = createWorkspaceDiffEventKey(sessionId, workspaceRelativePath, commitHash);
     const list = diffListeners.get(key) ?? [];
     list.push(cb);
     diffListeners.set(key, list);
@@ -101,9 +110,10 @@ export function onWorkspaceDiffResponse(
 export function dispatchWorkspaceDiffResponse(
     sessionId: string,
     workspaceRelativePath: string,
+    commitHash: string | undefined,
     payload: DiffResponsePayload
 ): void {
-    const list = diffListeners.get(createWorkspaceEventKey(sessionId, workspaceRelativePath));
+    const list = diffListeners.get(createWorkspaceDiffEventKey(sessionId, workspaceRelativePath, commitHash));
     if (list !== undefined) {
         for (const cb of list) {
             cb(payload);

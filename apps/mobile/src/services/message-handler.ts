@@ -1254,8 +1254,8 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "workspace.diff.response": {
-            const { sessionId, workspaceRelativePath, diff, error } = message.payload;
-            dispatchWorkspaceDiffResponse(sessionId, workspaceRelativePath, {
+            const { sessionId, workspaceRelativePath, commitHash, diff, error } = message.payload;
+            dispatchWorkspaceDiffResponse(sessionId, workspaceRelativePath, commitHash, {
                 diff,
                 ...(error !== undefined ? { error } : {}),
             });

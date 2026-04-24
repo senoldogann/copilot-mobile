@@ -1,6 +1,6 @@
 {
     "name": "@senoldogann/code-companion",
-    "version": "0.1.2",
+    "version": "0.1.3",
     "type": "module",
     "bin": {
         "code-companion": "bin/copilot-mobile.mjs"
