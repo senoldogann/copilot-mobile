@@ -13,7 +13,7 @@ import {
 } from "@copilot-mobile/shared";
 import { createSessionManager } from "../copilot/session-manager.js";
 import { createMessageHandler } from "./handler.js";
-import { checkPairingRateLimit } from "../utils/rate-limit.js";
+import { checkPairingRateLimit, checkResumeRateLimit } from "../utils/rate-limit.js";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
 import { generatePairingQRCode } from "../auth/qr.js";
 import { isPairingActive } from "../auth/pairing.js";
@@ -21,6 +21,8 @@ import { renderCompanionDashboard } from "../http/dashboard.js";
 import { createCompletionNotifier } from "../notifications/completion-notifier.js";
 import { createDeviceRegistry } from "../notifications/device-registry.js";
 import { createPushProvider } from "../notifications/push-provider.js";
+import { createAttachmentUploadStore } from "../uploads/attachment-upload-store.js";
+import { createVSCodeExternalSessionStore } from "../vscode/external-session-store.js";
 
 const MANAGEMENT_STATUS_PATH = "/__copilot_mobile/status";
 const MANAGEMENT_QR_PATH = "/__copilot_mobile/qr";
@@ -149,6 +151,7 @@ export function createBridgeServer(
         if (
             message.type !== "auth.authenticated"
             && message.type !== "auth.session_token"
+            && message.type !== "error"
             && message.type !== "permission.request"
             && message.type !== "user_input.request"
         ) {
@@ -172,7 +175,15 @@ export function createBridgeServer(
         deviceRegistry,
         pushProvider,
     });
-    const sessionManager = createSessionManager(copilotClient, sendToActiveClient, completionNotifier);
+    const attachmentUploads = createAttachmentUploadStore();
+    const externalSessionStore = createVSCodeExternalSessionStore();
+    const sessionManager = createSessionManager(
+        copilotClient,
+        sendToActiveClient,
+        completionNotifier,
+        attachmentUploads,
+        externalSessionStore
+    );
 
     async function createPairingQrCode(relayAccessToken?: string): Promise<PairingQRCodeState> {
         const qrCode = await generatePairingQRCode(
@@ -425,6 +436,10 @@ export function createBridgeServer(
                 try {
                     const parsed = JSON.parse(data.toString("utf-8")) as { type?: unknown };
                     if (parsed.type === "auth.pair" && !checkPairingRateLimit(clientIP)) {
+                        ws.close(1008, "Rate limit exceeded");
+                        return;
+                    }
+                    if (parsed.type === "auth.resume" && !checkResumeRateLimit(clientIP)) {
                         ws.close(1008, "Rate limit exceeded");
                         return;
                     }

@@ -193,7 +193,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
     const visibleLiveSessions = useMemo(
         () => sessions.filter((session) => {
             const linkedConversation = linkedConversationBySessionId.get(session.id);
-            return linkedConversation?.archived !== true;
+            return linkedConversation === undefined || linkedConversation.archived !== true;
         }),
         [linkedConversationBySessionId, sessions],
     );
@@ -1549,23 +1549,21 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
 
                 {archivedConversations.length > 0 && (
                     <View style={styles.workspaceGroup}>
-                        <Pressable
-                            style={styles.workspaceHeader}
-                            onPress={() => setArchivedExpanded((prev) => !prev)}
-                        >
-                            <Feather
-                                name={archivedExpanded ? "chevron-down" : "chevron-right"}
-                                size={12}
-                                color={theme.colors.textTertiary}
-                            />
-                            <Feather name="archive" size={14} color={theme.colors.textTertiary} />
-                            <Text style={styles.workspaceName} numberOfLines={1}>
-                                Archived
-                            </Text>
-                            <Text style={styles.workspaceCount}>
-                                {archivedConversations.length}
-                            </Text>
-                        </Pressable>
+                        <View style={styles.workspaceHeaderRow}>
+                            <Pressable
+                                style={styles.workspaceHeader}
+                                onPress={() => setArchivedExpanded((prev) => !prev)}
+                            >
+                                <Feather name="archive" size={14} color={theme.colors.textTertiary} />
+                                <Text style={styles.workspaceName} numberOfLines={1}>
+                                    Archived
+                                </Text>
+                                <Text style={styles.workspaceCount}>
+                                    {archivedConversations.length}
+                                </Text>
+                            </Pressable>
+                            <View style={styles.workspaceMenuSpacer} />
+                        </View>
                         {archivedExpanded &&
                             archivedConversations.map((conversation) => {
                                 const metadata = buildArchivedConversationMetadata(
@@ -1984,6 +1982,10 @@ function createStyles(theme: AppTheme) {
             borderRadius: theme.borderRadius.sm,
             alignItems: "center",
             justifyContent: "center",
+            marginRight: theme.spacing.sm,
+        },
+        workspaceMenuSpacer: {
+            width: 26,
             marginRight: theme.spacing.sm,
         },
         workspaceAddBtnPressed: {

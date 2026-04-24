@@ -6,7 +6,9 @@ type Props = {
     size?: number;
 };
 
-export function CopilotBadge({ size = 28 }: Props) {
+export function CopilotBadge({
+    size = 28,
+}: Props) {
     return (
         <View
             style={[

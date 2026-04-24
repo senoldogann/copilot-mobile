@@ -167,6 +167,8 @@ function createWSClient(port: number): Promise<WSClient> {
 
 class FakeSession implements AdaptedCopilotSession {
     public readonly id = "session-test";
+    public closeCallCount = 0;
+    public unsubscribeAllCallCount = 0;
     private info: SessionInfo = {
         id: this.id,
         model: "gpt-4.1",
@@ -283,10 +285,13 @@ class FakeSession implements AdaptedCopilotSession {
     }
 
     unsubscribeAll(): void {
+        this.unsubscribeAllCallCount += 1;
         this.handlers = {};
     }
 
-    close(): void { }
+    close(): void {
+        this.closeCallCount += 1;
+    }
 
     getInfo(): SessionInfo {
         return this.info;
@@ -332,6 +337,10 @@ class FakeSession implements AdaptedCopilotSession {
         }
 
         return handler(request);
+    }
+
+    emitSessionError(errorType: string, message: string): void {
+        this.handlers.onSessionError?.(errorType, message);
     }
 }
 
@@ -549,6 +558,65 @@ describe("bridge reconnect and auth integration", () => {
         }
     });
 
+    it("rate limits repeated auth.resume attempts from the same client ip", async () => {
+        const token = generatePairingToken();
+        const pairedClient = await createWSClient(TEST_PORT);
+
+        try {
+            pairedClient.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            const pairingMessage = await pairedClient.waitForMessage("auth.authenticated");
+            assert.equal(pairingMessage.type, "auth.authenticated");
+            await pairedClient.close();
+
+            for (let attempt = 0; attempt < 10; attempt += 1) {
+                const client = await createWSClient(TEST_PORT);
+                try {
+                    client.send(makeClientMessage("auth.resume", {
+                        deviceCredential: pairingMessage.payload.deviceCredential,
+                        sessionToken: pairingMessage.payload.sessionToken,
+                        lastSeenSeq: pairingMessage.seq,
+                        transportMode: "direct",
+                    }));
+                    const authenticated = await client.waitForMessage("auth.authenticated");
+                    assert.equal(authenticated.type, "auth.authenticated");
+                } finally {
+                    await client.close();
+                }
+            }
+
+            const blockedClient = await createWSClient(TEST_PORT);
+            try {
+                const closeEvent = new Promise<{ code: number; reason: string }>((resolve) => {
+                    blockedClient.ws.once("close", (code, reason) => {
+                        resolve({ code, reason: reason.toString("utf-8") });
+                    });
+                });
+
+                blockedClient.send(makeClientMessage("auth.resume", {
+                    deviceCredential: pairingMessage.payload.deviceCredential,
+                    sessionToken: pairingMessage.payload.sessionToken,
+                    lastSeenSeq: pairingMessage.seq,
+                    transportMode: "direct",
+                }));
+
+                const closed = await closeEvent;
+                assert.equal(closed.code, 1008);
+                assert.equal(closed.reason, "Rate limit exceeded");
+            } finally {
+                if (blockedClient.ws.readyState !== WebSocket.CLOSED) {
+                    await blockedClient.close();
+                }
+            }
+        } finally {
+            if (pairedClient.ws.readyState !== WebSocket.CLOSED) {
+                await pairedClient.close();
+            }
+        }
+    });
+
     it("replays pending permission prompts after reconnect", async () => {
         const token = generatePairingToken();
         const clientA = await createWSClient(TEST_PORT);
@@ -596,6 +664,52 @@ describe("bridge reconnect and auth integration", () => {
                     approved: true,
                 }));
                 assert.equal(await pendingDecision, true);
+            } finally {
+                await clientB.close();
+            }
+        } finally {
+            if (clientA.ws.readyState !== WebSocket.CLOSED) {
+                await clientA.close();
+            }
+        }
+    });
+
+    it("does not replay stale error messages after reconnect", async () => {
+        const token = generatePairingToken();
+        const clientA = await createWSClient(TEST_PORT);
+
+        try {
+            clientA.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            const pairingMessage = await clientA.waitForMessage("auth.authenticated");
+            assert.equal(pairingMessage.type, "auth.authenticated");
+
+            clientA.send(makeClientMessage("message.send", {
+                sessionId: "missing-session",
+                content: "hello",
+            }));
+            const errorMessage = await clientA.waitForMessage("error");
+            assert.equal(errorMessage.type, "error");
+            await clientA.close();
+
+            const clientB = await createWSClient(TEST_PORT);
+            try {
+                clientB.send(makeClientMessage("auth.resume", {
+                    deviceCredential: pairingMessage.payload.deviceCredential,
+                    sessionToken: pairingMessage.payload.sessionToken,
+                    lastSeenSeq: errorMessage.seq,
+                    transportMode: "direct",
+                }));
+                const authenticated = await clientB.waitForMessage("auth.authenticated");
+                assert.equal(authenticated.type, "auth.authenticated");
+
+                await wait(100);
+                assert.equal(
+                    clientB.messages.some((message) => message.type === "error"),
+                    false
+                );
             } finally {
                 await clientB.close();
             }
@@ -740,6 +854,37 @@ describe("bridge reconnect and auth integration", () => {
                 relevantTypes,
                 ["session.resumed", "assistant.message", "session.history"]
             );
+        } finally {
+            await client.close();
+        }
+    });
+
+    it("cleans up session handlers explicitly when deleting a session", async () => {
+        const token = generatePairingToken();
+        const client = await createWSClient(TEST_PORT);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await client.waitForMessage("session.created");
+
+            client.send(makeClientMessage("session.delete", { sessionId: session.id }));
+            await wait(25);
+
+            assert.equal(session.unsubscribeAllCallCount, 1);
+            assert.equal(session.closeCallCount, 1);
         } finally {
             await client.close();
         }

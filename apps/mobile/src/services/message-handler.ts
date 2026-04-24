@@ -58,6 +58,19 @@ type AssistantInternalExtraction = {
     systemNotifications: ReadonlyArray<string>;
 };
 
+type MergeCandidateBucket = {
+    indexes: number[];
+    cursor: number;
+};
+
+type IndexedMergeCandidates = {
+    messageById: Map<string, MergeCandidateBucket>;
+    messageBySignature: Map<string, MergeCandidateBucket>;
+    toolByRequestId: Map<string, MergeCandidateBucket>;
+    streamingAssistantIndexes: number[];
+    streamingThinkingIndexes: number[];
+};
+
 const assistantSystemNotificationState = new Map<string, AssistantSystemNotificationBuffer>();
 const emittedSystemNotificationKeys = new Map<string, Set<string>>();
 
@@ -478,6 +491,117 @@ function mapHistoryItemWithStreamingState(
     };
 }
 
+function buildAttachmentSignature(
+    attachments: ReadonlyArray<{ mimeType: string; displayName?: string }>
+): string {
+    if (attachments.length === 0) {
+        return "";
+    }
+
+    return attachments
+        .map((attachment) => `${attachment.mimeType}:${attachment.displayName ?? ""}`)
+        .join("|");
+}
+
+function createCurrentMessageSignature(
+    item: Extract<ChatItem, { type: "user" | "assistant" | "thinking" }>
+): string {
+    const content = item.type === "assistant"
+        ? stripAssistantInternalMarkup(item.content)
+        : item.content;
+    const attachmentSignature = item.type === "user"
+        ? buildAttachmentSignature(item.attachments ?? [])
+        : "";
+    return `${item.type}:${content}:${attachmentSignature}`;
+}
+
+function createHistoryMessageSignature(
+    item: Extract<SessionHistoryItem, { type: "user" | "assistant" | "thinking" }>
+): string {
+    const content = item.type === "assistant"
+        ? stripAssistantInternalMarkup(item.content)
+        : item.content;
+    const attachmentSignature = item.type === "user"
+        ? buildAttachmentSignature(item.attachments ?? [])
+        : "";
+    return `${item.type}:${content}:${attachmentSignature}`;
+}
+
+function getOrCreateMergeCandidateBucket(
+    buckets: Map<string, MergeCandidateBucket>,
+    key: string
+): MergeCandidateBucket {
+    const existing = buckets.get(key);
+    if (existing !== undefined) {
+        return existing;
+    }
+
+    const created: MergeCandidateBucket = {
+        indexes: [],
+        cursor: 0,
+    };
+    buckets.set(key, created);
+    return created;
+}
+
+function takeNextUnmatchedBucketIndex(
+    bucket: MergeCandidateBucket | undefined,
+    matchedIndexes: ReadonlySet<number>
+): number {
+    if (bucket === undefined) {
+        return -1;
+    }
+
+    while (bucket.cursor < bucket.indexes.length) {
+        const index = bucket.indexes[bucket.cursor];
+        bucket.cursor += 1;
+        if (index !== undefined && !matchedIndexes.has(index)) {
+            return index;
+        }
+    }
+
+    return -1;
+}
+
+function buildIndexedMergeCandidates(
+    currentItems: ReadonlyArray<ChatItem>
+): IndexedMergeCandidates {
+    const messageById = new Map<string, MergeCandidateBucket>();
+    const messageBySignature = new Map<string, MergeCandidateBucket>();
+    const toolByRequestId = new Map<string, MergeCandidateBucket>();
+    const streamingAssistantIndexes: number[] = [];
+    const streamingThinkingIndexes: number[] = [];
+
+    currentItems.forEach((item, index) => {
+        if (item.type === "user" || item.type === "assistant" || item.type === "thinking") {
+            getOrCreateMergeCandidateBucket(messageById, `${item.type}:${item.id}`).indexes.push(index);
+            getOrCreateMergeCandidateBucket(
+                messageBySignature,
+                createCurrentMessageSignature(item)
+            ).indexes.push(index);
+
+            if (item.type === "assistant" && item.isStreaming) {
+                streamingAssistantIndexes.push(index);
+            } else if (item.type === "thinking" && item.isStreaming) {
+                streamingThinkingIndexes.push(index);
+            }
+            return;
+        }
+
+        if (item.type === "tool") {
+            getOrCreateMergeCandidateBucket(toolByRequestId, item.requestId).indexes.push(index);
+        }
+    });
+
+    return {
+        messageById,
+        messageBySignature,
+        toolByRequestId,
+        streamingAssistantIndexes,
+        streamingThinkingIndexes,
+    };
+}
+
 function mergeHistoryIntoExistingItems(
     currentItems: ReadonlyArray<ChatItem>,
     historyItems: ReadonlyArray<SessionHistoryItem>
@@ -485,6 +609,7 @@ function mergeHistoryIntoExistingItems(
     const matchedIndexes = new Set<number>();
     const mergedItems: Array<ChatItem> = [];
     let currentCursor = 0;
+    const indexedCandidates = buildIndexedMergeCandidates(currentItems);
 
     function appendPendingCurrentItemsBefore(targetIndex: number): void {
         while (currentCursor < targetIndex) {
@@ -509,10 +634,19 @@ function mergeHistoryIntoExistingItems(
 
         return leftAttachments.every((attachment, index) => {
             const rightAttachment = rightAttachments[index];
-            return rightAttachment !== undefined
-                && attachment.mimeType === rightAttachment.mimeType
-                && attachment.displayName === rightAttachment.displayName
-                && attachment.data === rightAttachment.data;
+            if (
+                rightAttachment === undefined
+                || attachment.mimeType !== rightAttachment.mimeType
+                || attachment.displayName !== rightAttachment.displayName
+            ) {
+                return false;
+            }
+
+            if (attachment.type === "upload_ref" || rightAttachment.type === "upload_ref") {
+                return true;
+            }
+
+            return attachment.data === rightAttachment.data;
         });
     }
 
@@ -545,7 +679,15 @@ function mergeHistoryIntoExistingItems(
     function findStreamingHistoryMatchIndex(
         historyItem: Extract<SessionHistoryItem, { type: "assistant" | "thinking" }>
     ): number {
-        for (let index = currentItems.length - 1; index >= 0; index -= 1) {
+        const streamingIndexes = historyItem.type === "assistant"
+            ? indexedCandidates.streamingAssistantIndexes
+            : indexedCandidates.streamingThinkingIndexes;
+
+        for (let cursor = streamingIndexes.length - 1; cursor >= 0; cursor -= 1) {
+            const index = streamingIndexes[cursor];
+            if (index === undefined) {
+                continue;
+            }
             if (matchedIndexes.has(index)) {
                 continue;
             }
@@ -569,11 +711,28 @@ function mergeHistoryIntoExistingItems(
 
     for (const historyItem of historyItems) {
         if (historyItem.type === "user" || historyItem.type === "assistant" || historyItem.type === "thinking") {
-            let existingIndex = currentItems.findIndex((item, index) =>
-                !matchedIndexes.has(index)
-                && (item.type === "user" || item.type === "assistant" || item.type === "thinking")
-                && isExactHistoryMessageMatch(historyItem, item)
+            let existingIndex = takeNextUnmatchedBucketIndex(
+                indexedCandidates.messageById.get(`${historyItem.type}:${historyItem.id}`),
+                matchedIndexes
             );
+
+            if (existingIndex === -1) {
+                existingIndex = takeNextUnmatchedBucketIndex(
+                    indexedCandidates.messageBySignature.get(createHistoryMessageSignature(historyItem)),
+                    matchedIndexes
+                );
+            }
+
+            if (existingIndex !== -1) {
+                const candidate = currentItems[existingIndex];
+                if (
+                    candidate === undefined
+                    || (candidate.type !== "user" && candidate.type !== "assistant" && candidate.type !== "thinking")
+                    || !isExactHistoryMessageMatch(historyItem, candidate)
+                ) {
+                    existingIndex = -1;
+                }
+            }
 
             if (
                 existingIndex === -1
@@ -601,10 +760,9 @@ function mergeHistoryIntoExistingItems(
             continue;
         }
 
-        const existingIndex = currentItems.findIndex((item, index) =>
-            !matchedIndexes.has(index)
-            && item.type === "tool"
-            && item.requestId === historyItem.requestId
+        const existingIndex = takeNextUnmatchedBucketIndex(
+            indexedCandidates.toolByRequestId.get(historyItem.requestId),
+            matchedIndexes
         );
 
         if (existingIndex === -1) {
@@ -647,6 +805,10 @@ function mergeHistoryIntoExistingItems(
 
     return mergedItems;
 }
+
+export const __testables = {
+    mergeHistoryIntoExistingItems,
+};
 
 function formatToolArguments(
     args: Record<string, unknown> | undefined
@@ -702,6 +864,12 @@ export function handleServerMessage(message: ServerMessage): void {
         if (sessionId === undefined) return true; // Some message types do not include sessionId.
         const { activeSessionId } = useSessionStore.getState();
         return activeSessionId !== null && activeSessionId === sessionId;
+    };
+
+    const clearLoadingForActiveSession = (sessionId: string): void => {
+        if (isActiveSession(sessionId)) {
+            sessionStore.setSessionLoading(false);
+        }
     };
 
     const isWorkspaceLoadError = (code: string): boolean => {
@@ -764,7 +932,6 @@ export function handleServerMessage(message: ServerMessage): void {
                 break;
             }
 
-            sessionStore.setSessionLoading(false);
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.setAbortRequested(false);
             sessionStore.upsertSession(message.payload.session);
@@ -786,6 +953,7 @@ export function handleServerMessage(message: ServerMessage): void {
             chatHistoryStore.setActiveConversation(conversationId);
             chatHistoryStore.markConversationSynced(conversationId, Date.now());
             const localItems = chatHistoryStore.getConversationItems(conversationId);
+            sessionStore.setSessionLoading(localItems.length === 0);
             if (localItems.length > 0) {
                 sessionStore.replaceChatItems(localItems);
                 sessionStore.setSubagentRuns(deriveSubagentRunsFromItems(localItems, false));
@@ -849,12 +1017,13 @@ export function handleServerMessage(message: ServerMessage): void {
 
             const { activeSessionId } = useSessionStore.getState();
             if (activeSessionId === null || activeSessionId !== message.payload.sessionId) {
-                console.warn("[MessageHandler] session.history: sessionId eşleşmiyor, yoksayılıyor");
+                console.warn("[MessageHandler] Ignoring session.history for an inactive session");
                 break;
             }
             if (sessionStore.chatItems.length > 0) {
                 const mergedItems = mergeHistoryIntoExistingItems(sessionStore.chatItems, message.payload.items);
                 sessionStore.replaceChatItems(mergedItems);
+                sessionStore.setSessionLoading(false);
                 sessionStore.setSubagentRuns(
                     deriveSubagentRunsFromItems(mergedItems, sessionStore.isAssistantTyping)
                 );
@@ -862,6 +1031,7 @@ export function handleServerMessage(message: ServerMessage): void {
             }
             const historyItems = message.payload.items.map(mapHistoryItemToChatItem);
             sessionStore.replaceChatItems(historyItems);
+            sessionStore.setSessionLoading(false);
             sessionStore.setSubagentRuns(
                 deriveSubagentRunsFromItems(historyItems, sessionStore.isAssistantTyping)
             );
@@ -877,11 +1047,13 @@ export function handleServerMessage(message: ServerMessage): void {
             const content = extractedContent.visibleContent;
             replaceBackgroundCompletionPreview(message.payload.sessionId, content);
             if (!isActiveSession(message.payload.sessionId)) break;
+            clearLoadingForActiveSession(message.payload.sessionId);
             sessionStore.finalizeAssistantMessage(content);
             break;
         }
 
         case "assistant.message_delta": {
+            clearLoadingForActiveSession(message.payload.sessionId);
             scheduleAssistantDeltaFlush(message.payload.sessionId, message.payload.delta);
             break;
         }
@@ -890,17 +1062,20 @@ export function handleServerMessage(message: ServerMessage): void {
             flushThinkingDeltaBuffer(message.payload.sessionId);
             if (!isActiveSession(message.payload.sessionId)) break;
             armBackgroundCompletion(message.payload.sessionId);
+            clearLoadingForActiveSession(message.payload.sessionId);
             sessionStore.finalizeThinking(message.payload.content);
             break;
         }
 
         case "assistant.reasoning_delta": {
+            clearLoadingForActiveSession(message.payload.sessionId);
             scheduleThinkingDeltaFlush(message.payload.sessionId, message.payload.delta);
             break;
         }
 
         case "tool.execution_start": {
             if (!isActiveSession(message.payload.sessionId)) break;
+            clearLoadingForActiveSession(message.payload.sessionId);
             sessionStore.setAssistantTyping(true);
             const formattedArguments = formatToolArguments(message.payload.arguments);
             sessionStore.addToolStart(
@@ -968,6 +1143,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "permission.request": {
+            clearLoadingForActiveSession(message.payload.sessionId);
             sessionStore.receivePermissionPrompt({
                 sessionId: message.payload.sessionId,
                 requestId: message.payload.requestId,
@@ -994,6 +1170,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "user_input.request": {
+            clearLoadingForActiveSession(message.payload.sessionId);
             sessionStore.receiveUserInputPrompt({
                 sessionId: message.payload.sessionId,
                 requestId: message.payload.requestId,

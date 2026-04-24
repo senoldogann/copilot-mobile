@@ -106,6 +106,16 @@ function toPersistedSnapshot(state: Pick<ChatHistoryStore, "conversations" | "ac
     };
 }
 
+function pruneConversationItemsToTrackedConversations(
+    conversationItems: Readonly<Record<string, ReadonlyArray<ChatItem>>>,
+    conversations: ReadonlyArray<Conversation>
+): Readonly<Record<string, ReadonlyArray<ChatItem>>> {
+    const trackedConversationIds = new Set(conversations.map((conversation) => conversation.id));
+    return Object.fromEntries(
+        Object.entries(conversationItems).filter(([conversationId]) => trackedConversationIds.has(conversationId))
+    );
+}
+
 async function flushPersistQueue(): Promise<void> {
     if (persistInFlight) {
         return;
@@ -311,11 +321,16 @@ function sanitizeConversation(input: unknown): Conversation | null {
 }
 
 async function persistChatHistory(snapshot: PersistedChatHistory): Promise<void> {
+    const conversations = snapshot.conversations.slice(0, MAX_CONVERSATIONS);
+    const conversationItems = pruneConversationItemsToTrackedConversations(
+        snapshot.conversationItems,
+        conversations
+    );
     const serialized = JSON.stringify({
-        conversations: snapshot.conversations.slice(0, MAX_CONVERSATIONS),
+        conversations,
         activeConversationId: snapshot.activeConversationId,
         conversationItems: Object.fromEntries(
-            Object.entries(snapshot.conversationItems).map(([conversationId, items]) => [
+            Object.entries(conversationItems).map(([conversationId, items]) => [
                 conversationId,
                 items.map((item) => compactChatItemForPersistence(item)),
             ])
@@ -352,13 +367,17 @@ async function loadPersistedChatHistory(): Promise<PersistedChatHistory | null> 
         typeof record["activeConversationId"] === "string"
             ? record["activeConversationId"]
             : null;
+    const conversationItems = pruneConversationItemsToTrackedConversations(
+        sanitizeConversationItems(record["conversationItems"]),
+        conversations
+    );
 
     const snapshot = {
         conversations,
         activeConversationId: conversations.some((item) => item.id === activeConversationId)
             ? activeConversationId
             : null,
-        conversationItems: sanitizeConversationItems(record["conversationItems"]),
+        conversationItems,
     };
 
     if (persistedRaw === null && legacyRaw !== null) {
@@ -388,10 +407,17 @@ export const useChatHistoryStore = create<ChatHistoryStore>((set, get) => ({
             archived: false,
             workspaceRoot,
         };
-        set((s) => ({
-            conversations: [conv, ...s.conversations].slice(0, MAX_CONVERSATIONS),
-            activeConversationId: id,
-        }));
+        set((state) => {
+            const conversations = [conv, ...state.conversations].slice(0, MAX_CONVERSATIONS);
+            return {
+                conversations,
+                activeConversationId: id,
+                conversationItems: pruneConversationItemsToTrackedConversations(
+                    state.conversationItems,
+                    conversations
+                ),
+            };
+        });
         schedulePersist(get());
         return id;
     },

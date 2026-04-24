@@ -14,12 +14,18 @@ type Props = { item: ToolItem };
 
 // ─── Tool classification ──────────────────────────────────────────────────────
 
-type ToolKind = "edit" | "create" | "shell" | "read" | "search" | "think" | "git" | "fetch" | "agent" | "skill" | "other";
+type ToolKind = "edit" | "create" | "shell" | "read" | "search" | "think" | "git" | "fetch" | "agent" | "skill" | "patch" | "other";
 type ToolSourceKind = "native" | "mcp" | "plugin" | "skill" | "subagent";
 type ToolSource = {
     kind: ToolSourceKind;
     label: string;
     detail?: string;
+};
+
+type ApplyPatchChange = {
+    action: "update" | "add" | "delete" | "move";
+    path: string;
+    nextPath?: string;
 };
 
 const EMPTY_PARSED_ARGS: ParsedArgs = {};
@@ -28,6 +34,7 @@ function classifyTool(toolName: string): ToolKind {
     const t = toolName.toLowerCase();
     if (isSubagentToolName(t)) return "agent";
     if (t === "skill") return "skill";
+    if (t === "apply_patch") return "patch";
     if (t.includes("edit") || t.includes("str_replace")) return "edit";
     if (t.includes("create") || t.includes("write")) return "create";
     if (t.includes("shell") || t.includes("bash") || t.includes("exec") || t.includes("run")) return "shell";
@@ -41,12 +48,12 @@ function classifyTool(toolName: string): ToolKind {
 
 const KIND_LABELS: Record<ToolKind, string> = {
     edit: "Edit", create: "Create", shell: "Shell", read: "Read",
-    search: "Search", think: "Thought", git: "Git", fetch: "Fetch", agent: "Subagent", skill: "Skill", other: "Tool",
+    search: "Search", think: "Thought", git: "Git", fetch: "Fetch", agent: "Subagent", skill: "Skill", patch: "Patch", other: "Tool",
 };
 
 const KIND_ICONS: Record<ToolKind, FeatherName> = {
     edit: "edit-2", create: "file-plus", shell: "terminal", read: "eye",
-    search: "search", think: "cpu", git: "git-branch", fetch: "globe", agent: "cpu", skill: "tool", other: "tool",
+    search: "search", think: "cpu", git: "git-branch", fetch: "globe", agent: "cpu", skill: "tool", patch: "edit-2", other: "tool",
 };
 
 function getToolLabel(toolName: string, kind: ToolKind): string {
@@ -133,6 +140,78 @@ function parseArgs(text: string | undefined): ParsedArgs {
         ...(parsed.mcpTool !== undefined ? { mcpTool: parsed.mcpTool } : {}),
         ...(parsed.appUri !== undefined ? { appUri: parsed.appUri } : {}),
     };
+}
+
+function parseApplyPatchChanges(text: string | undefined): ReadonlyArray<ApplyPatchChange> {
+    if (text === undefined || text.trim().length === 0) {
+        return [];
+    }
+
+    const changes: Array<ApplyPatchChange> = [];
+    const lines = text.split("\n");
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index]?.trimEnd() ?? "";
+        if (line.startsWith("*** Update File: ")) {
+            changes.push({
+                action: "update",
+                path: line.slice("*** Update File: ".length).trim(),
+            });
+            continue;
+        }
+        if (line.startsWith("*** Add File: ")) {
+            changes.push({
+                action: "add",
+                path: line.slice("*** Add File: ".length).trim(),
+            });
+            continue;
+        }
+        if (line.startsWith("*** Delete File: ")) {
+            changes.push({
+                action: "delete",
+                path: line.slice("*** Delete File: ".length).trim(),
+            });
+            continue;
+        }
+        if (line.startsWith("*** Move to: ")) {
+            const nextPath = line.slice("*** Move to: ".length).trim();
+            const previousChange = changes[changes.length - 1];
+            if (previousChange !== undefined) {
+                changes[changes.length - 1] = {
+                    action: "move",
+                    path: previousChange.path,
+                    nextPath,
+                };
+            }
+        }
+    }
+
+    return changes;
+}
+
+function formatApplyPatchChange(change: ApplyPatchChange): string {
+    switch (change.action) {
+        case "add":
+            return `Add ${change.path}`;
+        case "delete":
+            return `Delete ${change.path}`;
+        case "move":
+            return `Move ${change.path} -> ${change.nextPath ?? change.path}`;
+        default:
+            return `Update ${change.path}`;
+    }
+}
+
+function getApplyPatchSummary(changes: ReadonlyArray<ApplyPatchChange>): string {
+    if (changes.length === 0) {
+        return "Patch payload";
+    }
+
+    if (changes.length === 1) {
+        return formatApplyPatchChange(changes[0]!);
+    }
+
+    return `${changes.length} file changes`;
 }
 
 function formatEntityName(value: string): string {
@@ -311,7 +390,17 @@ function shortPath(p: string | undefined): string {
 
 type DiffLine = { type: "add" | "remove" | "context"; text: string };
 
-function computeDiff(oldStr: string, newStr: string, contextLines = 3): DiffLine[] {
+function yieldDiffWork(): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, 0);
+    });
+}
+
+async function computeDiffAsync(
+    oldStr: string,
+    newStr: string,
+    contextLines = 3
+): Promise<DiffLine[]> {
     const oldLines = oldStr.split("\n");
     const newLines = newStr.split("\n");
 
@@ -326,6 +415,10 @@ function computeDiff(oldStr: string, newStr: string, contextLines = 3): DiffLine
             const downVal = dp[i + 1]?.[j] ?? 0;
             const rightVal = dp[i]?.[j + 1] ?? 0;
             dp[i]![j] = a[i] === b[j] ? diagVal + 1 : Math.max(downVal, rightVal);
+        }
+
+        if (i % 24 === 0) {
+            await yieldDiffWork();
         }
     }
 
@@ -345,6 +438,10 @@ function computeDiff(oldStr: string, newStr: string, contextLines = 3): DiffLine
         } else {
             edits.push({ type: "remove", text: a[i] as string });
             i++;
+        }
+
+        if ((i + j) % 160 === 0) {
+            await yieldDiffWork();
         }
     }
 
@@ -379,14 +476,17 @@ function DiffView({ oldStr, newStr }: { oldStr: string; newStr: string }) {
     const [lines, setLines] = useState<ReadonlyArray<DiffLine> | null>(null);
 
     useEffect(() => {
+        let cancelled = false;
         setLines(null);
 
-        const task = InteractionManager.runAfterInteractions(() => {
-            setLines(computeDiff(oldStr, newStr));
+        void computeDiffAsync(oldStr, newStr).then((nextLines) => {
+            if (!cancelled) {
+                setLines(nextLines);
+            }
         });
 
         return () => {
-            task.cancel();
+            cancelled = true;
         };
     }, [oldStr, newStr]);
 
@@ -612,7 +712,7 @@ function MetaRow({ label, value, accent }: { label: string; value: string; accen
 
 function SourceBadge({ source }: { source: ToolSource }) {
     const styles = useThemedStyles(createStyles);
-    if (source.kind === "native") {
+    if (source.kind === "native" || source.kind === "skill" || source.kind === "subagent") {
         return null;
     }
 
@@ -628,12 +728,20 @@ function formatSourceRowValue(source: ToolSource): string | null {
         return null;
     }
 
+    if (source.kind === "skill" || source.kind === "subagent") {
+        return source.detail ?? source.label;
+    }
+
     return source.detail !== undefined ? `${source.label} · ${source.detail}` : source.label;
 }
 
 function formatSheetSubtitle(source: ToolSource, statusText: string): string {
     if (source.kind === "native") {
         return statusText;
+    }
+
+    if (source.kind === "skill" || source.kind === "subagent") {
+        return source.detail !== undefined ? `${source.detail} · ${statusText}` : statusText;
     }
 
     return source.detail !== undefined ? `${source.label} · ${source.detail} · ${statusText}` : `${source.label} · ${statusText}`;
@@ -762,6 +870,34 @@ function ToolDetail({
                 />
             )}
 
+            {kind === "patch" && (
+                <>
+                    <View style={styles.diffSection}>
+                        <Text style={styles.sectionTitle}>FILES</Text>
+                        <SummaryBlock
+                            text={(() => {
+                                const changes = parseApplyPatchChanges(item.argumentsText);
+                                return changes.length > 0
+                                    ? changes.map(formatApplyPatchChange).join("\n")
+                                    : "Patch body captured, but no file operations could be parsed.";
+                            })()}
+                        />
+                    </View>
+                    {item.argumentsText !== undefined && item.argumentsText.trim().length > 0 && (
+                        <View style={styles.diffSection}>
+                            <Text style={styles.sectionTitle}>PATCH</Text>
+                            <TerminalBlock command={null} output={item.argumentsText} />
+                        </View>
+                    )}
+                    {(item.partialOutput !== undefined || item.errorMessage !== undefined) && (
+                        <View style={styles.diffSection}>
+                            <Text style={styles.sectionTitle}>TOOL OUTPUT</Text>
+                            <TerminalBlock command={null} output={item.partialOutput ?? item.errorMessage} />
+                        </View>
+                    )}
+                </>
+            )}
+
             {kind === "read" && (
                 <View style={styles.diffSection}>
                     <Text style={styles.sectionTitle}>FILE CONTENT</Text>
@@ -854,6 +990,9 @@ function getRowSummary(kind: ToolKind, args: ParsedArgs, item: ToolItem): string
             return (args.thought ?? "").slice(0, 60) + ((args.thought ?? "").length > 60 ? "…" : "");
         case "fetch":
             return args.query ?? args.path ?? "";
+        case "patch": {
+            return getApplyPatchSummary(parseApplyPatchChanges(item.argumentsText));
+        }
         default: {
             const first = args.path ?? args.command ?? args.query ?? args.content ?? item.progressMessage ?? "";
             if (first.length > 0) return first.slice(0, 60);
@@ -1056,10 +1195,10 @@ const createDiffStyles = (theme: AppTheme) => StyleSheet.create({
 
 const createTerminalStyles = (theme: AppTheme) => StyleSheet.create({
     container: {
-        backgroundColor: theme.colors.codeBg,
+        backgroundColor: theme.variant === "amoled" ? theme.colors.bg : theme.colors.bgElevated,
         borderRadius: 6,
         borderWidth: 1,
-        borderColor: theme.colors.codeBorder,
+        borderColor: theme.colors.border,
         overflow: "hidden",
     },
     promptRow: {
@@ -1070,7 +1209,7 @@ const createTerminalStyles = (theme: AppTheme) => StyleSheet.create({
         paddingVertical: 8,
         backgroundColor: theme.variant === "amoled" ? theme.colors.bg : theme.colors.bgTertiary,
         borderBottomWidth: 1,
-        borderBottomColor: theme.colors.codeBorder,
+        borderBottomColor: theme.colors.borderMuted,
     },
     prompt: {
         color: theme.colors.success,
@@ -1089,7 +1228,7 @@ const createTerminalStyles = (theme: AppTheme) => StyleSheet.create({
     },
     divider: {
         height: 1,
-        backgroundColor: theme.colors.codeBorder,
+        backgroundColor: theme.colors.borderMuted,
     },
     outputBlock: {
         paddingHorizontal: theme.spacing.md,

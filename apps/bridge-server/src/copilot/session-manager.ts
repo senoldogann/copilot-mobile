@@ -40,6 +40,8 @@ import {
     switchWorkspaceBranch,
 } from "../utils/workspace.js";
 import type { createCompletionNotifier } from "../notifications/completion-notifier.js";
+import type { createAttachmentUploadStore } from "../uploads/attachment-upload-store.js";
+import type { createVSCodeExternalSessionStore } from "../vscode/external-session-store.js";
 
 type SendFn = (message: ServerMessage) => void;
 type CompletionNotifier = ReturnType<typeof createCompletionNotifier>;
@@ -131,7 +133,9 @@ function isSessionNotFoundResumeError(error: unknown): boolean {
 export function createSessionManager(
     copilotClient: AdaptedCopilotClient,
     send: SendFn,
-    completionNotifier: CompletionNotifier
+    completionNotifier: CompletionNotifier,
+    attachmentUploads: ReturnType<typeof createAttachmentUploadStore>,
+    externalSessionStore?: ReturnType<typeof createVSCodeExternalSessionStore>
 ) {
     const activeSessions = new Map<string, AdaptedCopilotSession>();
     const pendingPermissions = new Map<string, PendingPermission>();
@@ -174,6 +178,7 @@ export function createSessionManager(
             bridge: {
                 autoApproveReads,
                 readApprovalsConfigurable: true,
+                supportsAttachmentUploads: true,
             },
         };
     }
@@ -206,6 +211,29 @@ export function createSessionManager(
                 runtimeMode: state.runtimeMode,
                 busy: state.busy,
             },
+        });
+    }
+
+    function syncExternalSession(sessionId: string): void {
+        if (externalSessionStore === undefined) {
+            return;
+        }
+
+        const session = activeSessions.get(sessionId);
+        const state = sessionStates.get(sessionId);
+        if (session === undefined || state === undefined) {
+            return;
+        }
+
+        void externalSessionStore.syncSession({
+            session: session.getInfo(),
+            permissionLevel: state.permissionLevel,
+            busy: state.busy,
+        }).catch((error: unknown) => {
+            console.warn("[vscode-sync] Failed to sync external session", {
+                sessionId,
+                error: error instanceof Error ? error.message : String(error),
+            });
         });
     }
 
@@ -271,6 +299,7 @@ export function createSessionManager(
         }
         completionNotifier.onBusyStateChanged(sessionId, busy);
         emitSessionState(sessionId);
+        syncExternalSession(sessionId);
     }
 
     function resolvePendingSessionInteractions(sessionId: string): void {
@@ -664,6 +693,7 @@ export function createSessionManager(
 
         session.onTitleChanged((title: string) => {
             completionNotifier.updateSessionTitle(sessionId, title);
+            syncExternalSession(sessionId);
             emit({
                 ...makeBase(),
                 type: "session.title_changed",
@@ -702,6 +732,69 @@ export function createSessionManager(
     }
 
     return {
+        async startAttachmentUpload(
+            deviceId: string,
+            uploadId: string,
+            mimeType: string,
+            displayName?: string
+        ): Promise<void> {
+            try {
+                await attachmentUploads.startUpload(deviceId, uploadId, {
+                    mimeType,
+                    ...(displayName !== undefined ? { displayName } : {}),
+                });
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "error",
+                    payload: {
+                        code: "ATTACHMENT_UPLOAD_ERROR",
+                        message: error instanceof Error ? error.message : "Attachment upload start failed",
+                        retry: true,
+                    },
+                });
+            }
+        },
+
+        async appendAttachmentUploadChunk(
+            deviceId: string,
+            uploadId: string,
+            data: string
+        ): Promise<void> {
+            try {
+                await attachmentUploads.appendChunk(deviceId, uploadId, data);
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "error",
+                    payload: {
+                        code: "ATTACHMENT_UPLOAD_ERROR",
+                        message: error instanceof Error ? error.message : "Attachment upload chunk failed",
+                        retry: true,
+                    },
+                });
+            }
+        },
+
+        async completeAttachmentUpload(
+            deviceId: string,
+            uploadId: string
+        ): Promise<void> {
+            try {
+                await attachmentUploads.completeUpload(deviceId, uploadId);
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "error",
+                    payload: {
+                        code: "ATTACHMENT_UPLOAD_ERROR",
+                        message: error instanceof Error ? error.message : "Attachment upload completion failed",
+                        retry: true,
+                    },
+                });
+            }
+        },
+
         async createSession(
             config: SessionConfig,
             deviceId: string,
@@ -750,16 +843,21 @@ export function createSessionManager(
 
                 emitCapabilitiesState();
                 emitSessionState(session.id);
+                syncExternalSession(session.id);
 
                 if (initialMessage === undefined) {
                     return;
                 }
 
                 try {
+                    const resolvedAttachments = await attachmentUploads.resolveAttachments(
+                        deviceId,
+                        initialMessage.attachments
+                    );
                     setSessionBusy(session.id, true);
                     await session.send(
-                        initialMessage.attachments !== undefined && initialMessage.attachments.length > 0
-                            ? { prompt: initialMessage.prompt, attachments: initialMessage.attachments }
+                        resolvedAttachments !== undefined && resolvedAttachments.length > 0
+                            ? { prompt: initialMessage.prompt, attachments: resolvedAttachments }
                             : { prompt: initialMessage.prompt }
                     );
                 } catch (sendError) {
@@ -819,6 +917,7 @@ export function createSessionManager(
 
                 emitCapabilitiesState();
                 emitSessionState(session.id);
+                syncExternalSession(session.id);
 
                 void session.getHistory()
                     .then((history: ReadonlyArray<SessionHistoryItem>) => {
@@ -893,12 +992,21 @@ export function createSessionManager(
         async deleteSession(sessionId: string): Promise<void> {
             const session = activeSessions.get(sessionId);
             if (session !== undefined) {
-                session.close();
                 activeSessions.delete(sessionId);
+                session.unsubscribeAll();
+                session.close();
             }
             clearBusyWatchdog(sessionId);
             sessionStates.delete(sessionId);
             completionNotifier.forgetSession(sessionId);
+            if (externalSessionStore !== undefined) {
+                void externalSessionStore.removeSession(sessionId).catch((error: unknown) => {
+                    console.warn("[vscode-sync] Failed to remove external session", {
+                        sessionId,
+                        error: error instanceof Error ? error.message : String(error),
+                    });
+                });
+            }
             try {
                 await copilotClient.deleteSession(sessionId);
             } catch (err) {
@@ -939,9 +1047,10 @@ export function createSessionManager(
                 completionNotifier.bindSessionToDevice(sessionId, deviceId);
                 abortedSessionIds.delete(sessionId);
                 setSessionBusy(sessionId, true);
+                const resolvedAttachments = await attachmentUploads.resolveAttachments(deviceId, attachments);
                 await session.send(
-                    attachments !== undefined && attachments.length > 0
-                        ? { prompt: content, attachments }
+                    resolvedAttachments !== undefined && resolvedAttachments.length > 0
+                        ? { prompt: content, attachments: resolvedAttachments }
                         : { prompt: content }
                 );
             } catch (err) {

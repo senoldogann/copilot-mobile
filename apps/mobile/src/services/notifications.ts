@@ -7,12 +7,14 @@ import { BACKGROUND_NOTIFICATION_TASK } from "./notification-background-shared";
 const SESSION_EVENTS_CHANNEL_ID = "session-events";
 const MAX_LOCAL_NOTIFICATION_KEYS = 200;
 const LOCAL_NOTIFICATION_DEDUP_WINDOW_MS = 12_000;
+const REMOTE_PUSH_CACHE_TTL_MS = 5 * 60 * 1000;
 
 let initialized = false;
 let notificationResponseSubscription: { remove: () => void } | null = null;
 let lastHandledNotificationId: string | null = null;
 let notificationsModulePromise: Promise<typeof import("expo-notifications") | null> | null = null;
 let cachedRemotePushRegistration: RemotePushRegistration | null = null;
+let cachedRemotePushRegistrationAt = 0;
 let bridgeRegisteredPushToken: string | null = null;
 let backgroundNotificationTaskRegistered = false;
 const localNotificationKeys = new Set<string>();
@@ -291,13 +293,17 @@ export async function resolveRemotePushAvailability(
     const granted = await ensureNotificationPermission({ allowPrompt: options.allowPrompt });
     if (!granted) {
         cachedRemotePushRegistration = null;
+        cachedRemotePushRegistrationAt = 0;
         return { kind: "permission_denied" };
     }
 
-    if (cachedRemotePushRegistration !== null) {
+    const cachedRegistration = cachedRemotePushRegistration;
+    const cacheStillFresh = cachedRegistration !== null
+        && (Date.now() - cachedRemotePushRegistrationAt) < REMOTE_PUSH_CACHE_TTL_MS;
+    if (cacheStillFresh) {
         return {
             kind: "ready",
-            registration: cachedRemotePushRegistration,
+            registration: cachedRegistration,
         };
     }
 
@@ -325,12 +331,23 @@ export async function resolveRemotePushAvailability(
             ...(appVersion !== undefined ? { appVersion } : {}),
         };
         cachedRemotePushRegistration = nextRegistration;
+        cachedRemotePushRegistrationAt = Date.now();
 
         return {
             kind: "ready",
             registration: nextRegistration,
         };
     } catch (error) {
+        if (cachedRegistration !== null) {
+            console.warn("[notifications] Reusing cached push registration after refresh failure", {
+                error: readRemotePushRegistrationError(error),
+            });
+            return {
+                kind: "ready",
+                registration: cachedRegistration,
+            };
+        }
+
         useConnectionStore.getState().setError(
             `Failed to register remote notifications: ${readRemotePushRegistrationError(error)}`
         );
@@ -424,6 +441,21 @@ export async function notifySessionActionRequired(input: {
     });
 }
 
+export function getPresentedCompletionNotificationIds(
+    presentedNotifications: ReadonlyArray<{
+        request: {
+            identifier: string;
+            content: {
+                data?: Record<string, unknown>;
+            };
+        };
+    }>
+): ReadonlyArray<string> {
+    return presentedNotifications
+        .filter((notification) => notification.request.content.data?.["kind"] === "session-complete")
+        .map((notification) => notification.request.identifier);
+}
+
 async function scheduleSessionNotification(input: {
     sessionId: string;
     title: string;
@@ -474,7 +506,12 @@ export async function dismissCompletionNotifications(): Promise<void> {
     if (notifications === null) return;
 
     try {
-        await notifications.dismissAllNotificationsAsync();
+        const presentedNotifications = await notifications.getPresentedNotificationsAsync();
+        const completionNotificationIds = getPresentedCompletionNotificationIds(presentedNotifications);
+
+        await Promise.all(
+            completionNotificationIds.map((identifier) => notifications.dismissNotificationAsync(identifier))
+        );
     } catch (error) {
         useConnectionStore.getState().setError(
             `Failed to clear completion notifications: ${error instanceof Error ? error.message : String(error)}`

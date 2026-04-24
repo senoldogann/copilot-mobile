@@ -30,6 +30,7 @@ import {
     removeDeferredPromptByRequestId,
     sortSessionsByActivity,
 } from "./session-store-helpers";
+import { areSubagentRunsEqual } from "../utils/tool-introspection";
 
 export { deriveAvailableReasoningEfforts } from "./session-store-helpers";
 export type {
@@ -51,23 +52,6 @@ export type {
 
 const MAX_TOOL_PROGRESS_MESSAGES = 40;
 
-function areSubagentRunsEqual(
-    left: ReadonlyArray<SubagentRun>,
-    right: ReadonlyArray<SubagentRun>
-): boolean {
-    if (left.length !== right.length) {
-        return false;
-    }
-
-    return left.every((run, index) => {
-        const candidate = right[index];
-        return candidate !== undefined
-            && candidate.requestId === run.requestId
-            && candidate.title === run.title
-            && candidate.status === run.status;
-    });
-}
-
 export const useSessionStore = create<SessionStore>((set) => ({
     activeSessionId: null,
     isSessionLoading: false,
@@ -81,7 +65,11 @@ export const useSessionStore = create<SessionStore>((set) => ({
     permissionLevel: "default",
     runtimeMode: "interactive",
     hostCapabilities: { elicitation: false },
-    bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
+    bridgeSettings: {
+        autoApproveReads: false,
+        readApprovalsConfigurable: true,
+        supportsAttachmentUploads: false,
+    },
 
     chatItems: [],
     busySessions: {},
@@ -1003,6 +991,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             chatItems: [...items],
             isAssistantTyping: false,
             isAbortRequested: false,
+            currentIntent: null,
             agentTodos: [],
             subagentRuns: [],
             permissionPrompt: null,
@@ -1045,7 +1034,11 @@ export const useSessionStore = create<SessionStore>((set) => ({
             permissionLevel: "default",
             runtimeMode: "interactive",
             hostCapabilities: { elicitation: false },
-            bridgeSettings: { autoApproveReads: false, readApprovalsConfigurable: true },
+            bridgeSettings: {
+                autoApproveReads: false,
+                readApprovalsConfigurable: true,
+                supportsAttachmentUploads: false,
+            },
             chatItems: [],
             busySessions: {},
             isAssistantTyping: false,

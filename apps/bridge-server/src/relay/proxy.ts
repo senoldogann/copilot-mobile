@@ -28,6 +28,7 @@ export type RelayProxy = {
 const BASE_RECONNECT_DELAY_MS = 1_000;
 const MAX_RECONNECT_DELAY_MS = 30_000;
 const LOCAL_BRIDGE_RECONNECT_DELAY_MS = 1_000;
+const MAX_BUFFERED_MOBILE_MESSAGES = 100;
 const RELAY_PROXY_HEADER = "x-copilot-mobile-relay-proxy";
 const RELAY_COMPANION_ID_HEADER = "x-copilot-mobile-companion-id";
 
@@ -131,6 +132,19 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
         }
     }
 
+    function handleBufferedMobileOverflow(): void {
+        console.warn("[relay] Local bridge buffer limit reached; closing mobile tunnel", {
+            companionId: config.companionId,
+            bufferedMessages: bufferedMobileMessages.length,
+        });
+        bufferedMobileMessages.length = 0;
+        sendRelayControlMessage({
+            type: "mobile.close",
+            companionId: config.companionId,
+            reason: "Local bridge unavailable. Please retry.",
+        });
+    }
+
     function connectLocalBridge(): void {
         clearLocalBridgeReconnectTimer();
 
@@ -193,6 +207,14 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
 
             case "mobile.message":
                 if (localBridgeSocket === null || localBridgeSocket.readyState !== WebSocket.OPEN) {
+                    if (bufferedMobileMessages.length >= MAX_BUFFERED_MOBILE_MESSAGES) {
+                        handleBufferedMobileOverflow();
+                        if (localBridgeSocket === null) {
+                            connectLocalBridge();
+                        }
+                        return;
+                    }
+
                     bufferedMobileMessages.push(message.data);
                     if (localBridgeSocket === null) {
                         connectLocalBridge();

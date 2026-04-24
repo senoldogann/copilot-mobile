@@ -170,25 +170,37 @@ export function createWSClient(config: WSClientConfig) {
         }, AUTHENTICATION_TIMEOUT_MS);
     }
 
-    function sendRaw(message: ClientMessage): void {
-        if (ws !== null && ws.readyState === WebSocket.OPEN) {
+    function sendRaw(message: ClientMessage): boolean {
+        if (ws === null || ws.readyState !== WebSocket.OPEN) {
+            return false;
+        }
+
+        try {
             ws.send(JSON.stringify(message));
+            return true;
+        } catch {
+            return false;
         }
     }
 
     function flushPending(): void {
         while (pendingMessages.length > 0) {
-            const pending = pendingMessages.shift();
-            if (pending !== undefined) {
-                sendRaw(pending.message);
-                pending.resolve();
+            const pending = pendingMessages[0];
+            if (pending === undefined) {
+                return;
             }
+
+            if (!sendRaw(pending.message)) {
+                return;
+            }
+
+            pendingMessages.shift();
+            pending.resolve();
         }
     }
 
     function send(message: ClientMessage): Promise<void> {
-        if (state === "authenticated" && ws !== null && ws.readyState === WebSocket.OPEN) {
-            sendRaw(message);
+        if (state === "authenticated" && sendRaw(message)) {
             return Promise.resolve();
         }
 

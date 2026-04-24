@@ -225,14 +225,7 @@ export function buildArchivedConversationMetadata(
     now: number
 ): ProviderMetadata {
     if (sessionId === null) {
-        const metadata = buildLocalDraftMetadata();
-        return {
-            ...metadata,
-            chips: [
-                ...metadata.chips,
-                { label: "Archived", tone: "warning" },
-            ],
-        };
+        return buildLocalDraftMetadata();
     }
 
     const metadata = workspaceRoot === null
@@ -249,11 +242,5 @@ export function buildArchivedConversationMetadata(
             now,
         );
 
-    return {
-        ...metadata,
-        chips: [
-            ...metadata.chips,
-            { label: "Archived", tone: "warning" },
-        ],
-    };
+    return metadata;
 }

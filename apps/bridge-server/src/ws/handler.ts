@@ -15,7 +15,12 @@ import {
     verifySessionToken,
 } from "../auth/jwt.js";
 import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
-import { checkMessageRateLimit, checkReplayProtection } from "../utils/rate-limit.js";
+import {
+    checkMessageRateLimit,
+    checkOperationRateLimit,
+    checkReplayProtection,
+    type OperationRateLimitBucket,
+} from "../utils/rate-limit.js";
 import { searchWorkspaceDirectories } from "../utils/workspace-search.js";
 import type { createSessionManager } from "../copilot/session-manager.js";
 
@@ -69,6 +74,7 @@ export function createMessageHandler(
         tokenIssuedAt: 0,
         transportMode: null,
     };
+    let tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
     function makeBase() {
         return {
@@ -85,6 +91,32 @@ export function createMessageHandler(
             type: "error",
             payload: { code, message, retry },
         });
+    }
+
+    function clearTokenRefreshTimer(): void {
+        if (tokenRefreshTimer === null) {
+            return;
+        }
+
+        clearTimeout(tokenRefreshTimer);
+        tokenRefreshTimer = null;
+    }
+
+    function scheduleTokenRefresh(): void {
+        clearTokenRefreshTimer();
+        if (!state.authenticated || state.deviceId === null) {
+            return;
+        }
+
+        const refreshDelayMs = Math.max(
+            (state.tokenIssuedAt + SESSION_TOKEN_REFRESH_THRESHOLD_MS) - Date.now(),
+            0
+        );
+        tokenRefreshTimer = setTimeout(() => {
+            tokenRefreshTimer = null;
+            checkTokenRefresh();
+        }, refreshDelayMs);
+        tokenRefreshTimer.unref?.();
     }
 
     function logValidationFailure(parsed: unknown, issues: ReadonlyArray<{ path: string; message: string }>): void {
@@ -194,6 +226,43 @@ export function createMessageHandler(
                 sessionTokenExpiresAt: nextToken.expiresAt,
             },
         });
+        scheduleTokenRefresh();
+    }
+
+    function getOperationRateLimitConfig(
+        message: ClientMessage
+    ): { bucket: OperationRateLimitBucket; errorMessage: string } | null {
+        switch (message.type) {
+            case "session.create":
+                return {
+                    bucket: "session.create",
+                    errorMessage: "Too many session creations, slow down",
+                };
+
+            case "workspace.search.request":
+            case "workspace.tree.request":
+            case "workspace.git.request":
+            case "workspace.file.request":
+            case "workspace.resolve.request":
+            case "workspace.diff.request":
+                return {
+                    bucket: "workspace-read",
+                    errorMessage: "Too many workspace reads, slow down",
+                };
+
+            case "workspace.pull":
+            case "workspace.commit":
+            case "workspace.push":
+            case "workspace.branch.switch":
+            case "workspace.branch.create":
+                return {
+                    bucket: "workspace-write",
+                    errorMessage: "Too many workspace changes, slow down",
+                };
+
+            default:
+                return null;
+        }
     }
 
     function handlePair(pairingToken: string, transportMode: TransportMode): void {
@@ -218,6 +287,7 @@ export function createMessageHandler(
         state.transportMode = transportMode;
 
         sendAuthenticatedMessage("pair", 0);
+        scheduleTokenRefresh();
         onAuthenticated?.("pair", false, deviceId);
         sessionManager.emitCapabilitiesState();
 
@@ -264,6 +334,7 @@ export function createMessageHandler(
 
         const missedMessages = messageBuffer.filter((message) => message.seq > payload.lastSeenSeq);
         sendAuthenticatedMessage("resume", missedMessages.length);
+        scheduleTokenRefresh();
         onAuthenticated?.("resume", true, verifiedDeviceId);
 
         for (const message of missedMessages) {
@@ -326,6 +397,18 @@ export function createMessageHandler(
                 }
             }
 
+            const operationRateLimit = state.deviceId !== null
+                ? getOperationRateLimitConfig(message)
+                : null;
+            if (
+                state.deviceId !== null
+                && operationRateLimit !== null
+                && !checkOperationRateLimit(state.deviceId, operationRateLimit.bucket)
+            ) {
+                sendError("RATE_LIMIT", operationRateLimit.errorMessage, false);
+                return;
+            }
+
             await this.dispatch(message);
             checkTokenRefresh();
         },
@@ -355,6 +438,27 @@ export function createMessageHandler(
 
                 case "session.delete":
                     return sessionManager.deleteSession(message.payload.sessionId);
+
+                case "attachment.upload.start":
+                    return sessionManager.startAttachmentUpload(
+                        requireDeviceId(),
+                        message.payload.uploadId,
+                        message.payload.mimeType,
+                        message.payload.displayName
+                    );
+
+                case "attachment.upload.chunk":
+                    return sessionManager.appendAttachmentUploadChunk(
+                        requireDeviceId(),
+                        message.payload.uploadId,
+                        message.payload.data
+                    );
+
+                case "attachment.upload.complete":
+                    return sessionManager.completeAttachmentUpload(
+                        requireDeviceId(),
+                        message.payload.uploadId
+                    );
 
                 case "message.send":
                     return sessionManager.sendMessage(
@@ -538,6 +642,7 @@ export function createMessageHandler(
         },
 
         cleanup(): void {
+            clearTokenRefreshTimer();
             sessionManager.cleanupOnDisconnect();
         },
     };

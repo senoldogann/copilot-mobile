@@ -69,6 +69,11 @@ async function createTestRelayServer(): Promise<TestRelayServer> {
                     const payload = JSON.parse(String(data)) as { type: string; data?: string };
                     if (payload.type === "mobile.message" && payload.data !== undefined && room.mobile !== null) {
                         room.mobile.send(payload.data);
+                        return;
+                    }
+
+                    if (payload.type === "mobile.close" && room.mobile !== null) {
+                        room.mobile.close(1013, payload.reason ?? "Companion requested close");
                     }
                 });
 
@@ -296,5 +301,40 @@ describe("relay proxy", () => {
         assert.equal(status.connectedToRelay, true);
         assert.equal(status.connectedToLocalBridge, true);
         assert.equal(status.companionId, companionId);
+    });
+
+    it("closes the mobile tunnel when the local bridge buffer overflows", async () => {
+        process.env["COPILOT_MOBILE_RELAY_SECRET"] = "relay-test-secret-0123456789abcdef";
+        const relayServer = await createTestRelayServer();
+        cleanupCallbacks.push(() => relayServer.close());
+
+        const companionId = "companion-overflow";
+        const relayProxy = createRelayProxy({
+            relayUrl: `${relayServer.url}/connect/companion/${companionId}`,
+            localBridgeUrl: "ws://127.0.0.1:9",
+            companionId,
+            accessToken: createRelayAccessToken("companion", companionId),
+        });
+        relayProxy.start();
+        cleanupCallbacks.push(async () => {
+            relayProxy.shutdown();
+        });
+
+        const mobileSocket = new WebSocket(`${relayServer.url}/connect/mobile/${companionId}`);
+        await once(mobileSocket, "open");
+        mobileSocket.send(JSON.stringify({
+            type: "relay.connect",
+            role: "mobile",
+            accessToken: createRelayAccessToken("mobile", companionId),
+        }));
+
+        const closeEventPromise = once(mobileSocket, "close");
+        for (let index = 0; index <= 100; index += 1) {
+            mobileSocket.send(JSON.stringify({ type: "queued", index }));
+        }
+
+        const [closeCode, closeReason] = await closeEventPromise;
+        assert.equal(closeCode, 1013);
+        assert.equal(String(closeReason), "Local bridge unavailable. Please retry.");
     });
 });

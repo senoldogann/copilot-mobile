@@ -1,5 +1,5 @@
 import React from "react";
-import { Image, StyleSheet, View } from "react-native";
+import { Image, StyleSheet } from "react-native";
 
 export const APP_LOGO_BACKGROUND_COLOR = "#161918";
 export const APP_LOGO_SOURCE = require("../../assets/icon.png");
@@ -12,38 +12,23 @@ export function AppLogoMark({ size }: AppLogoMarkProps) {
     const resolvedSize = size ?? 64;
 
     return (
-        <View
+        <Image
+            source={APP_LOGO_SOURCE}
+            defaultSource={APP_LOGO_SOURCE}
+            fadeDuration={0}
             style={[
-                styles.container,
+                styles.image,
                 {
                     width: resolvedSize,
                     height: resolvedSize,
                     borderRadius: Math.max(10, resolvedSize * 0.24),
                 },
             ]}
-        >
-            <Image
-                source={APP_LOGO_SOURCE}
-                defaultSource={APP_LOGO_SOURCE}
-                fadeDuration={0}
-                style={[
-                    styles.image,
-                    {
-                        width: resolvedSize,
-                        height: resolvedSize,
-                        borderRadius: Math.max(10, resolvedSize * 0.24),
-                    },
-                ]}
-            />
-        </View>
+        />
     );
 }
 
 const styles = StyleSheet.create({
-    container: {
-        overflow: "hidden",
-        backgroundColor: APP_LOGO_BACKGROUND_COLOR,
-    },
     image: {
         resizeMode: "cover",
     },

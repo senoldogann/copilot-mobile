@@ -13,9 +13,12 @@ import {
     Alert,
     AppState,
     Keyboard,
+    Platform,
 } from "react-native";
 import Svg, { Circle } from "react-native-svg";
 import * as ImagePicker from "expo-image-picker";
+import { File } from "expo-file-system";
+import * as ImageManipulator from "expo-image-manipulator";
 import { ExpoSpeechRecognitionModule, useSpeechRecognitionEvent } from "expo-speech-recognition";
 import { useSessionStore } from "../stores/session-store";
 import { deriveAvailableReasoningEfforts } from "../stores/session-store-helpers";
@@ -71,6 +74,13 @@ import {
     GitHubIcon,
 } from "./ProviderIcon";
 import { ReasoningEffortIcon } from "./Icons";
+import {
+    MAX_MESSAGE_IMAGE_ATTACHMENTS,
+} from "../utils/attachment-upload";
+import {
+    shouldAutoStopVoiceCapture,
+    shouldDismissVoiceInputError,
+} from "../utils/voice-input";
 
 // --- Effort labels ---
 
@@ -616,6 +626,8 @@ const VOICE_CONTEXTUAL_STRINGS: ReadonlyArray<string> = [
 ];
 
 const DEFAULT_SPEECH_LOCALE = "en-US";
+const DEFAULT_IMAGE_COMPRESSION_QUALITY = 0.82;
+const MAX_ATTACHMENT_LONGEST_EDGE = 1600;
 
 const PREFERRED_SPEECH_LOCALES: Readonly<Record<string, string>> = {
     en: "en-US",
@@ -757,6 +769,85 @@ function appendComposerText(currentInput: string, text: string): { text: string;
     return {
         text: nextText,
         selection: { start: nextCursor, end: nextCursor },
+    };
+}
+
+function ensureJpegFileName(fileName: string): string {
+    return fileName.replace(/\.[^.]+$/, "").concat(".jpg");
+}
+
+function createAttachmentFileName(fileName: string | null | undefined, fallbackPrefix: string): string {
+    if (fileName !== undefined && fileName !== null && fileName.trim().length > 0) {
+        return fileName;
+    }
+
+    return `${fallbackPrefix}-${Date.now()}.jpg`;
+}
+
+function createResizeActions(
+    width: number,
+    height: number,
+    targetLongestEdge: number
+): Array<{ resize: { width?: number; height?: number } }> {
+    const longestEdge = Math.max(width, height, 1);
+    if (targetLongestEdge >= longestEdge) {
+        return [];
+    }
+
+    if (width >= height) {
+        return [{ resize: { width: targetLongestEdge } }];
+    }
+
+    return [{ resize: { height: targetLongestEdge } }];
+}
+
+async function loadBase64Attachment(uri: string): Promise<string> {
+    return new File(uri).base64();
+}
+
+async function prepareImageAttachment(
+    asset: ImagePicker.ImagePickerAsset
+): Promise<{ attachment: ImageAttachment; wasCompressed: boolean }> {
+    const originalFileName = createAttachmentFileName(asset.fileName, "image");
+    const originalMimeType = asset.mimeType ?? "image/jpeg";
+    const longestEdge = Math.max(asset.width, asset.height, 1);
+
+    if (longestEdge <= MAX_ATTACHMENT_LONGEST_EDGE) {
+        const originalBase64 = await loadBase64Attachment(asset.uri);
+        return {
+            attachment: {
+                uri: asset.uri,
+                width: asset.width,
+                height: asset.height,
+                fileName: originalFileName,
+                mimeType: originalMimeType,
+                base64Data: originalBase64,
+            },
+            wasCompressed: false,
+        };
+    }
+
+    const result = await ImageManipulator.manipulateAsync(
+        asset.uri,
+        createResizeActions(asset.width, asset.height, MAX_ATTACHMENT_LONGEST_EDGE),
+        {
+            base64: true,
+            compress: DEFAULT_IMAGE_COMPRESSION_QUALITY,
+            format: ImageManipulator.SaveFormat.JPEG,
+        }
+    );
+    const base64Data = result.base64 ?? await loadBase64Attachment(result.uri);
+
+    return {
+        attachment: {
+            uri: result.uri,
+            width: result.width,
+            height: result.height,
+            fileName: ensureJpegFileName(originalFileName),
+            mimeType: "image/jpeg",
+            base64Data,
+        },
+        wasCompressed: true,
     };
 }
 
@@ -1062,9 +1153,11 @@ function ChatInputComponent({
     const [workspaceFileMatches, setWorkspaceFileMatches] = useState<ReadonlyArray<string>>([]);
     const [voiceState, setVoiceState] = useState<"idle" | "starting" | "recording">("idle");
     const lastSendSignatureRef = React.useRef<{ signature: string; sentAt: number } | null>(null);
+    const imagesRef = React.useRef<ReadonlyArray<ImageAttachment>>([]);
     const inputRefState = React.useRef("");
     const selectionRef = React.useRef<InputSelection>({ start: 0, end: 0 });
     const voiceStartPendingRef = React.useRef(false);
+    const voiceHeardSpeechRef = React.useRef(false);
     const supportedSpeechLocalesRef = React.useRef<ReadonlyArray<string> | null>(null);
     const voiceLocaleResolutionRef = React.useRef<SpeechLocaleResolution | null>(null);
     const voiceCaptureRef = React.useRef<VoiceCaptureState>({
@@ -1100,11 +1193,16 @@ function ChatInputComponent({
     }, [input]);
 
     useEffect(() => {
+        imagesRef.current = images;
+    }, [images]);
+
+    useEffect(() => {
         selectionRef.current = selection;
     }, [selection]);
 
     const resetVoiceCapture = useCallback(() => {
         voiceStartPendingRef.current = false;
+        voiceHeardSpeechRef.current = false;
         voiceLocaleResolutionRef.current = null;
         voiceCaptureRef.current = {
             active: false,
@@ -1140,7 +1238,7 @@ function ChatInputComponent({
             if (trimmed.length === 0 || disabled) return;
 
             const attachmentSignature = images.map((image) => (
-                `${image.fileName}:${image.base64Data.length}:${image.width}x${image.height}`
+                `${image.fileName}:${image.mimeType}:${image.base64Data.length}:${image.width}x${image.height}`
             )).join("|");
             const sendSignature = `${mode}::${trimmed}::${attachmentSignature}`;
             const now = Date.now();
@@ -1260,9 +1358,16 @@ function ChatInputComponent({
         setVoiceState("recording");
     });
 
+    useSpeechRecognitionEvent("speechstart", () => {
+        voiceHeardSpeechRef.current = true;
+    });
+
     useSpeechRecognitionEvent("result", (event) => {
         const transcript = event.results.map((result) => result.transcript).join(" ").trim();
         applyVoiceTranscript(transcript);
+        if (shouldAutoStopVoiceCapture(event.isFinal, transcript)) {
+            stopVoiceCapture(false);
+        }
     });
 
     useSpeechRecognitionEvent("end", () => {
@@ -1270,10 +1375,12 @@ function ChatInputComponent({
     });
 
     useSpeechRecognitionEvent("error", (event) => {
-        const wasActive = voiceCaptureRef.current.active;
+        const capture = voiceCaptureRef.current;
+        const wasActive = capture.active;
         const voiceLocaleResolution = voiceLocaleResolutionRef.current;
+        const heardSpeech = voiceHeardSpeechRef.current;
         resetVoiceCapture();
-        if (wasActive && event.error !== "aborted") {
+        if (wasActive && !shouldDismissVoiceInputError(event.error, capture.transcript, heardSpeech)) {
             if (voiceLocaleResolution?.usedFallback === true && isUnsupportedSpeechLocaleMessage(event.message)) {
                 Alert.alert(
                     "Voice input stopped",
@@ -1287,7 +1394,7 @@ function ChatInputComponent({
     });
 
     const startVoiceInput = useCallback(async () => {
-        if (disabled || voiceState !== "idle" || voiceStartPendingRef.current) {
+        if (disabled || isAbortPending || voiceState !== "idle" || voiceStartPendingRef.current) {
             return;
         }
 
@@ -1319,12 +1426,13 @@ function ChatInputComponent({
                 baseSelection: selectionRef.current,
                 transcript: "",
             };
+            voiceHeardSpeechRef.current = false;
             inputRef.current?.focus();
             ExpoSpeechRecognitionModule.start({
                 lang: localeResolution.resolvedLocale,
                 interimResults: true,
                 maxAlternatives: 1,
-                continuous: false,
+                continuous: Platform.OS !== "android" || Platform.Version >= 31,
                 addsPunctuation: true,
                 contextualStrings: [...VOICE_CONTEXTUAL_STRINGS],
             });
@@ -1334,7 +1442,7 @@ function ChatInputComponent({
             const message = getVoiceInputErrorMessage("start_failed", rawMessage);
             Alert.alert("Could not start voice input", message);
         }
-    }, [disabled, resetVoiceCapture, resolveActiveSpeechLocale, voiceAvailable, voiceState]);
+    }, [disabled, isAbortPending, resetVoiceCapture, resolveActiveSpeechLocale, voiceAvailable, voiceState]);
 
     const handleVoiceToggle = useCallback(() => {
         if (voiceState === "idle") {
@@ -1510,39 +1618,52 @@ function ChatInputComponent({
             const result = await ImagePicker.launchImageLibraryAsync({
                 mediaTypes: ["images"],
                 allowsMultipleSelection: true,
-                quality: 0.8,
-                base64: true,
+                quality: 1,
+                base64: false,
             });
 
             if (result.canceled) {
                 return;
             }
 
-            const newImages: Array<ImageAttachment> = result.assets.flatMap((asset) => {
-                if (asset.base64 === undefined || asset.base64 === null) {
-                    console.warn("[ChatInput] Skipped selected image because base64 data was missing");
-                    return [];
-                }
+            const availableSlots = Math.max(0, MAX_MESSAGE_IMAGE_ATTACHMENTS - imagesRef.current.length);
+            if (availableSlots === 0) {
+                Alert.alert(
+                    "Attachment limit reached",
+                    `You can attach up to ${MAX_MESSAGE_IMAGE_ATTACHMENTS} images per message.`,
+                );
+                return;
+            }
 
-                return [{
-                    uri: asset.uri,
-                    width: asset.width,
-                    height: asset.height,
-                    fileName: asset.fileName ?? `image-${Date.now()}.jpg`,
-                    mimeType: asset.mimeType ?? "image/jpeg",
-                    base64Data: asset.base64,
-                }];
-            });
+            const selectedAssets = result.assets.slice(0, availableSlots);
+            const skippedForCount = result.assets.length - selectedAssets.length;
+            const newImages: Array<ImageAttachment> = [];
+            let skippedCount = 0;
+
+            for (const asset of selectedAssets) {
+                const preparedAttachment = await prepareImageAttachment(asset);
+                newImages.push(preparedAttachment.attachment);
+            }
 
             if (newImages.length === 0) {
                 Alert.alert(
                     "Attachment unavailable",
-                    "The selected image could not be attached. Please try another image.",
+                    "The selected image could not be prepared for upload. Choose another image and try again.",
                 );
                 return;
             }
 
             setImages((prev) => [...prev, ...newImages]);
+            if (skippedCount > 0 || skippedForCount > 0) {
+                const notices: Array<string> = [];
+                if (skippedCount > 0) {
+                    notices.push(`${skippedCount} image${skippedCount > 1 ? "s could not" : " could not"} be prepared.`);
+                }
+                if (skippedForCount > 0) {
+                    notices.push(`Only ${MAX_MESSAGE_IMAGE_ATTACHMENTS} images can be attached to one message.`);
+                }
+                Alert.alert("Some images were skipped", notices.join(" "));
+            }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);
             Alert.alert("Could not open photo library", message);
@@ -1702,7 +1823,6 @@ function ChatInputComponent({
     const contextMeterRadius = 6.5;
     const contextMeterCircumference = 2 * Math.PI * contextMeterRadius;
     const contextMeterStroke = (contextMeterPercent / 100) * contextMeterCircumference;
-
     return (
         <View style={styles.container}>
             {queuedDrafts.length > 0 && (
@@ -1750,20 +1870,22 @@ function ChatInputComponent({
 
             {/* Image attachments */}
             {images.length > 0 && (
-                <ScrollView
-                    horizontal
-                    style={attachStyles.row}
-                    contentContainerStyle={attachStyles.rowContent}
-                    showsHorizontalScrollIndicator={false}
-                >
-                    {images.map((img, idx) => (
-                        <AttachmentChip
-                            key={img.uri}
-                            image={img}
-                            onRemove={() => removeImage(idx)}
-                        />
-                    ))}
-                </ScrollView>
+                <View>
+                    <ScrollView
+                        horizontal
+                        style={attachStyles.row}
+                        contentContainerStyle={attachStyles.rowContent}
+                        showsHorizontalScrollIndicator={false}
+                    >
+                        {images.map((img, idx) => (
+                            <AttachmentChip
+                                key={img.uri}
+                                image={img}
+                                onRemove={() => removeImage(idx)}
+                            />
+                        ))}
+                    </ScrollView>
+                </View>
             )}
 
             {/* Input card — text area + toolbar in one unified rounded container */}
@@ -1869,10 +1991,10 @@ function ChatInputComponent({
                         style={[
                             toolbarStyles.toolBtn,
                             voiceState !== "idle" && toolbarStyles.toolBtnRecording,
-                            !voiceAvailable && toolbarStyles.toolBtnDimmed,
+                            (!voiceAvailable || isAbortPending) && toolbarStyles.toolBtnDimmed,
                         ]}
                         onPress={handleVoiceToggle}
-                        disabled={disabled || !voiceAvailable}
+                        disabled={disabled || !voiceAvailable || isAbortPending}
                         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                         accessibilityLabel={voiceState === "idle" ? "Start voice input" : "Stop voice input"}
                     >

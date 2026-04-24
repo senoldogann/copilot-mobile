@@ -203,7 +203,6 @@ export function createAttachmentStyles(theme: AppTheme) {
     return StyleSheet.create({
         row: {
             maxHeight: 72,
-            marginBottom: 6,
         },
         rowContent: {
             paddingHorizontal: 4,

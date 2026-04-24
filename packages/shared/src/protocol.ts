@@ -30,12 +30,19 @@ export type SessionConfig = {
     workspaceRoot?: string;
 };
 
-export type SessionMessageAttachment = {
-    type: "blob";
-    data: string;
-    mimeType: string;
-    displayName?: string;
-};
+export type SessionMessageAttachment =
+    | {
+        type: "blob";
+        data: string;
+        mimeType: string;
+        displayName?: string;
+    }
+    | {
+        type: "upload_ref";
+        uploadId: string;
+        mimeType: string;
+        displayName?: string;
+    };
 
 export type SessionMessageInput = {
     prompt: string;
@@ -437,6 +444,7 @@ export type HostSessionCapabilities = {
 export type BridgeSettings = {
     autoApproveReads: boolean;
     readApprovalsConfigurable: boolean;
+    supportsAttachmentUploads?: boolean;
 };
 
 export type CapabilitiesStatePayload = {
@@ -769,6 +777,30 @@ export type MessageAbortMessage = BaseBridgeMessage & {
     payload: { sessionId: string };
 };
 
+export type AttachmentUploadStartMessage = BaseBridgeMessage & {
+    type: "attachment.upload.start";
+    payload: {
+        uploadId: string;
+        mimeType: string;
+        displayName?: string;
+    };
+};
+
+export type AttachmentUploadChunkMessage = BaseBridgeMessage & {
+    type: "attachment.upload.chunk";
+    payload: {
+        uploadId: string;
+        data: string;
+    };
+};
+
+export type AttachmentUploadCompleteMessage = BaseBridgeMessage & {
+    type: "attachment.upload.complete";
+    payload: {
+        uploadId: string;
+    };
+};
+
 export type PermissionRespondMessage = BaseBridgeMessage & {
     type: "permission.respond";
     payload: PermissionResponsePayload;
@@ -850,6 +882,9 @@ export type ClientMessage =
     | SessionResumeMessage
     | SessionListRequestMessage
     | SessionDeleteMessage
+    | AttachmentUploadStartMessage
+    | AttachmentUploadChunkMessage
+    | AttachmentUploadCompleteMessage
     | MessageSendMessage
     | MessageAbortMessage
     | PermissionRespondMessage

@@ -890,9 +890,10 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             async send(message: SessionMessageInput): Promise<void> {
                 info.lastActiveAt = Date.now();
                 info.status = "active";
+                const attachments = message.attachments?.filter((attachment) => attachment.type === "blob");
                 await sdkSession.send(
-                    message.attachments !== undefined && message.attachments.length > 0
-                        ? { prompt: message.prompt, attachments: [...message.attachments] }
+                    attachments !== undefined && attachments.length > 0
+                        ? { prompt: message.prompt, attachments }
                         : { prompt: message.prompt }
                 );
             },
@@ -1025,6 +1026,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
 
             onTitleChanged(handler: (title: string) => void): void {
                 const unsub = sdkSession.on("session.title_changed", (event) => {
+                    info.title = event.data.title;
                     handler(event.data.title);
                 });
                 unsubscribes.push(unsub);

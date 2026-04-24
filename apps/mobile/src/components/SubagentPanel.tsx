@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ScrollView } from "react-native";
 import { SubagentIcon } from "./Icons";
 import { CloseIcon } from "./ProviderIcon";
 import { useAppTheme, useThemedStyles, type AppTheme } from "../theme/theme-context";
+import { areSubagentRunsEqual } from "../utils/tool-introspection";
 
 export type SubagentRun = {
     requestId: string;
@@ -40,23 +41,6 @@ function SubagentStatusIcon({ status }: { status: SubagentRun["status"] }) {
             <View style={[styles.runningDot, { backgroundColor: theme.colors.textOnAccent }]} />
         </View>
     );
-}
-
-function areSubagentRunsEqual(
-    left: ReadonlyArray<SubagentRun>,
-    right: ReadonlyArray<SubagentRun>
-): boolean {
-    if (left.length !== right.length) {
-        return false;
-    }
-
-    return left.every((run, index) => {
-        const candidate = right[index];
-        return candidate !== undefined
-            && candidate.requestId === run.requestId
-            && candidate.title === run.title
-            && candidate.status === run.status;
-    });
 }
 
 function SubagentPanelInner({ runs, onDismiss }: SubagentPanelProps) {

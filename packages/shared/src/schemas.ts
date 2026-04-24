@@ -98,12 +98,20 @@ const sessionInfoSchema = z.object({
     context: sessionContextSchema.optional(),
 });
 
-const sessionMessageAttachmentSchema = z.object({
-    type: z.literal("blob"),
-    data: z.string().min(1),
-    mimeType: z.string().min(1),
-    displayName: z.string().min(1).optional(),
-});
+const sessionMessageAttachmentSchema = z.discriminatedUnion("type", [
+    z.object({
+        type: z.literal("blob"),
+        data: z.string().min(1),
+        mimeType: z.string().min(1),
+        displayName: z.string().min(1).optional(),
+    }),
+    z.object({
+        type: z.literal("upload_ref"),
+        uploadId: z.string().min(1),
+        mimeType: z.string().min(1),
+        displayName: z.string().min(1).optional(),
+    }),
+]);
 
 const toolArgumentsSchema = z.record(z.unknown());
 const toolExecutionStatusSchema = z.enum(["running", "completed", "failed", "no_results"]);
@@ -197,6 +205,7 @@ const hostSessionCapabilitiesSchema = z.object({
 const bridgeSettingsSchema = z.object({
     autoApproveReads: z.boolean(),
     readApprovalsConfigurable: z.boolean(),
+    supportsAttachmentUploads: z.boolean().optional(),
 });
 
 const capabilitiesStatePayloadSchema = z.object({
@@ -699,6 +708,30 @@ const messageAbortSchema = baseBridgeMessageSchema.extend({
     payload: z.object({ sessionId: z.string().min(1) }),
 });
 
+const attachmentUploadStartSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("attachment.upload.start"),
+    payload: z.object({
+        uploadId: z.string().min(1),
+        mimeType: z.string().min(1),
+        displayName: z.string().min(1).optional(),
+    }),
+});
+
+const attachmentUploadChunkSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("attachment.upload.chunk"),
+    payload: z.object({
+        uploadId: z.string().min(1),
+        data: z.string().min(1),
+    }),
+});
+
+const attachmentUploadCompleteSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("attachment.upload.complete"),
+    payload: z.object({
+        uploadId: z.string().min(1),
+    }),
+});
+
 const permissionRespondSchema = baseBridgeMessageSchema.extend({
     type: z.literal("permission.respond"),
     payload: permissionResponsePayloadSchema,
@@ -872,6 +905,9 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     sessionResumeSchema,
     sessionListRequestSchema,
     sessionDeleteSchema,
+    attachmentUploadStartSchema,
+    attachmentUploadChunkSchema,
+    attachmentUploadCompleteSchema,
     messageSendSchema,
     messageAbortSchema,
     permissionRespondSchema,

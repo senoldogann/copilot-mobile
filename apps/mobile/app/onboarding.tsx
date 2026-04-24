@@ -26,7 +26,6 @@ import {
     ScanIcon,
     TerminalIcon,
 } from "../src/components/ProviderIcon";
-import { AppLogoMark } from "../src/components/AppLogo";
 import { useThemedStyles, type AppTheme } from "../src/theme/theme-context";
 
 type OnboardingSlide = {

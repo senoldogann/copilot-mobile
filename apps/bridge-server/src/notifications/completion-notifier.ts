@@ -99,20 +99,22 @@ export function createCompletionNotifier(deps: {
         return nextState;
     }
 
-    function triggerBackgroundSyncPush(input: {
+    async function notifyForBackgroundSyncSafely(input: {
         deviceId: string;
         pushToken: string;
         sessionId: string;
         eventType: SessionPushEventType;
-    }): void {
-        void notifyForBackgroundSync(input).catch((error: unknown) => {
+    }): Promise<void> {
+        try {
+            await notifyForBackgroundSync(input);
+        } catch (error) {
             console.warn("[notifications] Background sync push crashed", {
                 sessionId: input.sessionId,
                 deviceId: input.deviceId,
                 eventType: input.eventType,
                 error: error instanceof Error ? error.message : String(error),
             });
-        });
+        }
     }
 
     async function notifyForCompletedCycle(sessionId: string, snapshot: CompletedCycleSnapshot): Promise<void> {
@@ -130,7 +132,7 @@ export function createCompletionNotifier(deps: {
             return;
         }
 
-        triggerBackgroundSyncPush({
+        await notifyForBackgroundSyncSafely({
             deviceId: snapshot.deviceId,
             pushToken: registration.pushToken,
             sessionId,
@@ -201,7 +203,7 @@ export function createCompletionNotifier(deps: {
             return;
         }
 
-        triggerBackgroundSyncPush({
+        await notifyForBackgroundSyncSafely({
             deviceId: sessionState.deviceId,
             pushToken: registration.pushToken,
             sessionId: input.sessionId,

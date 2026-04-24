@@ -21,6 +21,18 @@ class FakeWebSocket {
     public send = jest.fn();
 }
 
+function installMockWebSocket(socket: FakeWebSocket): void {
+    globalThis.WebSocket = Object.assign(
+        jest.fn(() => socket),
+        {
+            CONNECTING: FakeWebSocket.CONNECTING,
+            OPEN: FakeWebSocket.OPEN,
+            CLOSING: FakeWebSocket.CLOSING,
+            CLOSED: FakeWebSocket.CLOSED,
+        }
+    ) as unknown as typeof WebSocket;
+}
+
 describe("createWSClient", () => {
     const OriginalWebSocket = globalThis.WebSocket;
 
@@ -33,7 +45,7 @@ describe("createWSClient", () => {
         jest.useFakeTimers();
 
         const socket = new FakeWebSocket();
-        globalThis.WebSocket = jest.fn(() => socket) as unknown as typeof WebSocket;
+        installMockWebSocket(socket);
 
         const stateChanges: Array<string> = [];
         const reportedErrors: Array<string> = [];
@@ -69,5 +81,62 @@ describe("createWSClient", () => {
         expect(stateChanges).toContain("disconnected");
         expect(reportedErrors).toContain("WebSocket connection error");
         expect(socket.close).toHaveBeenCalled();
+    });
+
+    it("keeps unsent queued messages pending for a later flush when the socket closes mid-drain", async () => {
+        const socket = new FakeWebSocket();
+        installMockWebSocket(socket);
+
+        const client = createWSClient({
+            onMessage: () => undefined,
+            onStateChange: () => undefined,
+            onError: () => undefined,
+        });
+
+        client.seedStoredCredentials({
+            deviceCredential: "device-credential",
+            serverUrl: "ws://127.0.0.1:29877",
+            certFingerprint: null,
+            transportMode: "direct",
+            relayAccessToken: null,
+        });
+        expect(client.resume({
+            reconnectOnFailure: true,
+            reportErrors: true,
+        })).toBe(true);
+
+        const firstSend = client.sendMessage("capabilities.request", {});
+        const secondSend = client.sendMessage("models.request", {});
+
+        socket.readyState = FakeWebSocket.OPEN;
+        let sendCount = 0;
+        socket.send.mockImplementation(() => {
+            sendCount += 1;
+            if (sendCount === 1) {
+                socket.readyState = FakeWebSocket.CLOSED;
+            }
+        });
+
+        client.flushPending();
+        await expect(firstSend).resolves.toBeUndefined();
+
+        let secondSettled = false;
+        void secondSend.then(() => {
+            secondSettled = true;
+        });
+        await Promise.resolve();
+
+        expect(secondSettled).toBe(false);
+        expect(socket.send).toHaveBeenCalledTimes(1);
+
+        socket.readyState = FakeWebSocket.OPEN;
+        client.flushPending();
+
+        try {
+            await expect(secondSend).resolves.toBeUndefined();
+            expect(socket.send).toHaveBeenCalledTimes(2);
+        } finally {
+            client.disconnect();
+        }
     });
 });

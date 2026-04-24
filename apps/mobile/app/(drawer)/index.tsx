@@ -51,7 +51,7 @@ import { SubagentPanel } from "../../src/components/SubagentPanel";
 import { TodoPanel } from "../../src/components/TodoPanel";
 import { PermissionDialog, PlanExitDialog, UserInputDialog } from "../../src/components/Dialogs";
 import { useAppTheme, type AppTheme } from "../../src/theme/theme-context";
-import type { SessionConfig, SessionMessageAttachment } from "@copilot-mobile/shared";
+import type { SessionConfig } from "@copilot-mobile/shared";
 import {
     sendMessage,
     abortMessage,
@@ -73,6 +73,10 @@ import {
     deriveAgentTodosFromItems,
     getActiveAgentItems,
 } from "../../src/utils/tool-introspection";
+import {
+    createBlobAttachments,
+    createPendingUploadAttachments,
+} from "../../src/utils/attachment-upload";
 
 const CHAT_LIST_DRAW_DISTANCE = 320;
 
@@ -651,25 +655,9 @@ const WorkspaceOperationToast = React.memo(function WorkspaceOperationToast() {
     );
 });
 
-const MAX_TOTAL_ATTACHMENT_BASE64_CHARS = 700_000;
 const STREAMING_PERSIST_DELAY_MS = 15_000;
 const TYPING_PERSIST_DELAY_MS = 2_200;
 const IDLE_PERSIST_DELAY_MS = 1_200;
-
-function toSessionMessageAttachments(
-    images: ReadonlyArray<ImageAttachment>
-): ReadonlyArray<SessionMessageAttachment> | undefined {
-    if (images.length === 0) {
-        return undefined;
-    }
-
-    return images.map((image) => ({
-        type: "blob",
-        data: image.base64Data,
-        mimeType: image.mimeType,
-        displayName: image.fileName,
-    }));
-}
 
 export default function ChatScreen() {
     const theme = useAppTheme();
@@ -699,6 +687,9 @@ export default function ChatScreen() {
     const isSessionLoading = useSessionStore((s) => s.isSessionLoading);
     const isTyping = useSessionStore((s) => s.isAssistantTyping);
     const isAbortPending = useSessionStore((s) => s.isAbortRequested);
+    const supportsAttachmentUploads = useSessionStore(
+        (s) => s.bridgeSettings.supportsAttachmentUploads === true
+    );
     const busySessions = useSessionStore((s) => s.busySessions);
     const chatCurrentIntent = useSessionStore((s) => s.currentIntent);
     const models = useSessionStore((s) => s.models);
@@ -956,24 +947,11 @@ export default function ChatScreen() {
     // Send message
     const handleSend = useCallback(
         (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => {
-            const attachments = toSessionMessageAttachments(images);
-            const totalAttachmentChars = images.reduce(
-                (sum, image) => sum + image.base64Data.length,
-                0
-            );
-
-            if (totalAttachmentChars > MAX_TOTAL_ATTACHMENT_BASE64_CHARS) {
-                useConnectionStore.getState().setError(
-                    "Selected images exceed the bridge transfer limit. Choose fewer images or smaller files."
-                );
-                return;
-            }
-
             enableAutoFollow();
 
             // "steer" mode sends inline without interrupting assistant
             if (mode === "steer" && activeSessionId !== null) {
-                sendMessage(activeSessionId, content, attachments);
+                sendMessage(activeSessionId, content, images);
                 return;
             }
 
@@ -1053,7 +1031,12 @@ export default function ChatScreen() {
                 const draftWorkspaceRoot = historyStore.conversations.find(
                     (conversationItem) => conversationItem.id === activeConversationId
                 )?.workspaceRoot ?? null;
-                const localItemId = store.addUserMessage(content, attachments);
+                const localItemId = store.addUserMessage(
+                    content,
+                    supportsAttachmentUploads
+                        ? createPendingUploadAttachments(images)
+                        : createBlobAttachments(images)
+                );
                 store.setSessionLoading(true);
                 store.setAssistantTyping(true);
                 const config: SessionConfig = {
@@ -1071,9 +1054,8 @@ export default function ChatScreen() {
                 }
                 void createSessionWithInitialMessage(
                     config,
-                    attachments !== undefined && attachments.length > 0
-                        ? { prompt: content, attachments }
-                        : { prompt: content }
+                    content,
+                    images
                 )
                     .then(() => {
                         store.updateUserMessageDeliveryState(localItemId, "sent");
@@ -1085,7 +1067,7 @@ export default function ChatScreen() {
                 return;
             }
 
-            sendMessage(activeSessionId, content, attachments);
+            sendMessage(activeSessionId, content, images);
         },
         [
             activeSessionId,
@@ -1102,6 +1084,7 @@ export default function ChatScreen() {
             selectedModel,
             setAbortRequested,
             sessions,
+            supportsAttachmentUploads,
             userInputPrompt,
             workspaceRoot,
             workspaceSessionId,

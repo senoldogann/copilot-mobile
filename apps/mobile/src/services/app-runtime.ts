@@ -1,4 +1,4 @@
-import { AppState } from "react-native";
+import { AppState, InteractionManager } from "react-native";
 import type { AppStateStatus } from "react-native";
 import {
     listSessions,
@@ -25,6 +25,7 @@ let currentAppState: AppStateStatus = getAppVisibilityState();
 let runtimeInitialized = false;
 let runtimeBootstrapId = 0;
 let mobileStateHydrated = false;
+let foregroundResumeTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
 
 function createRuntimeBootstrapId(): number {
     runtimeBootstrapId += 1;
@@ -33,6 +34,42 @@ function createRuntimeBootstrapId(): number {
 
 function isRuntimeBootstrapCurrent(bootstrapId: number): boolean {
     return runtimeInitialized && bootstrapId === runtimeBootstrapId;
+}
+
+function clearForegroundResumeTask(): void {
+    if (foregroundResumeTask === null) {
+        return;
+    }
+
+    foregroundResumeTask.cancel();
+    foregroundResumeTask = null;
+}
+
+function scheduleForegroundSessionResume(sessionId: string, immediate: boolean): void {
+    clearForegroundResumeTask();
+
+    const runResume = (): void => {
+        if (currentAppState !== "active") {
+            return;
+        }
+
+        const activeSessionId = useSessionStore.getState().activeSessionId;
+        if (activeSessionId !== sessionId) {
+            return;
+        }
+
+        void resumeSession(sessionId);
+    };
+
+    if (immediate) {
+        runResume();
+        return;
+    }
+
+    foregroundResumeTask = InteractionManager.runAfterInteractions(() => {
+        foregroundResumeTask = null;
+        runResume();
+    });
 }
 
 function openSessionFromNotification(sessionId: string): void {
@@ -82,7 +119,7 @@ function syncOnForeground(): void {
         void listSessions();
         void requestCapabilities();
         if (activeSessionId !== null) {
-            void resumeSession(activeSessionId);
+            scheduleForegroundSessionResume(activeSessionId, !hasVisibleChatState);
         }
         return;
     }
@@ -167,6 +204,7 @@ function handleAppStateChange(nextAppState: AppStateStatus): void {
 
     if (nextAppState !== "active") {
         createRuntimeBootstrapId();
+        clearForegroundResumeTask();
         const sessionStore = useSessionStore.getState();
         if (sessionStore.activeSessionId !== null && sessionStore.isAssistantTyping) {
             armBackgroundCompletion(sessionStore.activeSessionId);
@@ -203,6 +241,7 @@ export function initializeAppRuntime(): () => void {
 
     return () => {
         createRuntimeBootstrapId();
+        clearForegroundResumeTask();
         subscription.remove();
         runtimeInitialized = false;
         mobileStateHydrated = false;

@@ -11,13 +11,27 @@ import {
 const REPLAY_CLEANUP_INTERVAL_MS = 60_000;
 const MAX_TRACKED_WINDOW_KEYS = 4_096;
 const MAX_REPLAY_IDS = 20_000;
+const RATE_LIMIT_RESUME_MAX = 10;
+const RATE_LIMIT_RESUME_WINDOW_MS = 5 * 60 * 1000;
+const OPERATION_RATE_LIMITS = {
+    "session.create": { maxCount: 12, windowMs: 5 * 60 * 1000 },
+    "workspace-read": { maxCount: 90, windowMs: 60 * 1000 },
+    "workspace-write": { maxCount: 20, windowMs: 5 * 60 * 1000 },
+} as const;
+const OPERATION_RATE_LIMIT_MAX_WINDOW_MS = Math.max(
+    ...Object.values(OPERATION_RATE_LIMITS).map((limit) => limit.windowMs)
+);
 
 type WindowEntry = {
     timestamps: number[];
 };
 
+export type OperationRateLimitBucket = keyof typeof OPERATION_RATE_LIMITS;
+
 const pairingWindows = new Map<string, WindowEntry>();
+const resumeWindows = new Map<string, WindowEntry>();
 const messageWindows = new Map<string, WindowEntry>();
+const operationWindows = new Map<string, WindowEntry>();
 const seenMessageIds = new Map<string, number>();
 
 // Periodic cleanup — prevents memory leaks
@@ -113,7 +127,9 @@ function startReplayCleanup(): void {
         const now = Date.now();
         pruneReplayMap(now);
         pruneWindowMap(pairingWindows, RATE_LIMIT_PAIRING_WINDOW_MS, now);
+        pruneWindowMap(resumeWindows, RATE_LIMIT_RESUME_WINDOW_MS, now);
         pruneWindowMap(messageWindows, RATE_LIMIT_MESSAGE_WINDOW_MS, now);
+        pruneWindowMap(operationWindows, OPERATION_RATE_LIMIT_MAX_WINDOW_MS, now);
     }, REPLAY_CLEANUP_INTERVAL_MS);
     // Don't let timer keep the process alive
     cleanupTimer.unref();
@@ -156,12 +172,34 @@ export function checkPairingRateLimit(ip: string): boolean {
     );
 }
 
+export function checkResumeRateLimit(ip: string): boolean {
+    return checkLimit(
+        resumeWindows,
+        ip,
+        RATE_LIMIT_RESUME_MAX,
+        RATE_LIMIT_RESUME_WINDOW_MS
+    );
+}
+
 export function checkMessageRateLimit(deviceId: string): boolean {
     return checkLimit(
         messageWindows,
         deviceId,
         RATE_LIMIT_MESSAGE_MAX,
         RATE_LIMIT_MESSAGE_WINDOW_MS
+    );
+}
+
+export function checkOperationRateLimit(
+    deviceId: string,
+    bucket: OperationRateLimitBucket
+): boolean {
+    const limit = OPERATION_RATE_LIMITS[bucket];
+    return checkLimit(
+        operationWindows,
+        `${deviceId}:${bucket}`,
+        limit.maxCount,
+        limit.windowMs
     );
 }
 
@@ -182,7 +220,9 @@ export function checkReplayProtection(messageId: string): boolean {
 
 export function clearRateLimitState(): void {
     pairingWindows.clear();
+    resumeWindows.clear();
     messageWindows.clear();
+    operationWindows.clear();
     seenMessageIds.clear();
     if (cleanupTimer !== null) {
         clearInterval(cleanupTimer);

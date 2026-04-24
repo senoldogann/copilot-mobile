@@ -2,6 +2,7 @@
 // All bridge communication goes through this module
 
 import type { AppStateStatus } from "react-native";
+import * as Crypto from "expo-crypto";
 import type {
     AgentMode,
     NotificationPresenceState,
@@ -9,7 +10,6 @@ import type {
     QRPayload,
     SessionConfig,
     ClientMessage,
-    SessionMessageInput,
     SessionMessageAttachment,
 } from "@copilot-mobile/shared";
 import { createWSClient } from "./ws-client";
@@ -46,6 +46,14 @@ import {
     resolveRemotePushAvailability,
 } from "./notifications";
 import { clearSessionPrefetch, markSessionPrefetchRequest } from "./session-prefetch";
+import type { ImageAttachment } from "../components/chat-input-types";
+import {
+    createBlobAttachments,
+    createPendingUploadAttachments,
+    getTotalAttachmentBase64Chars,
+    LEGACY_BRIDGE_ATTACHMENT_BASE64_CHAR_LIMIT,
+    splitAttachmentBase64,
+} from "../utils/attachment-upload";
 
 export { onWorkspaceFileResponse, onWorkspaceDiffResponse, onWorkspaceResolveResponse };
 
@@ -67,6 +75,83 @@ const WORKSPACE_GIT_SUMMARY_THROTTLE_MS = 8_000;
 const WORKSPACE_BRANCH_RESPONSE_TIMEOUT_MS = 12_000;
 const workspaceGitSummaryRequestTimestamps = new Map<string, number>();
 let workspaceBranchResponseTimer: ReturnType<typeof setTimeout> | null = null;
+
+function createAttachmentUploadId(): string {
+    if (typeof Crypto.randomUUID === "function") {
+        return Crypto.randomUUID();
+    }
+
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+async function uploadMessageAttachments(
+    c: ReturnType<typeof createWSClient>,
+    images: ReadonlyArray<ImageAttachment>
+): Promise<ReadonlyArray<SessionMessageAttachment> | undefined> {
+    if (images.length === 0) {
+        return undefined;
+    }
+
+    const uploadedAttachments: Array<SessionMessageAttachment> = [];
+
+    for (const image of images) {
+        const uploadId = createAttachmentUploadId();
+        await c.sendMessage("attachment.upload.start", {
+            uploadId,
+            mimeType: image.mimeType,
+            displayName: image.fileName,
+        });
+
+        const chunks = splitAttachmentBase64(image.base64Data);
+        for (const chunk of chunks) {
+            await c.sendMessage("attachment.upload.chunk", {
+                uploadId,
+                data: chunk,
+            });
+        }
+
+        await c.sendMessage("attachment.upload.complete", { uploadId });
+        uploadedAttachments.push({
+            type: "upload_ref",
+            uploadId,
+            mimeType: image.mimeType,
+            displayName: image.fileName,
+        });
+    }
+
+    return uploadedAttachments;
+}
+
+function bridgeSupportsAttachmentUploads(): boolean {
+    return getBridgeSessionState().bridgeSettings.supportsAttachmentUploads === true;
+}
+
+function buildLegacyBlobAttachments(
+    images: ReadonlyArray<ImageAttachment>
+): ReadonlyArray<SessionMessageAttachment> | undefined {
+    if (images.length === 0) {
+        return undefined;
+    }
+
+    if (getTotalAttachmentBase64Chars(images) > LEGACY_BRIDGE_ATTACHMENT_BASE64_CHAR_LIMIT) {
+        throw new Error(
+            "This companion does not support chunked image uploads yet. Update the companion or choose smaller images."
+        );
+    }
+
+    return createBlobAttachments(images);
+}
+
+async function resolveOutgoingAttachments(
+    c: ReturnType<typeof createWSClient>,
+    images: ReadonlyArray<ImageAttachment>
+): Promise<ReadonlyArray<SessionMessageAttachment> | undefined> {
+    if (bridgeSupportsAttachmentUploads()) {
+        return uploadMessageAttachments(c, images);
+    }
+
+    return buildLegacyBlobAttachments(images);
+}
 
 export type RemoteDeleteSessionsResult = {
     deletedSessionIds: ReadonlyArray<string>;
@@ -388,14 +473,18 @@ export async function createSession(config: SessionConfig): Promise<void> {
 
 export async function createSessionWithInitialMessage(
     config: SessionConfig,
-    initialMessage: SessionMessageInput
+    prompt: string,
+    images: ReadonlyArray<ImageAttachment>
 ): Promise<void> {
     const c = getClient();
     setBridgeConnectionError(null);
     try {
+        const attachments = await resolveOutgoingAttachments(c, images);
         await c.sendMessage("session.create", {
             config,
-            initialMessage,
+            initialMessage: attachments !== undefined && attachments.length > 0
+                ? { prompt, attachments }
+                : { prompt },
         });
     } catch (error) {
         getBridgeSessionState().setSessionLoading(false);
@@ -410,11 +499,12 @@ export async function createSessionWithInitialMessage(
 async function sendMessageWithoutLocalEcho(
     sessionId: string,
     content: string,
-    attachments?: ReadonlyArray<SessionMessageAttachment>
+    images: ReadonlyArray<ImageAttachment>
 ): Promise<void> {
     const c = getClient();
 
     try {
+        const attachments = await resolveOutgoingAttachments(c, images);
         await c.sendMessage(
             "message.send",
             attachments !== undefined && attachments.length > 0
@@ -434,13 +524,16 @@ async function sendMessageWithoutLocalEcho(
 export async function sendMessage(
     sessionId: string,
     content: string,
-    attachments?: ReadonlyArray<SessionMessageAttachment>
+    images: ReadonlyArray<ImageAttachment>
 ): Promise<void> {
     const sessionStore = getBridgeSessionState();
-    const itemId = sessionStore.addUserMessage(content, attachments);
+    const localAttachments = bridgeSupportsAttachmentUploads()
+        ? createPendingUploadAttachments(images)
+        : createBlobAttachments(images);
+    const itemId = sessionStore.addUserMessage(content, localAttachments);
     sessionStore.setAssistantTyping(true);
     try {
-        await sendMessageWithoutLocalEcho(sessionId, content, attachments);
+        await sendMessageWithoutLocalEcho(sessionId, content, images);
         sessionStore.updateUserMessageDeliveryState(itemId, "sent");
     } catch {
         sessionStore.updateUserMessageDeliveryState(itemId, "failed");
@@ -450,11 +543,11 @@ export async function sendMessage(
 export async function sendQueuedMessage(
     sessionId: string,
     content: string,
-    attachments?: ReadonlyArray<SessionMessageAttachment>
+    images: ReadonlyArray<ImageAttachment>
 ): Promise<void> {
     const sessionStore = getBridgeSessionState();
     sessionStore.setAssistantTyping(true);
-    await sendMessageWithoutLocalEcho(sessionId, content, attachments);
+    await sendMessageWithoutLocalEcho(sessionId, content, images);
 }
 
 export async function syncSessionPreferences(sessionId: string): Promise<void> {
