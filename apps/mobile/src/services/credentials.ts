@@ -37,6 +37,7 @@ const KEY_RELAY_ACCESS_TOKEN: SecureStoreKeyPair = {
 const KEY_ACTIVE_SESSION_ID = "code_companion_active_session_id";
 const KEY_SESSION_PREFERENCES = "code_companion_session_preferences";
 const KEY_ONBOARDING_COMPLETED = "code_companion_onboarding_completed";
+const KEY_FREE_MESSAGE_TRIAL = "code_companion_free_message_trial";
 
 export type StoredCredentials = {
     deviceCredential: string;
@@ -69,6 +70,10 @@ export type StoredSessionPreferences = {
     autoApproveReads: boolean;
 };
 
+type PersistedFreeMessageTrial = {
+    hasUsedFreeMessage: boolean;
+};
+
 async function writeOnboardingStateFile(completed: boolean): Promise<void> {
     if (!completed) {
         await deleteLocalStateValue(KEY_ONBOARDING_COMPLETED);
@@ -87,6 +92,25 @@ async function readOnboardingStateFile(): Promise<boolean> {
     try {
         const parsed = JSON.parse(raw) as { completed?: unknown };
         return parsed.completed === true;
+    } catch {
+        return false;
+    }
+}
+
+async function writeFreeMessageTrialStateFile(hasUsedFreeMessage: boolean): Promise<void> {
+    const payload: PersistedFreeMessageTrial = { hasUsedFreeMessage };
+    await writeLocalStateValue(KEY_FREE_MESSAGE_TRIAL, JSON.stringify(payload));
+}
+
+async function readFreeMessageTrialStateFile(): Promise<boolean> {
+    const raw = await readLocalStateValue(KEY_FREE_MESSAGE_TRIAL);
+    if (raw === null) {
+        return false;
+    }
+
+    try {
+        const parsed = JSON.parse(raw) as Partial<PersistedFreeMessageTrial>;
+        return parsed.hasUsedFreeMessage === true;
     } catch {
         return false;
     }
@@ -303,4 +327,12 @@ export async function saveOnboardingCompleted(completed: boolean): Promise<void>
 
 export async function loadOnboardingCompleted(): Promise<boolean> {
     return readOnboardingStateFile();
+}
+
+export async function saveFreeMessageTrialUsed(hasUsedFreeMessage: boolean): Promise<void> {
+    await writeFreeMessageTrialStateFile(hasUsedFreeMessage);
+}
+
+export async function loadFreeMessageTrialUsed(): Promise<boolean> {
+    return readFreeMessageTrialStateFile();
 }

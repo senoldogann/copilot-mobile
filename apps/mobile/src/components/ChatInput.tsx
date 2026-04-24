@@ -81,6 +81,7 @@ import {
     shouldAutoStopVoiceCapture,
     shouldDismissVoiceInputError,
 } from "../utils/voice-input";
+import { openFeedbackEmail } from "../services/feedback";
 
 // --- Effort labels ---
 
@@ -626,8 +627,17 @@ const VOICE_CONTEXTUAL_STRINGS: ReadonlyArray<string> = [
 ];
 
 const DEFAULT_SPEECH_LOCALE = "en-US";
-const DEFAULT_IMAGE_COMPRESSION_QUALITY = 0.82;
 const MAX_ATTACHMENT_LONGEST_EDGE = 1600;
+const COMPATIBLE_ATTACHMENT_MAX_BASE64_CHARS = 120_000;
+const COMPATIBLE_ATTACHMENT_ATTEMPTS: ReadonlyArray<{ longestEdge: number; compress: number }> = [
+    { longestEdge: 1280, compress: 0.72 },
+    { longestEdge: 1024, compress: 0.66 },
+    { longestEdge: 800, compress: 0.58 },
+    { longestEdge: 640, compress: 0.5 },
+    { longestEdge: 512, compress: 0.48 },
+    { longestEdge: 384, compress: 0.46 },
+    { longestEdge: 256, compress: 0.42 },
+];
 
 const PREFERRED_SPEECH_LOCALES: Readonly<Record<string, string>> = {
     en: "en-US",
@@ -809,43 +819,63 @@ async function prepareImageAttachment(
     asset: ImagePicker.ImagePickerAsset
 ): Promise<{ attachment: ImageAttachment; wasCompressed: boolean }> {
     const originalFileName = createAttachmentFileName(asset.fileName, "image");
-    const originalMimeType = asset.mimeType ?? "image/jpeg";
     const longestEdge = Math.max(asset.width, asset.height, 1);
 
-    if (longestEdge <= MAX_ATTACHMENT_LONGEST_EDGE) {
-        const originalBase64 = await loadBase64Attachment(asset.uri);
-        return {
-            attachment: {
-                uri: asset.uri,
-                width: asset.width,
-                height: asset.height,
-                fileName: originalFileName,
-                mimeType: originalMimeType,
-                base64Data: originalBase64,
-            },
-            wasCompressed: false,
-        };
+    const compressionAttempts = [
+        ...(longestEdge <= MAX_ATTACHMENT_LONGEST_EDGE
+            ? [{ longestEdge, compress: 0.78 }]
+            : []),
+        ...COMPATIBLE_ATTACHMENT_ATTEMPTS,
+    ];
+
+    for (const attempt of compressionAttempts) {
+        const result = await ImageManipulator.manipulateAsync(
+            asset.uri,
+            createResizeActions(asset.width, asset.height, attempt.longestEdge),
+            {
+                base64: true,
+                compress: attempt.compress,
+                format: ImageManipulator.SaveFormat.JPEG,
+            }
+        );
+        const base64Data = result.base64 ?? await loadBase64Attachment(result.uri);
+        if (base64Data.length <= COMPATIBLE_ATTACHMENT_MAX_BASE64_CHARS) {
+            return {
+                attachment: {
+                    uri: result.uri,
+                    width: result.width,
+                    height: result.height,
+                    fileName: ensureJpegFileName(originalFileName),
+                    mimeType: "image/jpeg",
+                    base64Data,
+                },
+                wasCompressed: longestEdge > MAX_ATTACHMENT_LONGEST_EDGE || attempt.longestEdge !== longestEdge,
+            };
+        }
     }
 
-    const result = await ImageManipulator.manipulateAsync(
+    const finalAttempt = COMPATIBLE_ATTACHMENT_ATTEMPTS[COMPATIBLE_ATTACHMENT_ATTEMPTS.length - 1];
+    if (finalAttempt === undefined) {
+        throw new Error("No compatible attachment attempts configured.");
+    }
+    const fallbackResult = await ImageManipulator.manipulateAsync(
         asset.uri,
-        createResizeActions(asset.width, asset.height, MAX_ATTACHMENT_LONGEST_EDGE),
+        createResizeActions(asset.width, asset.height, finalAttempt.longestEdge),
         {
             base64: true,
-            compress: DEFAULT_IMAGE_COMPRESSION_QUALITY,
+            compress: finalAttempt.compress,
             format: ImageManipulator.SaveFormat.JPEG,
         }
     );
-    const base64Data = result.base64 ?? await loadBase64Attachment(result.uri);
-
+    const fallbackBase64 = fallbackResult.base64 ?? await loadBase64Attachment(fallbackResult.uri);
     return {
         attachment: {
-            uri: result.uri,
-            width: result.width,
-            height: result.height,
+            uri: fallbackResult.uri,
+            width: fallbackResult.width,
+            height: fallbackResult.height,
             fileName: ensureJpegFileName(originalFileName),
             mimeType: "image/jpeg",
-            base64Data,
+            base64Data: fallbackBase64,
         },
         wasCompressed: true,
     };
@@ -889,6 +919,8 @@ const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
     { command: "/disableAutoApprove", description: "Set permissions back to default", category: "session" },
     { command: "/disableYolo", description: "Set permissions back to default", category: "session" },
     { command: "/exitAutopilot", description: "Set permissions back to default", category: "session" },
+    // Support
+    { command: "/feedback", description: "Send app feedback by email", category: "help" },
     // Help
     { command: "/help", description: "Show help and available commands", category: "help" },
 ];
@@ -964,11 +996,13 @@ function pathMatchesQuery(path: string, query: string): boolean {
 
 type ToolbarSendControlsProps = {
     canSend: boolean;
+    isComposerLocked: boolean;
     isTyping: boolean;
     isAbortPending: boolean;
     onAbort: () => void;
     onDefaultSend: () => void;
     onDirectSend: () => void;
+    onLockedPress: () => void;
     onToggleSendMenu: () => void;
     onSelectSendMode: (mode: SendMode) => void;
     showSendMenu: boolean;
@@ -979,11 +1013,13 @@ function areToolbarSendControlsEqual(
     nextProps: ToolbarSendControlsProps
 ): boolean {
     return previousProps.canSend === nextProps.canSend
+        && previousProps.isComposerLocked === nextProps.isComposerLocked
         && previousProps.isTyping === nextProps.isTyping
         && previousProps.isAbortPending === nextProps.isAbortPending
         && previousProps.onAbort === nextProps.onAbort
         && previousProps.onDefaultSend === nextProps.onDefaultSend
         && previousProps.onDirectSend === nextProps.onDirectSend
+        && previousProps.onLockedPress === nextProps.onLockedPress
         && previousProps.onToggleSendMenu === nextProps.onToggleSendMenu
         && previousProps.onSelectSendMode === nextProps.onSelectSendMode
         && previousProps.showSendMenu === nextProps.showSendMenu;
@@ -991,11 +1027,13 @@ function areToolbarSendControlsEqual(
 
 const ToolbarSendControls = React.memo(function ToolbarSendControls({
     canSend,
+    isComposerLocked,
     isTyping,
     isAbortPending,
     onAbort,
     onDefaultSend,
     onDirectSend,
+    onLockedPress,
     onToggleSendMenu,
     onSelectSendMode,
     showSendMenu,
@@ -1039,6 +1077,15 @@ const ToolbarSendControls = React.memo(function ToolbarSendControls({
                             <ChevronDownIcon size={12} color={theme.colors.textPrimary} />
                         </Pressable>
                     </View>
+                ) : isComposerLocked ? (
+                    <Pressable
+                        style={[styles.sendButton, styles.sendButtonDisabled]}
+                        onPress={onLockedPress}
+                        hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                        accessibilityLabel="Subscribe to continue chatting"
+                    >
+                        <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
+                    </Pressable>
                 ) : (
                     <View style={[styles.sendButton, styles.sendButtonDisabled]}>
                         <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
@@ -1062,6 +1109,19 @@ const ToolbarSendControls = React.memo(function ToolbarSendControls({
                 accessibilityLabel="Send message"
             >
                 <ArrowUpIcon size={16} color={theme.colors.textOnAccent} />
+            </Pressable>
+        );
+    }
+
+    if (isComposerLocked) {
+        return (
+            <Pressable
+                style={[styles.sendButton, styles.sendButtonDisabled]}
+                onPress={onLockedPress}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                accessibilityLabel="Subscribe to continue chatting"
+            >
+                <ArrowUpIcon size={16} color={theme.colors.textTertiary} />
             </Pressable>
         );
     }
@@ -1110,9 +1170,12 @@ function areChatInputPropsEqual(
 
     return previousProps.onSend === nextProps.onSend
         && previousProps.onAbort === nextProps.onAbort
+        && previousProps.onLockedPress === nextProps.onLockedPress
         && previousProps.isTyping === nextProps.isTyping
         && previousProps.isAbortPending === nextProps.isAbortPending
         && previousProps.disabled === nextProps.disabled
+        && previousProps.isComposerLocked === nextProps.isComposerLocked
+        && previousProps.inputPlaceholder === nextProps.inputPlaceholder
         && previousProps.onEditingDraftConsumed === nextProps.onEditingDraftConsumed
         && previousProps.onEditQueuedDraft === nextProps.onEditQueuedDraft
         && previousProps.onRemoveQueuedDraft === nextProps.onRemoveQueuedDraft
@@ -1124,9 +1187,12 @@ function areChatInputPropsEqual(
 function ChatInputComponent({
     onSend,
     onAbort,
+    onLockedPress,
     isTyping,
     isAbortPending,
     disabled,
+    isComposerLocked,
+    inputPlaceholder,
     queuedDrafts,
     editingDraft,
     onEditingDraftConsumed,
@@ -1235,34 +1301,50 @@ function ChatInputComponent({
     const handleSend = useCallback(
         (mode: SendMode) => {
             const trimmed = input.trim();
-            if (trimmed.length === 0 || disabled) return;
+            if (trimmed.length === 0 || disabled || isComposerLocked) return;
 
-            const attachmentSignature = images.map((image) => (
-                `${image.fileName}:${image.mimeType}:${image.base64Data.length}:${image.width}x${image.height}`
-            )).join("|");
-            const sendSignature = `${mode}::${trimmed}::${attachmentSignature}`;
-            const now = Date.now();
-            const previousSend = lastSendSignatureRef.current;
-            if (
-                previousSend !== null
-                && previousSend.signature === sendSignature
-                && now - previousSend.sentAt < 1200
-            ) {
-                return;
-            }
+            void (async () => {
+                const normalized = trimmed.toLowerCase();
+                if (normalized === "/feedback" || normalized.startsWith("/feedback ")) {
+                    stopVoiceCapture(false);
+                    const feedbackMessage = trimmed.slice("/feedback".length).trim();
+                    const opened = await openFeedbackEmail(feedbackMessage, activeSessionId);
+                    if (!opened) {
+                        return;
+                    }
 
-            lastSendSignatureRef.current = {
-                signature: sendSignature,
-                sentAt: now,
-            };
+                    setInput("");
+                    setImages([]);
+                    return;
+                }
 
-            stopVoiceCapture(false);
-            const currentImages = [...images];
-            setInput("");
-            setImages([]);
-            onSend(trimmed, currentImages, mode);
+                const attachmentSignature = images.map((image) => (
+                    `${image.fileName}:${image.mimeType}:${image.base64Data.length}:${image.width}x${image.height}`
+                )).join("|");
+                const sendSignature = `${mode}::${trimmed}::${attachmentSignature}`;
+                const now = Date.now();
+                const previousSend = lastSendSignatureRef.current;
+                if (
+                    previousSend !== null
+                    && previousSend.signature === sendSignature
+                    && now - previousSend.sentAt < 1200
+                ) {
+                    return;
+                }
+
+                lastSendSignatureRef.current = {
+                    signature: sendSignature,
+                    sentAt: now,
+                };
+
+                stopVoiceCapture(false);
+                const currentImages = [...images];
+                setInput("");
+                setImages([]);
+                onSend(trimmed, currentImages, mode);
+            })();
         },
-        [input, disabled, images, onSend, stopVoiceCapture]
+        [activeSessionId, input, disabled, images, isComposerLocked, onSend, stopVoiceCapture]
     );
 
     useEffect(() => {
@@ -1749,7 +1831,8 @@ function ChatInputComponent({
         };
     }, [resetVoiceCapture]);
 
-    const canSend = input.trim().length > 0 && !disabled;
+    const isInputDisabled = disabled || isComposerLocked;
+    const canSend = input.trim().length > 0 && !disabled && !isComposerLocked;
 
     // Model display label — truncate to keep pill compact
     const modelDisplayName = (() => {
@@ -1957,9 +2040,14 @@ function ChatInputComponent({
                     style={styles.textInput}
                     value={input}
                     onChangeText={setInput}
+                    onPressIn={() => {
+                        if (isComposerLocked) {
+                            onLockedPress();
+                        }
+                    }}
                     selection={selection}
                     onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
-                    placeholder="Message, #files, @participants, /commands"
+                    placeholder={inputPlaceholder}
                     placeholderTextColor={theme.colors.textTertiary}
                     multiline
                     maxLength={10000}
@@ -1968,7 +2056,7 @@ function ChatInputComponent({
                     onFocus={() => setIsFocused(true)}
                     onBlur={() => setIsFocused(false)}
                     blurOnSubmit={false}
-                    editable={!disabled}
+                    editable={!isInputDisabled}
                     accessibilityLabel="Write message"
                 />
 
@@ -1980,7 +2068,7 @@ function ChatInputComponent({
                     <Pressable
                         style={toolbarStyles.toolBtn}
                         onPress={handleAttachImage}
-                        disabled={disabled}
+                        disabled={isInputDisabled}
                         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                         accessibilityLabel="Attach image"
                     >
@@ -1994,7 +2082,7 @@ function ChatInputComponent({
                             (!voiceAvailable || isAbortPending) && toolbarStyles.toolBtnDimmed,
                         ]}
                         onPress={handleVoiceToggle}
-                        disabled={disabled || !voiceAvailable || isAbortPending}
+                        disabled={isInputDisabled || !voiceAvailable || isAbortPending}
                         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                         accessibilityLabel={voiceState === "idle" ? "Start voice input" : "Stop voice input"}
                     >
@@ -2008,7 +2096,7 @@ function ChatInputComponent({
                     <Pressable
                         style={toolbarStyles.modelPill}
                         onPress={() => setShowModelPicker(true)}
-                        disabled={disabled}
+                        disabled={isInputDisabled}
                         hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
                         accessibilityLabel="Select model"
                     >
@@ -2026,7 +2114,7 @@ function ChatInputComponent({
                     <Pressable
                         style={toolbarStyles.toolBtn}
                         onPress={() => setShowEffortPicker(true)}
-                        disabled={disabled}
+                        disabled={isInputDisabled}
                         hitSlop={{ top: 10, bottom: 10, left: 8, right: 8 }}
                         accessibilityLabel="Session controls"
                     >
@@ -2072,11 +2160,13 @@ function ChatInputComponent({
                             {/* Send / Abort / Queue */}
                             <ToolbarSendControls
                                 canSend={canSend}
+                                isComposerLocked={isComposerLocked}
                                 isTyping={isTyping}
                                 isAbortPending={isAbortPending}
                                 onAbort={onAbort}
                                 onDefaultSend={handleDefaultSend}
                                 onDirectSend={handleDirectSend}
+                                onLockedPress={onLockedPress}
                                 onToggleSendMenu={handleToggleSendMenu}
                                 onSelectSendMode={handleSendModeSelect}
                                 showSendMenu={showSendMenu}

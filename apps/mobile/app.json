@@ -39,6 +39,8 @@
       ]
     },
     "extra": {
+      "revenueCatApiKey": "appl_CxXnSJTPLFYwSWbYplszkCmQNiM",
+      "revenueCatEntitlementId": "code-companion Pro",
       "eas": {
         "projectId": "33e68d9a-4ae3-47b2-b130-04b0c57ed91e"
       }

@@ -1,4 +1,9 @@
 {
-  "compilerOptions": {},
-  "extends": "expo/tsconfig.base"
+  "files": [],
+  "references": [
+    { "path": "./packages/shared" },
+    { "path": "./apps/bridge-server" },
+    { "path": "./apps/mobile" },
+    { "path": "./apps/cloudflare-relay" }
+  ]
 }

@@ -135,7 +135,7 @@ function buildLegacyBlobAttachments(
 
     if (getTotalAttachmentBase64Chars(images) > LEGACY_BRIDGE_ATTACHMENT_BASE64_CHAR_LIMIT) {
         throw new Error(
-            "This companion does not support chunked image uploads yet. Update the companion or choose smaller images."
+            "This image is still too large for the current companion. It was resized automatically, but the upload limit is still exceeded. Try a smaller image."
         );
     }
 

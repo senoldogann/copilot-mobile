@@ -19,9 +19,12 @@ export type QueuedDraft = {
 export type ChatInputProps = {
     onSend: (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => void;
     onAbort: () => void;
+    onLockedPress: () => void;
     isTyping: boolean;
     isAbortPending: boolean;
     disabled: boolean;
+    isComposerLocked: boolean;
+    inputPlaceholder: string;
     queuedDrafts: ReadonlyArray<QueuedDraft>;
     editingDraft: QueuedDraft | null;
     onEditingDraftConsumed: () => void;

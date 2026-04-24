@@ -9,9 +9,11 @@ import {
     Modal,
     ScrollView,
     StyleSheet,
+    type StyleProp,
     type ViewStyle,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { FeatherName } from "./Icons";
 import { useThemedStyles, type AppTheme } from "../theme/theme-context";
 
@@ -26,9 +28,11 @@ type Props = {
     title: string;
     subtitle?: string;
     children: React.ReactNode;
-    contentStyle?: ViewStyle;
+    contentStyle?: StyleProp<ViewStyle>;
     /** Rendered between the header and the scrollable content — stays pinned while content scrolls */
     stickyHeader?: React.ReactNode;
+    fullScreen?: boolean;
+    contentContainerStyle?: StyleProp<ViewStyle>;
 };
 
 export function BottomSheet({
@@ -42,8 +46,11 @@ export function BottomSheet({
     children,
     contentStyle,
     stickyHeader,
+    fullScreen = false,
+    contentContainerStyle,
 }: Props) {
     const styles = useThemedStyles(createStyles);
+    const insets = useSafeAreaInsets();
     return (
         <Modal
             visible={visible}
@@ -56,11 +63,18 @@ export function BottomSheet({
                 <Pressable style={StyleSheet.absoluteFillObject} onPress={onClose} />
 
                 {/* Sheet — plain View so it doesn't compete with inner ScrollView gestures */}
-                <View style={styles.sheet}>
-                    {/* Tutma çubuğu */}
-                    <View style={styles.grabHandleContainer}>
-                        <View style={styles.grabHandle} />
-                    </View>
+                <View
+                    style={[
+                        styles.sheet,
+                        fullScreen && styles.sheetFullScreen,
+                        fullScreen && { paddingTop: insets.top },
+                    ]}
+                >
+                    {!fullScreen && (
+                        <View style={styles.grabHandleContainer}>
+                            <View style={styles.grabHandle} />
+                        </View>
+                    )}
 
                     {/* Başlık */}
                     <View style={styles.header}>
@@ -106,7 +120,7 @@ export function BottomSheet({
                     {/* İçerik — flex: 1 so it fills remaining sheet space and scrolls properly */}
                     <ScrollView
                         style={[styles.content, contentStyle]}
-                        contentContainerStyle={styles.contentContainer}
+                        contentContainerStyle={[styles.contentContainer, contentContainerStyle]}
                         showsVerticalScrollIndicator={true}
                         scrollIndicatorInsets={{ right: 1 }}
                         keyboardShouldPersistTaps="handled"
@@ -131,8 +145,8 @@ function createStyles(theme: AppTheme) {
             justifyContent: "flex-end",
         },
         sheet: {
-            height: "75%",
-            maxHeight: "85%",
+            height: "82%",
+            maxHeight: "90%",
             minHeight: 300,
             backgroundColor: theme.colors.bg,
             borderTopLeftRadius: theme.borderRadius.xl,
@@ -140,6 +154,15 @@ function createStyles(theme: AppTheme) {
             borderWidth: 1,
             borderBottomWidth: 0,
             borderColor: theme.colors.border,
+        },
+        sheetFullScreen: {
+            position: "absolute",
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
         },
         grabHandleContainer: {
             alignItems: "center",

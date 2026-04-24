@@ -5,6 +5,7 @@ import {
     View,
     Text,
     Pressable,
+    Alert,
     KeyboardAvoidingView,
     Keyboard,
     InteractionManager,
@@ -49,6 +50,7 @@ import { EmptyChat } from "../../src/components/EmptyChat";
 import { ActivityDots } from "../../src/components/ActivityDots";
 import { SubagentPanel } from "../../src/components/SubagentPanel";
 import { TodoPanel } from "../../src/components/TodoPanel";
+import { SubscriptionPaywallSheet } from "../../src/components/SubscriptionPaywallSheet";
 import { PermissionDialog, PlanExitDialog, UserInputDialog } from "../../src/components/Dialogs";
 import { useAppTheme, type AppTheme } from "../../src/theme/theme-context";
 import type { SessionConfig } from "@copilot-mobile/shared";
@@ -68,15 +70,19 @@ import {
     pullWorkspace,
     pushWorkspace,
 } from "../../src/services/bridge";
+import { loadFreeMessageTrialUsed, saveFreeMessageTrialUsed } from "../../src/services/credentials";
+import { refreshRevenueCatState } from "../../src/services/revenuecat";
 import { startDraftConversation } from "../../src/services/new-chat";
 import {
     deriveAgentTodosFromItems,
+    deriveSubagentRunsFromItems,
     getActiveAgentItems,
 } from "../../src/utils/tool-introspection";
 import {
     createBlobAttachments,
     createPendingUploadAttachments,
 } from "../../src/utils/attachment-upload";
+import { useSubscriptionStore } from "../../src/stores/subscription-store";
 
 const CHAT_LIST_DRAW_DISTANCE = 320;
 
@@ -667,6 +673,8 @@ export default function ChatScreen() {
     const [showScrollToBottom, setShowScrollToBottom] = useState(false);
     const [queuedDrafts, setQueuedDrafts] = useState<Array<QueuedDraft>>([]);
     const [editingDraft, setEditingDraft] = useState<QueuedDraft | null>(null);
+    const [hasUsedFreeMessageTrial, setHasUsedFreeMessageTrial] = useState(false);
+    const [isSubscriptionPaywallVisible, setIsSubscriptionPaywallVisible] = useState(false);
     const [listLayoutRevision, setListLayoutRevision] = useState(0);
     const [dismissedSubagentSignature, setDismissedSubagentSignature] = useState<string | null>(null);
     const [dismissedTodoSignature, setDismissedTodoSignature] = useState<string | null>(null);
@@ -679,6 +687,7 @@ export default function ChatScreen() {
     const activeConversationIdRef = useRef<string | null>(null);
     const stableAgentTodosRef = useRef<ReadonlyArray<AgentTodo>>([]);
     const stablePanelSessionIdRef = useRef<string | null>(null);
+    const prevIsActiveTurnSourceRef = useRef(false);
 
     // Store'lardan state
     const chatItems = useSessionStore((s) => s.chatItems);
@@ -700,12 +709,11 @@ export default function ChatScreen() {
     const permissionPrompt = useSessionStore((s) => s.permissionPrompt);
     const userInputPrompt = useSessionStore((s) => s.userInputPrompt);
     const planExitPrompt = useSessionStore((s) => s.planExitPrompt);
-    const agentTodos = useSessionStore((s) => s.agentTodos);
-    const subagentRuns = useSessionStore((s) => s.subagentRuns);
     const setAbortRequested = useSessionStore((s) => s.setAbortRequested);
     const activeConversationId = useChatHistoryStore((s) => s.activeConversationId);
     const workspaceSessionId = useWorkspaceStore((s) => s.sessionId);
     const workspaceRoot = useWorkspaceStore((s) => s.workspaceRoot);
+    const hasActiveEntitlement = useSubscriptionStore((s) => s.hasActiveEntitlement);
 
     latestChatItemsRef.current = chatItems;
     activeConversationIdRef.current = activeConversationId;
@@ -721,6 +729,12 @@ export default function ChatScreen() {
     const isConnecting =
         connectionState === "connecting" || connectionState === "connected";
     const inputDisabled = !isConnected || isSessionLoading;
+    const isSubscriptionLocked = !hasActiveEntitlement && hasUsedFreeMessageTrial;
+    const inputPlaceholder = !hasActiveEntitlement && !hasUsedFreeMessageTrial
+        ? "Your first message is free"
+        : isSubscriptionLocked
+            ? "Subscribe to continue chatting"
+            : "Message, #files, @participants, /commands";
     const isActiveSessionBusy = activeSessionId !== null && busySessions[activeSessionId] === true;
     const isActiveTurnSource = isTyping || isActiveSessionBusy || isAbortPending;
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
@@ -729,9 +743,9 @@ export default function ChatScreen() {
         () => getActiveAgentItems(chatItems, isTyping),
         [chatItems, isTyping],
     );
-    const subagentPanelSignature = useMemo(
-        () => subagentRuns.map((run) => `${run.requestId}:${run.title}`).join("|"),
-        [subagentRuns],
+    const visibleSubagentRuns = useMemo(
+        () => deriveSubagentRunsFromItems(activeAgentItems, isTyping),
+        [activeAgentItems, isTyping],
     );
     const hasRunningToolInCurrentTurn = useMemo(
         () => activeAgentItems.some((item) => item.type === "tool" && item.status === "running"),
@@ -743,13 +757,8 @@ export default function ChatScreen() {
             return [];
         }
 
-        const derivedTodos = deriveAgentTodosFromItems(activeAgentItems);
-        if (derivedTodos.length > 0) {
-            return derivedTodos;
-        }
-
-        return agentTodos;
-    }, [activeAgentItems, agentTodos, hasRunningToolInCurrentTurn, isActiveSessionBusy, isTyping]);
+        return deriveAgentTodosFromItems(activeAgentItems);
+    }, [activeAgentItems, hasRunningToolInCurrentTurn, isActiveSessionBusy, isTyping]);
     if (!areAgentTodosEqual(stableAgentTodosRef.current, nextVisibleAgentTodos)) {
         stableAgentTodosRef.current = nextVisibleAgentTodos;
     }
@@ -758,28 +767,37 @@ export default function ChatScreen() {
         () => visibleAgentTodos.map((todo) => `${todo.id}:${todo.content}`).join("|"),
         [visibleAgentTodos],
     );
-    const showSubagentPanel = subagentRuns.length > 0 && dismissedSubagentSignature !== subagentPanelSignature;
+    const subagentPanelSignature = useMemo(
+        () => visibleSubagentRuns.map((run) => `${run.requestId}:${run.title}`).join("|"),
+        [visibleSubagentRuns],
+    );
+    const showSubagentPanel = visibleSubagentRuns.length > 0 && dismissedSubagentSignature !== subagentPanelSignature;
     const showTodoPanel = visibleAgentTodos.length > 0 && dismissedTodoSignature !== todoPanelSignature;
 
     useEffect(() => {
-        if (
-            dismissedSubagentSignature !== null
-            && subagentPanelSignature.length > 0
-            && dismissedSubagentSignature !== subagentPanelSignature
-        ) {
-            setDismissedSubagentSignature(null);
-        }
-    }, [dismissedSubagentSignature, subagentPanelSignature]);
+        let cancelled = false;
+
+        void loadFreeMessageTrialUsed().then((value) => {
+            if (cancelled) {
+                return;
+            }
+
+            setHasUsedFreeMessageTrial(value);
+        });
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
 
     useEffect(() => {
-        if (
-            dismissedTodoSignature !== null
-            && todoPanelSignature.length > 0
-            && dismissedTodoSignature !== todoPanelSignature
-        ) {
+        if (isActiveTurnSource && !prevIsActiveTurnSourceRef.current) {
+            setDismissedSubagentSignature(null);
             setDismissedTodoSignature(null);
         }
-    }, [dismissedTodoSignature, todoPanelSignature]);
+
+        prevIsActiveTurnSourceRef.current = isActiveTurnSource;
+    }, [isActiveTurnSource]);
 
     useEffect(() => {
         setDismissedSubagentSignature(null);
@@ -944,138 +962,182 @@ export default function ChatScreen() {
         Keyboard.dismiss();
     }, []);
 
+    const handleSubscriptionLockedPress = useCallback(() => {
+        setIsSubscriptionPaywallVisible(true);
+    }, []);
+
     // Send message
     const handleSend = useCallback(
         (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => {
-            enableAutoFollow();
+            void (async () => {
+                enableAutoFollow();
 
-            // "steer" mode sends inline without interrupting assistant
-            if (mode === "steer" && activeSessionId !== null) {
-                sendMessage(activeSessionId, content, images);
-                return;
-            }
-
-            if (mode === "queue") {
-                setQueuedDrafts((prev) => [
-                    ...prev,
-                    {
-                        id: `queued-${Date.now()}-${prev.length + 1}`,
-                        sessionId: activeSessionId,
-                        content,
-                        images: [...images],
-                    },
-                ]);
-                return;
-            }
-
-            const hasBlockingTurn = activeSessionId !== null && (
-                isActiveSessionBusy
-                || isTyping
-                || permissionPrompt !== null
-                || userInputPrompt !== null
-                || planExitPrompt !== null
-            );
-
-            if (mode === "send" && hasBlockingTurn && activeSessionId !== null) {
-                setQueuedDrafts((prev) => [
-                    ...prev,
-                    {
-                        id: `queued-${Date.now()}-${prev.length + 1}`,
-                        sessionId: activeSessionId,
-                        content,
-                        images: [...images],
-                    },
-                ]);
-                if (!isAbortPending) {
-                    setAbortRequested(true);
-                    void abortMessage(activeSessionId).catch(() => {
-                        useSessionStore.getState().setAbortRequested(false);
-                    });
+                if (!hasActiveEntitlement && hasUsedFreeMessageTrial) {
+                    try {
+                        await refreshRevenueCatState();
+                        if (!useSubscriptionStore.getState().hasActiveEntitlement) {
+                            setIsSubscriptionPaywallVisible(true);
+                            return;
+                        }
+                    } catch (error) {
+                        Alert.alert(
+                            "Subscription required",
+                            error instanceof Error ? error.message : "Subscribe to send another message."
+                        );
+                        return;
+                    }
                 }
-                return;
-            }
 
-            const historyStore = useChatHistoryStore.getState();
-            const previousActiveConversationId = historyStore.activeConversationId;
-            const activeSession = sessions.find((session) => session.id === activeSessionId);
-            const workspaceRootForConversation =
-                activeSessionId !== null && workspaceSessionId === activeSessionId
-                    ? workspaceRoot
-                    : activeSession?.context?.workspaceRoot ?? null;
-            const activeConversationId =
-                previousActiveConversationId
-                ?? historyStore.createConversation(activeSessionId, workspaceRootForConversation);
-            const conversation = previousActiveConversationId === null
-                ? undefined
-                : historyStore.conversations.find(
-                    (item) => item.id === previousActiveConversationId
-                );
-            const shouldUpdateConversation =
-                previousActiveConversationId === null ||
-                (conversation !== undefined && conversation.title === "New Chat");
-
-            if (shouldUpdateConversation) {
-                const title =
-                    content.length > 40
-                        ? content.slice(0, 40) + "..."
-                        : content;
-                historyStore.updateConversation(activeConversationId, title, content);
-            }
-
-            if (activeSessionId === null) {
-                const store = useSessionStore.getState();
-                const requestedModelId = models.some((model) => model.id === selectedModel)
-                    ? selectedModel
-                    : models[0]?.id ?? selectedModel;
-                const requestedModel = models.find((m) => m.id === requestedModelId);
-                const draftWorkspaceRoot = historyStore.conversations.find(
-                    (conversationItem) => conversationItem.id === activeConversationId
-                )?.workspaceRoot ?? null;
-                const localItemId = store.addUserMessage(
-                    content,
-                    supportsAttachmentUploads
-                        ? createPendingUploadAttachments(images)
-                        : createBlobAttachments(images)
-                );
-                store.setSessionLoading(true);
-                store.setAssistantTyping(true);
-                const config: SessionConfig = {
-                    model: requestedModelId,
-                    streaming: true,
-                    agentMode,
-                    permissionLevel,
-                    ...(draftWorkspaceRoot !== null ? { workspaceRoot: draftWorkspaceRoot } : {}),
-                };
-                if (
-                    requestedModel?.supportsReasoningEffort === true &&
-                    reasoningEffort !== null
-                ) {
-                    config.reasoningEffort = reasoningEffort;
+                // "steer" mode sends inline without interrupting assistant
+                if (mode === "steer" && activeSessionId !== null) {
+                    try {
+                        await sendMessage(activeSessionId, content, images);
+                        if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
+                            await saveFreeMessageTrialUsed(true);
+                            setHasUsedFreeMessageTrial(true);
+                        }
+                    } catch {
+                        return;
+                    }
+                    return;
                 }
-                void createSessionWithInitialMessage(
-                    config,
-                    content,
-                    images
-                )
-                    .then(() => {
-                        store.updateUserMessageDeliveryState(localItemId, "sent");
-                    })
-                    .catch(() => {
-                        store.updateUserMessageDeliveryState(localItemId, "failed");
-                        store.setAssistantTyping(false);
-                    });
-                return;
-            }
 
-            sendMessage(activeSessionId, content, images);
+                if (mode === "queue") {
+                    setQueuedDrafts((prev) => [
+                        ...prev,
+                        {
+                            id: `queued-${Date.now()}-${prev.length + 1}`,
+                            sessionId: activeSessionId,
+                            content,
+                            images: [...images],
+                        },
+                    ]);
+                    return;
+                }
+
+                const hasBlockingTurn = activeSessionId !== null && (
+                    isActiveSessionBusy
+                    || isTyping
+                    || permissionPrompt !== null
+                    || userInputPrompt !== null
+                    || planExitPrompt !== null
+                );
+
+                if (mode === "send" && hasBlockingTurn && activeSessionId !== null) {
+                    setQueuedDrafts((prev) => [
+                        ...prev,
+                        {
+                            id: `queued-${Date.now()}-${prev.length + 1}`,
+                            sessionId: activeSessionId,
+                            content,
+                            images: [...images],
+                        },
+                    ]);
+                    if (!isAbortPending) {
+                        setAbortRequested(true);
+                        void abortMessage(activeSessionId).catch(() => {
+                            useSessionStore.getState().setAbortRequested(false);
+                        });
+                    }
+                    return;
+                }
+
+                const historyStore = useChatHistoryStore.getState();
+                const previousActiveConversationId = historyStore.activeConversationId;
+                const activeSession = sessions.find((session) => session.id === activeSessionId);
+                const workspaceRootForConversation =
+                    activeSessionId !== null && workspaceSessionId === activeSessionId
+                        ? workspaceRoot
+                        : activeSession?.context?.workspaceRoot ?? null;
+                const activeConversationId =
+                    previousActiveConversationId
+                    ?? historyStore.createConversation(activeSessionId, workspaceRootForConversation);
+                const conversation = previousActiveConversationId === null
+                    ? undefined
+                    : historyStore.conversations.find(
+                        (item) => item.id === previousActiveConversationId
+                    );
+                const shouldUpdateConversation =
+                    previousActiveConversationId === null ||
+                    (conversation !== undefined && conversation.title === "New Chat");
+
+                if (shouldUpdateConversation) {
+                    const title =
+                        content.length > 40
+                            ? content.slice(0, 40) + "..."
+                            : content;
+                    historyStore.updateConversation(activeConversationId, title, content);
+                }
+
+                if (activeSessionId === null) {
+                    const store = useSessionStore.getState();
+                    const requestedModelId = models.some((model) => model.id === selectedModel)
+                        ? selectedModel
+                        : models[0]?.id ?? selectedModel;
+                    const requestedModel = models.find((m) => m.id === requestedModelId);
+                    const draftWorkspaceRoot = historyStore.conversations.find(
+                        (conversationItem) => conversationItem.id === activeConversationId
+                    )?.workspaceRoot ?? null;
+                    const localItemId = store.addUserMessage(
+                        content,
+                        supportsAttachmentUploads
+                            ? createPendingUploadAttachments(images)
+                            : createBlobAttachments(images)
+                    );
+                    store.setSessionLoading(true);
+                    store.setAssistantTyping(true);
+                    const config: SessionConfig = {
+                        model: requestedModelId,
+                        streaming: true,
+                        agentMode,
+                        permissionLevel,
+                        ...(draftWorkspaceRoot !== null ? { workspaceRoot: draftWorkspaceRoot } : {}),
+                    };
+                    if (
+                        requestedModel?.supportsReasoningEffort === true &&
+                        reasoningEffort !== null
+                    ) {
+                        config.reasoningEffort = reasoningEffort;
+                    }
+                    void createSessionWithInitialMessage(
+                        config,
+                        content,
+                        images
+                    )
+                        .then(async () => {
+                            store.updateUserMessageDeliveryState(localItemId, "sent");
+                            if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
+                                await saveFreeMessageTrialUsed(true);
+                                setHasUsedFreeMessageTrial(true);
+                            }
+                        })
+                        .catch(() => {
+                            store.updateUserMessageDeliveryState(localItemId, "failed");
+                            store.setAssistantTyping(false);
+                        });
+                    return;
+                }
+
+                try {
+                    await sendMessage(activeSessionId, content, images);
+                    if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
+                        await saveFreeMessageTrialUsed(true);
+                        setHasUsedFreeMessageTrial(true);
+                    }
+                } catch {
+                    return;
+                }
+            })();
         },
         [
             activeSessionId,
             agentMode,
             enableAutoFollow,
+            hasActiveEntitlement,
             isActiveSessionBusy,
             isAbortPending,
             isTyping,
+            hasUsedFreeMessageTrial,
             models,
             permissionPrompt,
             permissionLevel,
@@ -1281,7 +1343,7 @@ export default function ChatScreen() {
 
                 {showSubagentPanel && (
                     <SubagentPanel
-                        runs={subagentRuns}
+                        runs={visibleSubagentRuns}
                         onDismiss={() => setDismissedSubagentSignature(subagentPanelSignature)}
                     />
                 )}
@@ -1293,12 +1355,22 @@ export default function ChatScreen() {
                     />
                 )}
 
+                <SubscriptionPaywallSheet
+                    visible={isSubscriptionPaywallVisible}
+                    onClose={() => setIsSubscriptionPaywallVisible(false)}
+                    headline="Your first message is already used"
+                    body="Subscribe to Code Companion Pro to keep chatting with your paired Mac without limits."
+                />
+
                 <ChatInput
                     onSend={handleSend}
                     onAbort={handleAbort}
+                    onLockedPress={handleSubscriptionLockedPress}
                     isTyping={isActiveTurnSource}
                     isAbortPending={isAbortPending}
                     disabled={inputDisabled}
+                    isComposerLocked={isSubscriptionLocked}
+                    inputPlaceholder={inputPlaceholder}
                     queuedDrafts={visibleQueuedDrafts}
                     editingDraft={editingDraft}
                     onEditingDraftConsumed={handleEditingDraftConsumed}

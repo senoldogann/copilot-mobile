@@ -20,6 +20,7 @@ import { useSessionStore } from "../stores/session-store";
 import { useWorkspaceDirectoryStore } from "../stores/workspace-directory-store";
 import { getAppVisibilityState, setAppVisibilityState } from "./app-visibility";
 import { armBackgroundCompletion, clearBackgroundCompletion } from "./background-completion";
+import { initializeRevenueCat, refreshRevenueCatState } from "./revenuecat";
 
 let currentAppState: AppStateStatus = getAppVisibilityState();
 let runtimeInitialized = false;
@@ -102,6 +103,11 @@ function syncOnForeground(): void {
     void syncRemoteNotificationRegistration({
         allowPrompt: false,
         force: false,
+    });
+    void refreshRevenueCatState().catch((error: unknown) => {
+        console.warn("[RevenueCat] Failed to refresh on foreground", {
+            error,
+        });
     });
 
     if (activeSessionId === null) {
@@ -228,6 +234,11 @@ export function initializeAppRuntime(): () => void {
     runtimeInitialized = true;
     setAppVisibilityState(AppState.currentState);
     currentAppState = getAppVisibilityState();
+    void initializeRevenueCat().catch((error: unknown) => {
+        console.warn("[RevenueCat] Failed to initialize during app bootstrap", {
+            error,
+        });
+    });
     void initializeNotifications();
     void initializeNotificationRouting(openSessionFromNotification);
     if (currentAppState === "active") {

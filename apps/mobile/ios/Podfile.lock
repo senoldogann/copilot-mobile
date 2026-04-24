@@ -209,7 +209,7 @@ PODS:
     - Yoga
   - ExpoAsset (12.0.12):
     - ExpoModulesCore
-  - ExpoBlur (14.0.3):
+  - ExpoBlur (15.0.8):
     - ExpoModulesCore
   - ExpoCamera (17.0.10):
     - ExpoModulesCore
@@ -286,6 +286,11 @@ PODS:
   - libwebp/sharpyuv (1.5.0)
   - libwebp/webp (1.5.0):
     - libwebp/sharpyuv
+  - PurchasesHybridCommon (18.1.0):
+    - RevenueCat (= 5.68.0)
+  - PurchasesHybridCommonUI (18.1.0):
+    - PurchasesHybridCommon (= 18.1.0)
+    - RevenueCatUI (= 5.68.0)
   - RCTDeprecation (0.81.5)
   - RCTRequired (0.81.5)
   - RCTTypeSafety (0.81.5):
@@ -1984,6 +1989,9 @@ PODS:
     - React-utils (= 0.81.5)
     - ReactNativeDependencies
   - ReactNativeDependencies (0.81.5)
+  - RevenueCat (5.68.0)
+  - RevenueCatUI (5.68.0):
+    - RevenueCat (= 5.68.0)
   - RNGestureHandler (2.28.0):
     - hermes-engine
     - RCTRequired
@@ -2006,6 +2014,12 @@ PODS:
     - ReactCommon/turbomodule/core
     - ReactNativeDependencies
     - Yoga
+  - RNPaywalls (10.0.1):
+    - PurchasesHybridCommonUI (= 18.1.0)
+    - React-Core
+  - RNPurchases (10.0.1):
+    - PurchasesHybridCommon (= 18.1.0)
+    - React-Core
   - RNReanimated (4.1.7):
     - hermes-engine
     - RCTRequired
@@ -2268,7 +2282,7 @@ DEPENDENCIES:
   - "expo-dev-menu (from `../../../node_modules/.pnpm/expo-dev-menu@7.0.18_expo@54.0.33/node_modules/expo-dev-menu`)"
   - "expo-dev-menu-interface (from `../../../node_modules/.pnpm/expo-dev-menu-interface@2.0.0_expo@54.0.33/node_modules/expo-dev-menu-interface/ios`)"
   - "ExpoAsset (from `../../../node_modules/.pnpm/expo-asset@12.0.12_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-co_kkdhz775ofzinerje2bqbwu37q/node_modules/expo-asset/ios`)"
-  - "ExpoBlur (from `../../../node_modules/.pnpm/expo-blur@14.0.3_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-conf_ftelz4ukmg6c7dcv45wwsnahni/node_modules/expo-blur/ios`)"
+  - "ExpoBlur (from `../../../node_modules/.pnpm/expo-blur@15.0.8_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-conf_egitjmbzkuc424igii3jgk3zqu/node_modules/expo-blur/ios`)"
   - "ExpoCamera (from `../../../node_modules/.pnpm/expo-camera@17.0.10_expo@54.0.33_react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react_lg3nk6og34xlbu7yhcu6i7fw7i/node_modules/expo-camera/ios`)"
   - "ExpoClipboard (from `../../../node_modules/.pnpm/expo-clipboard@8.0.8_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-_pubr7cw3aonjsl4r7f2bjji4nq/node_modules/expo-clipboard/ios`)"
   - "ExpoCrypto (from `../../../node_modules/.pnpm/expo-crypto@15.0.8_expo@54.0.33/node_modules/expo-crypto/ios`)"
@@ -2354,6 +2368,8 @@ DEPENDENCIES:
   - "ReactCommon/turbomodule/core (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-config@0.85.1_@babel+core@7.29.0___7tlutemzsulwe5b3sc2m5fyefq/node_modules/react-native/ReactCommon`)"
   - "ReactNativeDependencies (from `../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-config@0.85.1_@babel+core@7.29.0___7tlutemzsulwe5b3sc2m5fyefq/node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec`)"
   - "RNGestureHandler (from `../../../node_modules/.pnpm/react-native-gesture-handler@2.28.0_react-native@0.81.5_@babel+core@7.29.0_@react-native+metr_2ekx4kc6xkzisuf7qgpn3gqyni/node_modules/react-native-gesture-handler`)"
+  - "RNPaywalls (from `../../../node_modules/.pnpm/react-native-purchases-ui@10.0.1_react-native-purchases@10.0.1_react-native-web@0.21.2_react-_zpg26fsk3im7v33ei7gnsk566i/node_modules/react-native-purchases-ui`)"
+  - "RNPurchases (from `../../../node_modules/.pnpm/react-native-purchases@10.0.1_react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react@19_fpbn24enngprw3gwjrkdfc7c4u/node_modules/react-native-purchases`)"
   - "RNReanimated (from `../../../node_modules/.pnpm/react-native-reanimated@4.1.7_react-native-worklets@0.5.1_@babel+core@7.29.0_react-native@0.8_uhqo3n5euo5fiyx5tawtrmlbw4/node_modules/react-native-reanimated`)"
   - "RNScreens (from `../../../node_modules/.pnpm/react-native-screens@4.16.0_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-config_nyrt3oiyuvqggkwg53mful5m3y/node_modules/react-native-screens`)"
   - "RNSVG (from `../../../node_modules/.pnpm/react-native-svg@15.12.1_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-config@0._ojgc5hhcbguvfzzyui4luflfmu/node_modules/react-native-svg`)"
@@ -2364,6 +2380,10 @@ DEPENDENCIES:
 SPEC REPOS:
   trunk:
     - libwebp
+    - PurchasesHybridCommon
+    - PurchasesHybridCommonUI
+    - RevenueCat
+    - RevenueCatUI
     - SDWebImage
     - SDWebImageWebPCoder
     - ZXingObjC
@@ -2394,7 +2414,7 @@ EXTERNAL SOURCES:
   ExpoAsset:
     :path: "../../../node_modules/.pnpm/expo-asset@12.0.12_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-co_kkdhz775ofzinerje2bqbwu37q/node_modules/expo-asset/ios"
   ExpoBlur:
-    :path: "../../../node_modules/.pnpm/expo-blur@14.0.3_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-conf_ftelz4ukmg6c7dcv45wwsnahni/node_modules/expo-blur/ios"
+    :path: "../../../node_modules/.pnpm/expo-blur@15.0.8_expo@54.0.33_react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-conf_egitjmbzkuc424igii3jgk3zqu/node_modules/expo-blur/ios"
   ExpoCamera:
     :path: "../../../node_modules/.pnpm/expo-camera@17.0.10_expo@54.0.33_react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react_lg3nk6og34xlbu7yhcu6i7fw7i/node_modules/expo-camera/ios"
   ExpoClipboard:
@@ -2564,6 +2584,10 @@ EXTERNAL SOURCES:
     :podspec: "../../../node_modules/.pnpm/react-native@0.81.5_@babel+core@7.29.0_@react-native+metro-config@0.85.1_@babel+core@7.29.0___7tlutemzsulwe5b3sc2m5fyefq/node_modules/react-native/third-party-podspecs/ReactNativeDependencies.podspec"
   RNGestureHandler:
     :path: "../../../node_modules/.pnpm/react-native-gesture-handler@2.28.0_react-native@0.81.5_@babel+core@7.29.0_@react-native+metr_2ekx4kc6xkzisuf7qgpn3gqyni/node_modules/react-native-gesture-handler"
+  RNPaywalls:
+    :path: "../../../node_modules/.pnpm/react-native-purchases-ui@10.0.1_react-native-purchases@10.0.1_react-native-web@0.21.2_react-_zpg26fsk3im7v33ei7gnsk566i/node_modules/react-native-purchases-ui"
+  RNPurchases:
+    :path: "../../../node_modules/.pnpm/react-native-purchases@10.0.1_react-native-web@0.21.2_react-dom@19.1.0_react@19.1.0__react@19_fpbn24enngprw3gwjrkdfc7c4u/node_modules/react-native-purchases"
   RNReanimated:
     :path: "../../../node_modules/.pnpm/react-native-reanimated@4.1.7_react-native-worklets@0.5.1_@babel+core@7.29.0_react-native@0.8_uhqo3n5euo5fiyx5tawtrmlbw4/node_modules/react-native-reanimated"
   RNScreens:
@@ -2590,7 +2614,7 @@ SPEC CHECKSUMS:
   expo-dev-menu: 05b18812110c175814c6af0d09dd658abcc5e00d
   expo-dev-menu-interface: 600df12ea01efecdd822daaf13cc0ac091775533
   ExpoAsset: f867e55ceb428aab99e1e8c082b5aee7c159ea18
-  ExpoBlur: 392c1207f71d0ecf22371621c1fbd44ba84d9742
+  ExpoBlur: b90747a3f22a8b6ceffd9cb0dc41a4184efdc656
   ExpoCamera: 6a326deb45ba840749652e4c15198317aa78497e
   ExpoClipboard: b36b287d8356887844bb08ed5c84b5979bb4dd1e
   ExpoCrypto: b6105ebaa15d6b38a811e71e43b52cd934945322
@@ -2610,6 +2634,8 @@ SPEC CHECKSUMS:
   FBLazyVector: e95a291ad2dadb88e42b06e0c5fb8262de53ec12
   hermes-engine: 9f4dfe93326146a1c99eb535b1cb0b857a3cd172
   libwebp: 02b23773aedb6ff1fd38cec7a77b81414c6842a8
+  PurchasesHybridCommon: 32902b8fad349cf549f096183926ee33af00e36a
+  PurchasesHybridCommonUI: 658bc5ca18c14a4bcc543740a3acc092cd0064f6
   RCTDeprecation: 943572d4be82d480a48f4884f670135ae30bf990
   RCTRequired: 8f3cfc90cc25cf6e420ddb3e7caaaabc57df6043
   RCTTypeSafety: 16a4144ca3f959583ab019b57d5633df10b5e97c
@@ -2675,7 +2701,11 @@ SPEC CHECKSUMS:
   ReactCodegen: 4233c144c257a6fa83bfc6c96001490b8281d620
   ReactCommon: 08810150b1206cc44aecf5f6ae19af32f29151a8
   ReactNativeDependencies: 71ce9c28beb282aa720ea7b46980fff9669f428a
+  RevenueCat: c535d3739d51163f6d9d5dbd01c7b5d93b718ff5
+  RevenueCatUI: fb23ded3007789db7a240f05c35c2237a197d629
   RNGestureHandler: 2914750df066d89bf9d8f48a10ad5f0051108ac3
+  RNPaywalls: 051e2576b934bd1accdab123ebccc04c1e658a0d
+  RNPurchases: ef34b2c0c1fcdab1df209fde0d95b026f90ae329
   RNReanimated: 902403d7bd8e841eb6db4e316e6d6d95459115db
   RNScreens: d8d6f1792f6e7ac12b0190d33d8d390efc0c1845
   RNSVG: 31d6639663c249b7d5abc9728dde2041eb2a3c34

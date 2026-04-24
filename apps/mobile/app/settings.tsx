@@ -1,7 +1,8 @@
 import React from "react";
-import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Constants from "expo-constants";
 import { Stack, useRouter } from "expo-router";
+import { SubscriptionPaywallSheet } from "../src/components/SubscriptionPaywallSheet";
 
 import { type ThemeMode, type ThemeVariant } from "../src/theme/colors";
 import { useThemedStyles, type AppTheme, useAppTheme } from "../src/theme/theme-context";
@@ -9,6 +10,13 @@ import { useThemeStore } from "../src/theme/theme-store";
 import { APP_FONT_OPTIONS, type AppFontPreference } from "../src/theme/typography";
 import { prepareNotificationPermissions } from "../src/services/notifications";
 import { syncRemoteNotificationRegistration } from "../src/services/bridge";
+import { POLICY_URL } from "../src/services/legal";
+import {
+    initializeRevenueCat,
+    openSubscriptionManagement,
+    restoreRevenueCatPurchases,
+} from "../src/services/revenuecat";
+import { useSubscriptionStore } from "../src/stores/subscription-store";
 import {
     PaletteIcon,
     MoonIcon,
@@ -25,6 +33,9 @@ import {
     ChevronDownIcon,
     PaintbrushIcon,
     TypeIcon,
+    SparklesIcon,
+    ShieldCheckIcon,
+    RefreshIcon,
 } from "../src/components/ProviderIcon";
 
 const THEME_MODES: ReadonlyArray<{ value: ThemeMode; label: string; icon: (props: any) => React.ReactNode }> = [
@@ -58,6 +69,10 @@ function SettingsGroup({
             {footer && <Text style={styles.groupFooter}>{footer}</Text>}
         </View>
     );
+}
+
+async function openPolicyPage(): Promise<void> {
+    await Linking.openURL(POLICY_URL);
 }
 
 function SettingsRow({
@@ -258,6 +273,121 @@ function ThemeSettings() {
     );
 }
 
+function formatSubscriptionStatus(input: {
+    initialized: boolean;
+    status: "idle" | "loading" | "ready" | "error";
+    hasActiveEntitlement: boolean;
+    offeringIdentifier: string | null;
+}): string {
+    if (input.status === "loading") {
+        return "Syncing";
+    }
+
+    if (input.status === "error") {
+        return "Needs attention";
+    }
+
+    if (!input.initialized) {
+        return "Not initialized";
+    }
+
+    if (input.hasActiveEntitlement) {
+        return "Pro active";
+    }
+
+    if (input.offeringIdentifier !== null) {
+        return "Ready to subscribe";
+    }
+
+    return "Waiting for offering";
+}
+
+function RevenueCatSettings() {
+    const styles = useThemedStyles(createStyles);
+    const initialized = useSubscriptionStore((state) => state.initialized);
+    const status = useSubscriptionStore((state) => state.status);
+    const hasActiveEntitlement = useSubscriptionStore((state) => state.hasActiveEntitlement);
+    const offering = useSubscriptionStore((state) => state.offering);
+    const lastError = useSubscriptionStore((state) => state.lastError);
+    const [isSubscriptionPaywallVisible, setIsSubscriptionPaywallVisible] = React.useState(false);
+
+    const statusLabel = formatSubscriptionStatus({
+        initialized,
+        status,
+        hasActiveEntitlement,
+        offeringIdentifier: offering?.identifier ?? null,
+    });
+
+    async function handlePrimarySubscriptionAction(): Promise<void> {
+        try {
+            if (hasActiveEntitlement) {
+                await openSubscriptionManagement();
+                return;
+            }
+
+            setIsSubscriptionPaywallVisible(true);
+        } catch (error) {
+            Alert.alert(
+                hasActiveEntitlement ? "Subscription management failed" : "Paywall failed",
+                error instanceof Error ? error.message : String(error)
+            );
+        }
+    }
+
+    async function handleRestorePurchases(): Promise<void> {
+        try {
+            await restoreRevenueCatPurchases();
+            Alert.alert("Purchases restored", "Your RevenueCat purchases were restored successfully.");
+        } catch (error) {
+            Alert.alert(
+                "Restore failed",
+                error instanceof Error ? error.message : String(error)
+            );
+        }
+    }
+
+    React.useEffect(() => {
+        void initializeRevenueCat().catch((error: unknown) => {
+            console.warn("[RevenueCat] Settings initialization failed", {
+                error,
+            });
+        });
+    }, []);
+
+    return (
+        <SettingsGroup
+            title="Subscription"
+            footer={lastError ?? "Subscription status is synced automatically. Use Restore Purchases if your plan does not appear."}
+        >
+            <SubscriptionPaywallSheet
+                visible={isSubscriptionPaywallVisible}
+                onClose={() => setIsSubscriptionPaywallVisible(false)}
+                headline="Unlock unlimited desktop coding chats"
+                body="Subscribe to Code Companion Pro to keep chatting from iPhone after your free first message."
+            />
+            <SettingsRow
+                icon={ShieldCheckIcon}
+                label="Code Companion Pro"
+                value={statusLabel}
+            />
+            <SettingsRow
+                icon={SparklesIcon}
+                label={hasActiveEntitlement ? "Manage Subscription" : "Subscribe Monthly"}
+                onPress={() => {
+                    void handlePrimarySubscriptionAction();
+                }}
+            />
+            <SettingsRow
+                icon={RefreshIcon}
+                label="Restore Purchases"
+                onPress={() => {
+                    void handleRestorePurchases();
+                }}
+            />
+        </SettingsGroup>
+    );
+}
+
 export default function SettingsScreen() {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
@@ -285,6 +415,17 @@ export default function SettingsScreen() {
         }
     }
 
+    async function handleOpenPolicyPage(label: string): Promise<void> {
+        try {
+            await openPolicyPage();
+        } catch (error) {
+            Alert.alert(
+                `${label} link failed`,
+                error instanceof Error ? error.message : String(error)
+            );
+        }
+    }
+
     return (
         <>
             <Stack.Screen options={{ headerShown: false }} />
@@ -301,10 +442,11 @@ export default function SettingsScreen() {
                 </View>
 
                 <ThemeSettings />
+                <RevenueCatSettings />
 
                 <SettingsGroup
                     title="App Settings"
-                    footer="Enable notifications to receive background completion alerts."
+                    footer="Enable notifications to receive background completion alerts. Use /feedback in chat to send bug reports or issues by email."
                 >
                     <SettingsRow
                         icon={BookOpenIcon}
@@ -317,6 +459,27 @@ export default function SettingsScreen() {
                         isLast={true}
                         onPress={() => {
                             void handleEnableNotifications();
+                        }}
+                    />
+                </SettingsGroup>
+
+                <SettingsGroup
+                    title="Legal"
+                    footer="Review the subscription terms and privacy policy before subscribing."
+                >
+                    <SettingsRow
+                        icon={BookOpenIcon}
+                        label="Terms of Service"
+                        onPress={() => {
+                            void handleOpenPolicyPage("Terms");
+                        }}
+                    />
+                    <SettingsRow
+                        icon={ShieldCheckIcon}
+                        label="Privacy Policy"
+                        isLast={true}
+                        onPress={() => {
+                            void handleOpenPolicyPage("Privacy");
                         }}
                     />
                 </SettingsGroup>
