@@ -81,6 +81,23 @@ function mapPresenceState(nextAppState: AppStateStatus): NotificationPresenceSta
     return "background";
 }
 
+function persistAuthenticatedConnection(params: {
+    deviceCredential: string;
+    serverUrl: string;
+    certFingerprint: string | null;
+    deviceId: string;
+    transportMode: "direct" | "relay";
+    relayAccessToken: string | null;
+}): void {
+    void saveCredentials(params).catch((error: unknown) => {
+        console.warn("[Bridge] Failed to persist authenticated connection", {
+            deviceId: params.deviceId,
+            transportMode: params.transportMode,
+            error,
+        });
+    });
+}
+
 function armWorkspaceBranchResponseTimeout(): void {
     if (workspaceBranchResponseTimer !== null) {
         clearTimeout(workspaceBranchResponseTimer);
@@ -252,7 +269,7 @@ function getClient(): ReturnType<typeof createWSClient> {
                         persistableConnection.serverUrl !== null
                         && persistableConnection.transportMode !== null
                     ) {
-                        void saveCredentials({
+                        persistAuthenticatedConnection({
                             deviceCredential: message.payload.deviceCredential,
                             serverUrl: persistableConnection.serverUrl,
                             certFingerprint: persistableConnection.certFingerprint,
