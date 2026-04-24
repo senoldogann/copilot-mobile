@@ -164,8 +164,10 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
             },
         });
         localBridgeSocket = ws;
+        let opened = false;
 
         ws.onopen = () => {
+            opened = true;
             flushBufferedMobileMessages();
         };
 
@@ -183,7 +185,9 @@ export function createRelayProxy(config: RelayProxyConfig): RelayProxy {
             sendRelayControlMessage({
                 type: "mobile.close",
                 companionId: config.companionId,
-                reason: "Local bridge connection closed",
+                reason: opened
+                    ? "Local bridge connection closed"
+                    : "Local bridge unavailable. Please retry.",
             });
             scheduleLocalBridgeReconnect();
         };
