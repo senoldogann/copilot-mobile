@@ -183,6 +183,22 @@ function logUnsupportedSqliteOnce(): void {
     console.warn("[vscode-session-store] node:sqlite unavailable; external VS Code session sync disabled");
 }
 
+function decodeSqliteText(value: unknown): string {
+    if (typeof value === "string") {
+        return value;
+    }
+
+    if (value instanceof Uint8Array) {
+        return Buffer.from(value).toString("utf8");
+    }
+
+    if (value instanceof ArrayBuffer) {
+        return Buffer.from(value).toString("utf8");
+    }
+
+    throw new TypeError("Unsupported SQLite text value");
+}
+
 function readChatSessionStoreIndex(
     DatabaseSync: DatabaseSyncConstructor,
     globalStateDbPath: string
@@ -192,13 +208,14 @@ function readChatSessionStoreIndex(
         database.exec("PRAGMA busy_timeout = 2000");
         const row = database
             .prepare("SELECT value FROM ItemTable WHERE key = ?")
-            .get(CHAT_SESSION_INDEX_KEY) as { value: string } | undefined;
+            .get(CHAT_SESSION_INDEX_KEY) as { value: unknown } | undefined;
 
-        if (row === undefined || row.value.trim().length === 0) {
+        const serialized = row === undefined ? "" : decodeSqliteText(row.value).trim();
+        if (serialized.length === 0) {
             return { version: 1, entries: {} };
         }
 
-        const parsed = JSON.parse(row.value) as ChatSessionStoreIndex;
+        const parsed = JSON.parse(serialized) as ChatSessionStoreIndex;
         return {
             version: typeof parsed.version === "number" ? parsed.version : 1,
             entries: typeof parsed.entries === "object" && parsed.entries !== null

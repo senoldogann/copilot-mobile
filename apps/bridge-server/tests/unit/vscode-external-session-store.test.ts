@@ -39,6 +39,22 @@ async function getDatabaseSyncConstructor(): Promise<DatabaseSyncConstructor | n
     }
 }
 
+function decodeSqliteText(value: unknown): string {
+    if (typeof value === "string") {
+        return value;
+    }
+
+    if (value instanceof Uint8Array) {
+        return Buffer.from(value).toString("utf8");
+    }
+
+    if (value instanceof ArrayBuffer) {
+        return Buffer.from(value).toString("utf8");
+    }
+
+    throw new TypeError("Unsupported SQLite text value");
+}
+
 async function createFixture(
     DatabaseSync: DatabaseSyncConstructor,
     input: {
@@ -80,8 +96,8 @@ function readIndex(DatabaseSync: DatabaseSyncConstructor, dbPath: string): {
     try {
         const row = database
             .prepare("SELECT value FROM ItemTable WHERE key = ?")
-            .get("chat.ChatSessionStore.index") as { value: string };
-        return JSON.parse(row.value) as {
+            .get("chat.ChatSessionStore.index") as { value: unknown };
+        return JSON.parse(decodeSqliteText(row.value)) as {
             version: number;
             entries: Record<string, unknown>;
         };
