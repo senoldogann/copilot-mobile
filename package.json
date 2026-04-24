@@ -3,8 +3,8 @@
     "version": "0.1.0",
     "type": "module",
     "bin": {
-        "code-companion": "./bin/copilot-mobile.mjs",
-        "copilot-mobile": "./bin/copilot-mobile.mjs"
+        "code-companion": "bin/copilot-mobile.mjs",
+        "copilot-mobile": "bin/copilot-mobile.mjs"
     },
     "files": [
         "bin/copilot-mobile.mjs",
