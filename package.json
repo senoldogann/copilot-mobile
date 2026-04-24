@@ -7,12 +7,16 @@
         "copilot-mobile": "./bin/copilot-mobile.mjs"
     },
     "files": [
-        "bin",
+        "bin/copilot-mobile.mjs",
+        "bin/copilot-mobile-daemon.mjs",
+        "bin/lib",
         "dist/desktop",
         "apps/bridge-server/dist",
         "packages/shared/dist",
         "README.md",
-        "docs"
+        "docs/cloudflare-relay.md",
+        "docs/desktop-companion.md",
+        "docs/relay-deployment.md"
     ],
     "publishConfig": {
         "access": "public"

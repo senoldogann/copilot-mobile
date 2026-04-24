@@ -88,6 +88,4 @@ What still needs product hardening before App Store-grade rollout:
 - End-to-end onboarding polish for non-technical users
 - App Store metadata, privacy manifest, and release operations
 
-The detailed release checklist now lives in:
-
-- [docs/project-runbook-and-appstore-readiness.md](/Users/dogan/Desktop/copilot-mobile/docs/project-runbook-and-appstore-readiness.md)
+The detailed release checklist lives in `docs/project-runbook-and-appstore-readiness.md` in the source repository.

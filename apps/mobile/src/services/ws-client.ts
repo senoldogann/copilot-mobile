@@ -272,7 +272,7 @@ export function createWSClient(config: WSClientConfig) {
             reconnectTimer = null;
             void resumeConnectionWithCurrentBackoff({
                 reconnectOnFailure: true,
-                reportErrors: true,
+                reportErrors: reportConnectionErrors,
             });
         }, delay);
     }

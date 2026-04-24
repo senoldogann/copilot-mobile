@@ -21,6 +21,7 @@ export default function ScanScreen() {
     const [scanned, setScanned] = useState(false);
     const [isPairing, setIsPairing] = useState(false);
     const hasShownErrorRef = useRef(false);
+    const hasPairingAttemptRef = useRef(false);
     const connectionState = useConnectionStore((s) => s.state);
     const connectionError = useConnectionStore((s) => s.error);
 
@@ -37,7 +38,11 @@ export default function ScanScreen() {
     }, [connectionState, router]);
 
     useEffect(() => {
-        if (connectionError === null || hasShownErrorRef.current) {
+        if (
+            connectionError === null
+            || hasShownErrorRef.current
+            || !hasPairingAttemptRef.current
+        ) {
             return;
         }
 
@@ -99,6 +104,7 @@ export default function ScanScreen() {
 
             hasShownErrorRef.current = false;
             setIsPairing(true);
+            hasPairingAttemptRef.current = true;
             connectWithQR(qrPayload);
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : "Could not read QR code.";

@@ -10,9 +10,7 @@ The goal is:
 
 ## App Location
 
-Cloudflare Worker source lives in:
-
-- `/Users/dogan/Desktop/copilot-mobile/apps/cloudflare-relay`
+Cloudflare Worker source lives in `apps/cloudflare-relay`.
 
 It provides:
 
@@ -28,7 +26,7 @@ The public relay and control-plane run in the same Worker.
 ## GitHub Actions Deploy
 
 The repository now includes a dedicated workflow at
-[deploy-cloudflare-relay.yml](/Users/dogan/Desktop/copilot-mobile/.github/workflows/deploy-cloudflare-relay.yml).
+`.github/workflows/deploy-cloudflare-relay.yml`.
 
 It will deploy the Worker automatically on `main` changes under `apps/cloudflare-relay/**`
 or when triggered manually, as long as these repository secrets exist:

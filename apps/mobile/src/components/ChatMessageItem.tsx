@@ -482,18 +482,22 @@ function splitSegmentsIntoSentenceChunks(segments: ReadonlyArray<MarkdownSegment
 function InteractiveMarkdownText({
     segments,
     textStyle,
-    onSentenceLongPress,
+    selectedText,
+    onSentenceAction,
 }: {
     segments: ReadonlyArray<MarkdownSegment>;
     textStyle: StyleProp<TextStyle>;
-    onSentenceLongPress?: ((text: string, event: GestureResponderEvent) => void) | undefined;
+    selectedText?: string | undefined;
+    onSentenceAction?: ((text: string, event: GestureResponderEvent) => void) | undefined;
 }) {
+    const mdStyles = useThemedStyles(createMarkdownStyles);
     const chunks = useMemo(() => splitSegmentsIntoSentenceChunks(segments), [segments]);
 
     return (
         <Text style={textStyle}>
             {chunks.map((chunk) => {
                 const trimmedText = chunk.text.trim();
+                const isSelected = selectedText !== undefined && selectedText === trimmedText;
                 if (trimmedText.length === 0) {
                     return (
                         <Text key={chunk.key}>
@@ -505,10 +509,14 @@ function InteractiveMarkdownText({
                 return (
                     <Text
                         key={chunk.key}
+                        style={isSelected ? mdStyles.selectedSentence : undefined}
                         suppressHighlighting
-                        onLongPress={onSentenceLongPress === undefined
+                        onPress={onSentenceAction === undefined
                             ? undefined
-                            : (event) => onSentenceLongPress(trimmedText, event)}
+                            : (event) => onSentenceAction(trimmedText, event)}
+                        onLongPress={onSentenceAction === undefined
+                            ? undefined
+                            : (event) => onSentenceAction(trimmedText, event)}
                     >
                         <InlineMarkdownSpans segments={chunk.segments} />
                     </Text>
@@ -606,11 +614,13 @@ function CodeBlockCard({ language, code }: { language: string; code: string }) {
 function MarkdownContent({
     content,
     isStreaming,
-    onSentenceLongPress,
+    selectedText,
+    onSentenceAction,
 }: {
     content: string;
     isStreaming: boolean;
-    onSentenceLongPress?: ((text: string, event: GestureResponderEvent) => void) | undefined;
+    selectedText?: string | undefined;
+    onSentenceAction?: ((text: string, event: GestureResponderEvent) => void) | undefined;
 }) {
     const mdStyles = useThemedStyles(createMarkdownStyles);
     const styles = useThemedStyles(createStyles);
@@ -636,7 +646,8 @@ function MarkdownContent({
                                     block.level === 3 && mdStyles.h3,
                                 ]}
                                 segments={parseInlineMarkdown(block.text)}
-                                onSentenceLongPress={onSentenceLongPress}
+                                selectedText={selectedText}
+                                onSentenceAction={onSentenceAction}
                             />
                         );
                     case "code_block":
@@ -660,7 +671,8 @@ function MarkdownContent({
                                     <InteractiveMarkdownText
                                         segments={block.segments}
                                         textStyle={mdStyles.text}
-                                        onSentenceLongPress={onSentenceLongPress}
+                                        selectedText={selectedText}
+                                        onSentenceAction={onSentenceAction}
                                     />
                                 </View>
                             </View>
@@ -681,7 +693,8 @@ function MarkdownContent({
                                     <InteractiveMarkdownText
                                         segments={block.segments}
                                         textStyle={mdStyles.text}
-                                        onSentenceLongPress={onSentenceLongPress}
+                                        selectedText={selectedText}
+                                        onSentenceAction={onSentenceAction}
                                     />
                                 </View>
                             </View>
@@ -704,7 +717,8 @@ function MarkdownContent({
                                                 <InteractiveMarkdownText
                                                     textStyle={mdStyles.tableHeaderText}
                                                     segments={[{ kind: "text", value: header }]}
-                                                    onSentenceLongPress={onSentenceLongPress}
+                                                    selectedText={selectedText}
+                                                    onSentenceAction={onSentenceAction}
                                                 />
                                             </View>
                                         ))}
@@ -716,7 +730,8 @@ function MarkdownContent({
                                                     <InteractiveMarkdownText
                                                         textStyle={mdStyles.tableCellText}
                                                         segments={[{ kind: "text", value: cell }]}
-                                                        onSentenceLongPress={onSentenceLongPress}
+                                                        selectedText={selectedText}
+                                                        onSentenceAction={onSentenceAction}
                                                     />
                                                 </View>
                                             ))}
@@ -733,7 +748,8 @@ function MarkdownContent({
                                 <InteractiveMarkdownText
                                     segments={block.segments}
                                     textStyle={mdStyles.text}
-                                    onSentenceLongPress={onSentenceLongPress}
+                                    selectedText={selectedText}
+                                    onSentenceAction={onSentenceAction}
                                 />
                             </View>
                         );
@@ -933,7 +949,8 @@ function AssistantBubble({
                 <MarkdownContent
                     content={content}
                     isStreaming={isStreaming}
-                    onSentenceLongPress={handleOpenActions}
+                    selectedText={selectedText}
+                    onSentenceAction={handleOpenActions}
                 />
                 {showActions && !isStreaming && (
                     <Animated.View
@@ -1031,6 +1048,10 @@ const createMarkdownStyles = (theme: AppTheme) => StyleSheet.create({
     },
     inlineText: {
         color: theme.colors.textAssistant,
+    },
+    selectedSentence: {
+        backgroundColor: theme.colors.accentMuted,
+        borderRadius: 3,
     },
     paragraph: {
         marginBottom: 2,

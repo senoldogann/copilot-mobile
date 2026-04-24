@@ -16,7 +16,7 @@ Optionally provide a separate control-plane signing secret:
 export COPILOT_MOBILE_CONTROL_PLANE_SECRET="replace-with-a-long-random-secret"
 ```
 
-You can also start from [apps/relay-server/.env.example](/Users/dogan/Desktop/copilot-mobile/apps/relay-server/.env.example).
+You can also start from `apps/relay-server/.env.example` in the source repository.
 
 On the relay host also set:
 
