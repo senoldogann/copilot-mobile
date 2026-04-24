@@ -3,7 +3,6 @@ import { afterEach, describe, it } from "node:test";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { SessionInfo } from "@copilot-mobile/shared";
 import { createVSCodeExternalSessionStore } from "../../src/vscode/external-session-store.js";
 
@@ -13,7 +12,35 @@ afterEach(async () => {
     await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
+type DatabaseSyncInstance = {
+    exec(sql: string): void;
+    prepare(sql: string): {
+        get(...params: Array<unknown>): unknown;
+        run(...params: Array<unknown>): { changes?: number };
+    };
+    close(): void;
+};
+
+type DatabaseSyncConstructor = new (path: string) => DatabaseSyncInstance;
+
+async function getDatabaseSyncConstructor(): Promise<DatabaseSyncConstructor | null> {
+    try {
+        const module = await import("node:sqlite");
+        return module.DatabaseSync as DatabaseSyncConstructor;
+    } catch (error) {
+        if (
+            error instanceof Error
+            && "code" in error
+            && (error as NodeJS.ErrnoException).code === "ERR_UNKNOWN_BUILTIN_MODULE"
+        ) {
+            return null;
+        }
+        throw error;
+    }
+}
+
 async function createFixture(
+    DatabaseSync: DatabaseSyncConstructor,
     input: {
         index?: unknown;
         metadata?: unknown;
@@ -45,7 +72,7 @@ async function createFixture(
     return { userDir, dbPath, metadataPath };
 }
 
-function readIndex(dbPath: string): {
+function readIndex(DatabaseSync: DatabaseSyncConstructor, dbPath: string): {
     version: number;
     entries: Record<string, unknown>;
 } {
@@ -81,8 +108,14 @@ function createSessionInfo(overrides: Partial<SessionInfo> = {}): SessionInfo {
 }
 
 describe("VS Code external session store", () => {
-    it("registers a mobile session as an external copilotcli session", async () => {
-        const fixture = await createFixture();
+    it("registers a mobile session as an external copilotcli session", async (t) => {
+        const DatabaseSync = await getDatabaseSyncConstructor();
+        if (DatabaseSync === null) {
+            t.skip("node:sqlite unavailable");
+            return;
+        }
+
+        const fixture = await createFixture(DatabaseSync);
         const store = createVSCodeExternalSessionStore({ vscodeUserDir: fixture.userDir });
 
         const synced = await store.syncSession({
@@ -93,7 +126,7 @@ describe("VS Code external session store", () => {
 
         assert.equal(synced, true);
 
-        const index = readIndex(fixture.dbPath);
+        const index = readIndex(DatabaseSync, fixture.dbPath);
         assert.deepEqual(index.entries["copilotcli:/session-1"], {
             sessionId: "copilotcli:/session-1",
             title: "Mobile session summary",
@@ -122,8 +155,14 @@ describe("VS Code external session store", () => {
         });
     });
 
-    it("does not create an external entry when a native VS Code session already exists", async () => {
-        const fixture = await createFixture({
+    it("does not create an external entry when a native VS Code session already exists", async (t) => {
+        const DatabaseSync = await getDatabaseSyncConstructor();
+        if (DatabaseSync === null) {
+            t.skip("node:sqlite unavailable");
+            return;
+        }
+
+        const fixture = await createFixture(DatabaseSync, {
             index: {
                 version: 1,
                 entries: {
@@ -144,12 +183,18 @@ describe("VS Code external session store", () => {
         });
 
         assert.equal(synced, false);
-        const index = readIndex(fixture.dbPath);
+        const index = readIndex(DatabaseSync, fixture.dbPath);
         assert.equal(index.entries["copilotcli:/session-1"], undefined);
     });
 
-    it("removes externally registered sessions when they are deleted", async () => {
-        const fixture = await createFixture();
+    it("removes externally registered sessions when they are deleted", async (t) => {
+        const DatabaseSync = await getDatabaseSyncConstructor();
+        if (DatabaseSync === null) {
+            t.skip("node:sqlite unavailable");
+            return;
+        }
+
+        const fixture = await createFixture(DatabaseSync);
         const store = createVSCodeExternalSessionStore({ vscodeUserDir: fixture.userDir });
 
         await store.syncSession({
@@ -161,7 +206,7 @@ describe("VS Code external session store", () => {
         const removed = await store.removeSession("session-1");
         assert.equal(removed, true);
 
-        const index = readIndex(fixture.dbPath);
+        const index = readIndex(DatabaseSync, fixture.dbPath);
         assert.equal(index.entries["copilotcli:/session-1"], undefined);
 
         const metadata = JSON.parse(await readFile(fixture.metadataPath, "utf8")) as Record<string, unknown>;

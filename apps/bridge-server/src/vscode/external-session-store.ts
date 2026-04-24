@@ -2,7 +2,6 @@ import { constants as fsConstants } from "node:fs";
 import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
 import type { PermissionLevel, SessionInfo } from "@copilot-mobile/shared";
 
 const CHAT_SESSION_INDEX_KEY = "chat.ChatSessionStore.index";
@@ -58,6 +57,41 @@ type SyncSessionInput = {
 type CreateVSCodeExternalSessionStoreOptions = {
     vscodeUserDir?: string;
 };
+
+type DatabaseSyncInstance = {
+    exec(sql: string): void;
+    prepare(sql: string): {
+        get(...params: Array<unknown>): unknown;
+        run(...params: Array<unknown>): { changes?: number };
+    };
+    close(): void;
+};
+
+type DatabaseSyncConstructor = new (path: string) => DatabaseSyncInstance;
+
+let databaseSyncConstructorPromise: Promise<DatabaseSyncConstructor | null> | undefined;
+let warnedUnsupportedSqlite = false;
+
+async function getDatabaseSyncConstructor(): Promise<DatabaseSyncConstructor | null> {
+    if (databaseSyncConstructorPromise !== undefined) {
+        return databaseSyncConstructorPromise;
+    }
+
+    databaseSyncConstructorPromise = import("node:sqlite")
+        .then((module) => module.DatabaseSync as DatabaseSyncConstructor)
+        .catch((error: unknown) => {
+            if (
+                error instanceof Error
+                && "code" in error
+                && (error as NodeJS.ErrnoException).code === "ERR_UNKNOWN_BUILTIN_MODULE"
+            ) {
+                return null;
+            }
+            throw error;
+        });
+
+    return databaseSyncConstructorPromise;
+}
 
 function getVSCodeUserDirCandidates(): Array<string> {
     const home = homedir();
@@ -140,7 +174,19 @@ async function resolveStoragePaths(
     return null;
 }
 
-function readChatSessionStoreIndex(globalStateDbPath: string): ChatSessionStoreIndex {
+function logUnsupportedSqliteOnce(): void {
+    if (warnedUnsupportedSqlite) {
+        return;
+    }
+
+    warnedUnsupportedSqlite = true;
+    console.warn("[vscode-session-store] node:sqlite unavailable; external VS Code session sync disabled");
+}
+
+function readChatSessionStoreIndex(
+    DatabaseSync: DatabaseSyncConstructor,
+    globalStateDbPath: string
+): ChatSessionStoreIndex {
     const database = new DatabaseSync(globalStateDbPath);
     try {
         database.exec("PRAGMA busy_timeout = 2000");
@@ -165,6 +211,7 @@ function readChatSessionStoreIndex(globalStateDbPath: string): ChatSessionStoreI
 }
 
 function writeChatSessionStoreIndex(
+    DatabaseSync: DatabaseSyncConstructor,
     globalStateDbPath: string,
     index: ChatSessionStoreIndex
 ): void {
@@ -273,6 +320,12 @@ export function createVSCodeExternalSessionStore(
     return {
         async syncSession(input: SyncSessionInput): Promise<boolean> {
             return queueWrite(async () => {
+                const DatabaseSync = await getDatabaseSyncConstructor();
+                if (DatabaseSync === null) {
+                    logUnsupportedSqliteOnce();
+                    return false;
+                }
+
                 const paths = await getStoragePaths();
                 if (paths === null) {
                     return false;
@@ -283,7 +336,7 @@ export function createVSCodeExternalSessionStore(
                     { sessionIds: [] }
                 );
                 const trackedSessionIds = new Set(registry.sessionIds);
-                const index = readChatSessionStoreIndex(paths.globalStateDbPath);
+                const index = readChatSessionStoreIndex(DatabaseSync, paths.globalStateDbPath);
                 const rawSessionId = input.session.id;
                 const externalSessionKey = buildExternalSessionKey(rawSessionId);
                 const internalEntry = index.entries[rawSessionId];
@@ -303,7 +356,7 @@ export function createVSCodeExternalSessionStore(
                     index.entries[externalSessionKey]
                 );
                 index.entries[externalSessionKey] = nextEntry;
-                writeChatSessionStoreIndex(paths.globalStateDbPath, index);
+                writeChatSessionStoreIndex(DatabaseSync, paths.globalStateDbPath, index);
 
                 const metadata = await readOptionalJsonFile<ExternalSessionMetadata>(
                     paths.metadataPath,
@@ -346,6 +399,12 @@ export function createVSCodeExternalSessionStore(
 
         async removeSession(sessionId: string): Promise<boolean> {
             return queueWrite(async () => {
+                const DatabaseSync = await getDatabaseSyncConstructor();
+                if (DatabaseSync === null) {
+                    logUnsupportedSqliteOnce();
+                    return false;
+                }
+
                 const paths = await getStoragePaths();
                 if (paths === null) {
                     return false;
@@ -360,9 +419,9 @@ export function createVSCodeExternalSessionStore(
                     return false;
                 }
 
-                const index = readChatSessionStoreIndex(paths.globalStateDbPath);
+                const index = readChatSessionStoreIndex(DatabaseSync, paths.globalStateDbPath);
                 delete index.entries[buildExternalSessionKey(sessionId)];
-                writeChatSessionStoreIndex(paths.globalStateDbPath, index);
+                writeChatSessionStoreIndex(DatabaseSync, paths.globalStateDbPath, index);
 
                 const metadata = await readOptionalJsonFile<ExternalSessionMetadata>(
                     paths.metadataPath,
