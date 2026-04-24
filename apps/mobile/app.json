@@ -3,7 +3,7 @@
     "name": "Code Companion",
     "owner": "senoldogan33",
     "slug": "code-companion",
-    "version": "0.1.0",
+    "version": "0.1.5",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -45,8 +45,16 @@
         "projectId": "33e68d9a-4ae3-47b2-b130-04b0c57ed91e"
       }
     },
+    "updates": {
+      "url": "https://u.expo.dev/33e68d9a-4ae3-47b2-b130-04b0c57ed91e",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "plugins": [
       "expo-router",
+      "expo-updates",
       [
         "expo-camera",
         {
