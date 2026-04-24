@@ -56,7 +56,7 @@
         "pnpm": ">=9.0.0"
     },
     "dependencies": {
-        "@github/copilot": "^1.0.32",
+        "@github/copilot": "^1.0.35",
         "@github/copilot-sdk": "0.2.2",
         "jsonwebtoken": "9.0.2",
         "qrcode": "1.5.4",
