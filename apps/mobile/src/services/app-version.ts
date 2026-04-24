@@ -1,4 +1,3 @@
-import Application from "expo-application";
 import Constants from "expo-constants";
 
 const FALLBACK_APP_NAME = "Code Companion";
@@ -14,13 +13,11 @@ function normalizeMetadataValue(value: string | null | undefined): string | null
 }
 
 export function readAppName(): string {
-    return normalizeMetadataValue(Application.applicationName)
-        ?? normalizeMetadataValue(Constants.expoConfig?.name)
+    return normalizeMetadataValue(Constants.expoConfig?.name)
         ?? FALLBACK_APP_NAME;
 }
 
 export function readAppVersion(): string {
-    return normalizeMetadataValue(Application.nativeApplicationVersion)
-        ?? normalizeMetadataValue(Constants.expoConfig?.version)
+    return normalizeMetadataValue(Constants.expoConfig?.version)
         ?? FALLBACK_APP_VERSION;
 }

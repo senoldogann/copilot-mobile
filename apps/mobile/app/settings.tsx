@@ -2,6 +2,7 @@ import React from "react";
 import { Alert, Linking, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import Constants from "expo-constants";
 import { Stack, useRouter } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { SubscriptionPaywallSheet } from "../src/components/SubscriptionPaywallSheet";
 
 import { type ThemeMode, type ThemeVariant } from "../src/theme/colors";
@@ -392,6 +393,7 @@ function RevenueCatSettings() {
 export default function SettingsScreen() {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
+    const insets = useSafeAreaInsets();
     const appVersion = readAppVersion();
     const router = useRouter();
 
@@ -430,7 +432,10 @@ export default function SettingsScreen() {
     return (
         <>
             <Stack.Screen options={{ headerShown: false }} />
-            <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+            <ScrollView
+                style={styles.container}
+                contentContainerStyle={[styles.content, { paddingTop: insets.top + 16 }]}
+            >
                 <View style={styles.pageHeader}>
                     <Pressable
                         style={({ pressed }) => [styles.backButton, pressed && { opacity: 0.7 }]}
@@ -501,7 +506,6 @@ function createStyles(theme: AppTheme) {
         },
         content: {
             flexGrow: 1,
-            paddingTop: Constants.statusBarHeight + 16,
             paddingBottom: 48,
         },
         pageHeader: {
