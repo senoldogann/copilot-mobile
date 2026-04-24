@@ -113,10 +113,23 @@ export function dispatchWorkspaceDiffResponse(
     commitHash: string | undefined,
     payload: DiffResponsePayload
 ): void {
-    const list = diffListeners.get(createWorkspaceDiffEventKey(sessionId, workspaceRelativePath, commitHash));
-    if (list !== undefined) {
-        for (const cb of list) {
+    const exactKey = createWorkspaceDiffEventKey(sessionId, workspaceRelativePath, commitHash);
+    const exactList = diffListeners.get(exactKey);
+    if (exactList !== undefined) {
+        for (const cb of exactList) {
             cb(payload);
+        }
+        return;
+    }
+
+    if (commitHash === undefined) {
+        const legacyPrefix = `${sessionId}\u0000${workspaceRelativePath}\u0000`;
+        for (const [key, listeners] of diffListeners.entries()) {
+            if (key.startsWith(legacyPrefix)) {
+                for (const cb of listeners) {
+                    cb(payload);
+                }
+            }
         }
     }
 }

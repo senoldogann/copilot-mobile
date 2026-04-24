@@ -79,7 +79,7 @@ const gitCommitSummarySchema = z.object({
         path: z.string().min(1),
         additions: z.number().int().nonnegative().optional(),
         deletions: z.number().int().nonnegative().optional(),
-    })).readonly(),
+    })).readonly().optional(),
 });
 
 const gitBranchSummarySchema = z.object({

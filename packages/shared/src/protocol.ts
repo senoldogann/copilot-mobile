@@ -104,7 +104,7 @@ export type GitCommitSummary = {
     author: string;
     committedAt: number;
     files: ReadonlyArray<string>;
-    fileChanges: ReadonlyArray<GitCommitFileChange>;
+    fileChanges?: ReadonlyArray<GitCommitFileChange> | undefined;
 };
 
 export type GitBranchSummary = {
