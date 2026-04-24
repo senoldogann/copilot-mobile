@@ -1,7 +1,7 @@
 import { Appearance } from "react-native";
 import { create } from "zustand";
-import * as SecureStore from "expo-secure-store";
 
+import { readLocalStateValue, writeLocalStateValue } from "../services/local-state-storage";
 import { applyThemeColors, type ThemeMode, type ThemeVariant } from "./colors";
 import { ensureFontAssetsLoaded, setGlobalFontPreference, type AppFontPreference } from "./typography";
 
@@ -29,11 +29,11 @@ const DEFAULT_THEME_PREFERENCES: ThemePreferences = {
 
 async function persistThemePreferences(preferences: ThemePreferences): Promise<void> {
     const serializedPreferences = JSON.stringify(preferences);
-    await SecureStore.setItemAsync(
+    await writeLocalStateValue(
         THEME_PREFERENCES_KEY,
         serializedPreferences,
     );
-    await SecureStore.setItemAsync(
+    await writeLocalStateValue(
         LEGACY_THEME_PREFERENCES_KEY,
         serializedPreferences,
     );
@@ -87,10 +87,10 @@ export const useThemeStore = create<ThemeStore>((set) => ({
     hydrated: false,
 
     hydrate: async () => {
-        const rawValue = await SecureStore.getItemAsync(THEME_PREFERENCES_KEY)
-            ?? await SecureStore.getItemAsync(LEGACY_THEME_PREFERENCES_KEY);
+        const rawValue = await readLocalStateValue(THEME_PREFERENCES_KEY)
+            ?? await readLocalStateValue(LEGACY_THEME_PREFERENCES_KEY);
         if (rawValue !== null) {
-            await SecureStore.setItemAsync(THEME_PREFERENCES_KEY, rawValue);
+            await writeLocalStateValue(THEME_PREFERENCES_KEY, rawValue);
         }
 
         const preferences = readThemePreferences(rawValue);

@@ -1,8 +1,5 @@
-import * as SecureStore from "expo-secure-store";
 import { Directory, File, Paths } from "expo-file-system";
 
-const CHAT_HISTORY_KEY = "code_companion_chat_history";
-const LEGACY_CHAT_HISTORY_KEY = "copilot_mobile_chat_history";
 const STORAGE_DIRECTORY_NAME = "code-companion";
 const LEGACY_STORAGE_DIRECTORY_NAME = "copilot-mobile";
 const CHAT_HISTORY_FILE_NAME = "chat-history.json";
@@ -67,19 +64,9 @@ export async function deleteChatHistorySnapshot(): Promise<void> {
 }
 
 export async function readLegacySecureStoreChatHistory(): Promise<string | null> {
-    const primaryValue = await SecureStore.getItemAsync(CHAT_HISTORY_KEY);
-    if (primaryValue !== null) {
-        return primaryValue;
-    }
-
-    const legacyValue = await SecureStore.getItemAsync(LEGACY_CHAT_HISTORY_KEY);
-    if (legacyValue !== null) {
-        await SecureStore.setItemAsync(CHAT_HISTORY_KEY, legacyValue);
-    }
-    return legacyValue;
+    return null;
 }
 
 export async function clearLegacySecureStoreChatHistory(): Promise<void> {
-    await SecureStore.deleteItemAsync(CHAT_HISTORY_KEY);
-    await SecureStore.deleteItemAsync(LEGACY_CHAT_HISTORY_KEY);
+    return Promise.resolve();
 }

@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import * as SecureStore from "expo-secure-store";
+
+import { readLocalStateValue, writeLocalStateValue } from "../services/local-state-storage";
 
 const WORKSPACE_DIRECTORIES_KEY = "code_companion_workspace_directories";
 const LEGACY_WORKSPACE_DIRECTORIES_KEY = "copilot_mobile_workspace_directories";
@@ -28,11 +29,11 @@ async function persistDirectories(
 ): Promise<void> {
     const payload: PersistedWorkspaceDirectoryStore = { directories };
     const serializedPayload = JSON.stringify(payload);
-    await SecureStore.setItemAsync(
+    await writeLocalStateValue(
         WORKSPACE_DIRECTORIES_KEY,
         serializedPayload,
     );
-    await SecureStore.setItemAsync(
+    await writeLocalStateValue(
         LEGACY_WORKSPACE_DIRECTORIES_KEY,
         serializedPayload,
     );
@@ -49,14 +50,14 @@ export const useWorkspaceDirectoryStore = create<WorkspaceDirectoryStore>((set, 
     hydrated: false,
 
     hydrate: async () => {
-        const rawValue = await SecureStore.getItemAsync(WORKSPACE_DIRECTORIES_KEY)
-            ?? await SecureStore.getItemAsync(LEGACY_WORKSPACE_DIRECTORIES_KEY);
+        const rawValue = await readLocalStateValue(WORKSPACE_DIRECTORIES_KEY)
+            ?? await readLocalStateValue(LEGACY_WORKSPACE_DIRECTORIES_KEY);
         if (rawValue === null) {
             set({ hydrated: true });
             return;
         }
 
-        await SecureStore.setItemAsync(WORKSPACE_DIRECTORIES_KEY, rawValue);
+        await writeLocalStateValue(WORKSPACE_DIRECTORIES_KEY, rawValue);
 
         const parsed = JSON.parse(rawValue) as unknown;
         if (typeof parsed !== "object" || parsed === null || !Array.isArray((parsed as { directories?: unknown }).directories)) {

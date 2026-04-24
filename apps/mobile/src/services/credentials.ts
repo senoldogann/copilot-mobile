@@ -1,8 +1,9 @@
 // Persistent pairing credentials used to resume without scanning QR again.
 
 import * as SecureStore from "expo-secure-store";
-import { Directory, File, Paths } from "expo-file-system";
 import type { TransportMode } from "@copilot-mobile/shared";
+
+import { deleteLocalStateValue, readLocalStateValue, writeLocalStateValue } from "./local-state-storage";
 
 type SecureStoreKeyPair = {
     primary: string;
@@ -33,20 +34,9 @@ const KEY_RELAY_ACCESS_TOKEN: SecureStoreKeyPair = {
     primary: "code_companion_relay_access_token",
     legacy: "copilot_mobile_relay_access_token",
 };
-const KEY_ACTIVE_SESSION_ID: SecureStoreKeyPair = {
-    primary: "code_companion_active_session_id",
-    legacy: "copilot_mobile_active_session_id",
-};
-const KEY_SESSION_PREFERENCES: SecureStoreKeyPair = {
-    primary: "code_companion_session_preferences",
-    legacy: "copilot_mobile_session_preferences",
-};
-const KEY_ONBOARDING_COMPLETED: SecureStoreKeyPair = {
-    primary: "code_companion_onboarding_completed",
-    legacy: "copilot_mobile_onboarding_completed",
-};
-const LOCAL_STATE_DIRECTORY_NAME = "code-companion";
-const ONBOARDING_STATE_FILE_NAME = "onboarding-state.json";
+const KEY_ACTIVE_SESSION_ID = "code_companion_active_session_id";
+const KEY_SESSION_PREFERENCES = "code_companion_session_preferences";
+const KEY_ONBOARDING_COMPLETED = "code_companion_onboarding_completed";
 
 export type StoredCredentials = {
     deviceCredential: string;
@@ -79,48 +69,22 @@ export type StoredSessionPreferences = {
     autoApproveReads: boolean;
 };
 
-function getLocalStateDirectoryUri(): string {
-    return new Directory(Paths.document, LOCAL_STATE_DIRECTORY_NAME).uri;
-}
-
-function getOnboardingStateFileUri(): string {
-    return new File(getLocalStateDirectoryUri(), ONBOARDING_STATE_FILE_NAME).uri;
-}
-
-async function ensureLocalStateDirectory(): Promise<void> {
-    const directory = new Directory(getLocalStateDirectoryUri());
-    if (directory.exists) {
-        return;
-    }
-
-    await directory.create({ intermediates: true, idempotent: true });
-}
-
 async function writeOnboardingStateFile(completed: boolean): Promise<void> {
-    const file = new File(getOnboardingStateFileUri());
-
     if (!completed) {
-        if (file.exists) {
-            await file.delete();
-        }
+        await deleteLocalStateValue(KEY_ONBOARDING_COMPLETED);
         return;
     }
 
-    await ensureLocalStateDirectory();
-    if (!file.exists) {
-        await file.create({ intermediates: true, overwrite: true });
-    }
-    await file.write(JSON.stringify({ completed: true }));
+    await writeLocalStateValue(KEY_ONBOARDING_COMPLETED, JSON.stringify({ completed: true }));
 }
 
 async function readOnboardingStateFile(): Promise<boolean> {
-    const file = new File(getOnboardingStateFileUri());
-    if (!file.exists) {
+    const raw = await readLocalStateValue(KEY_ONBOARDING_COMPLETED);
+    if (raw === null) {
         return false;
     }
 
     try {
-        const raw = await file.text();
         const parsed = JSON.parse(raw) as { completed?: unknown };
         return parsed.completed === true;
     } catch {
@@ -281,31 +245,31 @@ export async function clearCredentials(): Promise<void> {
     await removeItem(KEY_DEVICE_ID);
     await removeItem(KEY_TRANSPORT_MODE);
     await removeItem(KEY_RELAY_ACCESS_TOKEN);
-    await removeItem(KEY_ACTIVE_SESSION_ID);
+    await deleteLocalStateValue(KEY_ACTIVE_SESSION_ID);
 }
 
 export async function saveActiveSessionId(sessionId: string | null): Promise<void> {
     if (sessionId === null) {
-        await removeItem(KEY_ACTIVE_SESSION_ID);
+        await deleteLocalStateValue(KEY_ACTIVE_SESSION_ID);
         return;
     }
 
-    await setItem(KEY_ACTIVE_SESSION_ID, sessionId);
+    await writeLocalStateValue(KEY_ACTIVE_SESSION_ID, sessionId);
 }
 
 export async function loadActiveSessionId(): Promise<string | null> {
-    return getItem(KEY_ACTIVE_SESSION_ID);
+    return readLocalStateValue(KEY_ACTIVE_SESSION_ID);
 }
 
 export async function saveSessionPreferences(
     preferences: StoredSessionPreferences
 ): Promise<void> {
-    await setItem(KEY_SESSION_PREFERENCES, JSON.stringify(preferences));
+    await writeLocalStateValue(KEY_SESSION_PREFERENCES, JSON.stringify(preferences));
 }
 
 export async function loadSessionPreferences(): Promise<StoredSessionPreferences | null> {
     try {
-        const raw = await getItem(KEY_SESSION_PREFERENCES);
+        const raw = await readLocalStateValue(KEY_SESSION_PREFERENCES);
         if (raw === null) {
             return null;
         }
@@ -335,7 +299,6 @@ export async function loadSessionPreferences(): Promise<StoredSessionPreferences
 
 export async function saveOnboardingCompleted(completed: boolean): Promise<void> {
     await writeOnboardingStateFile(completed);
-    await removeItem(KEY_ONBOARDING_COMPLETED);
 }
 
 export async function loadOnboardingCompleted(): Promise<boolean> {
