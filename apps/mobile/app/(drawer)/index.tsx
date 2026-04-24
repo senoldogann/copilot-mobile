@@ -1353,6 +1353,10 @@ export default function ChatScreen() {
 
 // Başlık stilleri — GitHub Copilot mobil stili
 function createHeaderStyles(theme: AppTheme) {
+const isAmoled = theme.variant === "amoled";
+const headerPillSurface = isAmoled ? theme.colors.bg : theme.colors.bgSecondary;
+const menuSurface = isAmoled ? theme.colors.bg : theme.colors.bgElevated;
+const menuPressedSurface = isAmoled ? theme.colors.bgTertiary : theme.colors.bgSecondary;
 return StyleSheet.create({
     container: {
         flexDirection: "row",
@@ -1430,9 +1434,9 @@ return StyleSheet.create({
         gap: 6,
         paddingHorizontal: theme.spacing.sm,
         borderRadius: theme.borderRadius.full,
-        backgroundColor: theme.colors.bgSecondary,
+        backgroundColor: headerPillSurface,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
     },
     gitButton: {
         minHeight: 34,
@@ -1442,9 +1446,9 @@ return StyleSheet.create({
         gap: 6,
         paddingHorizontal: theme.spacing.sm,
         borderRadius: theme.borderRadius.full,
-        backgroundColor: theme.colors.bgSecondary,
+        backgroundColor: headerPillSurface,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
     },
     gitButtonText: {
         fontSize: theme.fontSize.xs,
@@ -1483,10 +1487,10 @@ return StyleSheet.create({
     },
     menuCard: {
         minWidth: 180,
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: menuSurface,
         borderRadius: theme.borderRadius.md,
         borderWidth: StyleSheet.hairlineWidth,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
         overflow: "hidden",
     },
     menuItem: {
@@ -1497,7 +1501,7 @@ return StyleSheet.create({
         paddingVertical: 12,
     },
     menuItemPressed: {
-        backgroundColor: theme.colors.bgSecondary,
+        backgroundColor: menuPressedSurface,
     },
     menuItemDisabled: {
         opacity: 0.58,
@@ -1512,7 +1516,7 @@ return StyleSheet.create({
     gitMenuCard: {
         minWidth: 232,
         maxWidth: 280,
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: menuSurface,
         borderRadius: theme.borderRadius.lg,
         borderWidth: StyleSheet.hairlineWidth,
         borderColor: theme.colors.border,
@@ -1528,7 +1532,7 @@ return StyleSheet.create({
         paddingHorizontal: theme.spacing.md,
         paddingTop: theme.spacing.md,
         paddingBottom: theme.spacing.sm,
-        backgroundColor: theme.colors.bgSecondary,
+        backgroundColor: isAmoled ? theme.colors.bg : theme.colors.bgSecondary,
     },
     gitMenuTitleRow: {
         flexDirection: "row",
@@ -1581,9 +1585,9 @@ return StyleSheet.create({
         alignItems: "center",
         borderRadius: theme.borderRadius.full,
         paddingHorizontal: theme.spacing.md,
-        backgroundColor: theme.colors.bgSecondary,
+        backgroundColor: isAmoled ? theme.colors.bg : theme.colors.bgSecondary,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
     },
     gitComposerSecondaryText: {
         fontSize: theme.fontSize.sm,
@@ -1612,6 +1616,7 @@ return StyleSheet.create({
 
 // Ana ekran stilleri — GitHub Copilot koyu tema
 function createStyles(theme: AppTheme) {
+const isAmoled = theme.variant === "amoled";
 return StyleSheet.create({
     container: {
         flex: 1,
@@ -1697,7 +1702,7 @@ return StyleSheet.create({
         width: 36,
         height: 36,
         borderRadius: 18,
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: isAmoled ? theme.colors.bg : theme.colors.bgElevated,
         borderWidth: 1,
         borderColor: theme.colors.border,
         justifyContent: "center",

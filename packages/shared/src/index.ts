@@ -29,6 +29,7 @@ export type {
     WorkspaceGitSummaryMessage,
     WorkspaceCommitRequestMessage,
     WorkspaceOperationRequestMessage,
+    WorkspaceBranchCreateRequestMessage,
     WorkspaceBranchSwitchRequestMessage,
     WorkspaceResolveRequestMessage,
     WorkspaceResolveResponseMessage,

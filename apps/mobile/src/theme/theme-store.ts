@@ -56,7 +56,13 @@ function readThemePreferences(rawValue: string | null): ThemePreferences {
 
     if (
         (mode === "light" || mode === "dark" || mode === "system")
-        && (variant === "zinc" || variant === "midnight" || variant === "claude" || variant === "ghostty")
+        && (
+            variant === "zinc"
+            || variant === "midnight"
+            || variant === "claude"
+            || variant === "ghostty"
+            || variant === "amoled"
+        )
         && (
             fontPreference === undefined
             || fontPreference === "system"

@@ -809,6 +809,14 @@ const workspaceBranchSwitchSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const workspaceBranchCreateSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("workspace.branch.create"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        branchName: z.string().min(1),
+    }),
+});
+
 const workspaceFileRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("workspace.file.request"),
     payload: z.object({
@@ -875,6 +883,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     workspaceCommitSchema,
     workspacePullSchema,
     workspacePushSchema,
+    workspaceBranchCreateSchema,
     workspaceBranchSwitchSchema,
     workspaceResolveRequestSchema,
     workspaceFileRequestSchema,

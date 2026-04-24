@@ -915,6 +915,35 @@ export async function switchWorkspaceBranch(
     return runGit(resolveWorkspaceRoot(context), ["checkout", "--quiet", branchName]);
 }
 
+export async function createAndSwitchWorkspaceBranch(
+    context: SessionContext,
+    branchName: string
+): Promise<GitCommandResult> {
+    const cwd = resolveWorkspaceRoot(context);
+    const trimmedBranchName = branchName.trim();
+
+    if (trimmedBranchName.length === 0) {
+        return {
+            success: false,
+            stdout: "",
+            stderr: "",
+            message: "Branch name is required",
+        };
+    }
+
+    const validationResult = await runGit(cwd, ["check-ref-format", "--branch", trimmedBranchName]);
+    if (!validationResult.success) {
+        return {
+            ...validationResult,
+            message: validationResult.stderr.trim().length > 0
+                ? validationResult.stderr.trim()
+                : "Invalid branch name",
+        };
+    }
+
+    return runGit(cwd, ["checkout", "-b", trimmedBranchName]);
+}
+
 const MAX_FILE_READ_BYTES = 256_000; // 256 KB
 
 const TEXT_EXTENSIONS = new Set([

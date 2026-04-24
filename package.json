@@ -22,7 +22,7 @@
         "copilot-mobile": "node ./bin/copilot-mobile.mjs",
         "login": "node ./bin/copilot-mobile.mjs login",
         "doctor": "node ./bin/copilot-mobile.mjs doctor",
-        "dev:bridge": "pnpm --filter bridge-server dev",
+        "dev:bridge": "node ./bin/dev-bridge-direct.mjs",
         "dev:bridge:direct": "node ./bin/dev-bridge-direct.mjs",
         "dev:companion:local": "node ./bin/dev-companion-local.mjs",
         "dev:companion:macos": "swift run --package-path apps/macos-companion",

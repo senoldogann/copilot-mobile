@@ -11,6 +11,7 @@ import { useSessionStore } from "../stores/session-store";
 import { useWorkspaceStore } from "../stores/workspace-store";
 import {
     commitWorkspace,
+    createWorkspaceBranch,
     pullWorkspace,
     pushWorkspace,
     refreshWorkspaceGitSummary,
@@ -158,6 +159,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
     const [viewMode, setViewMode] = useState<ViewMode>("diff");
     const [branchMenuOpen, setBranchMenuOpen] = useState<boolean>(false);
+    const [branchComposerOpen, setBranchComposerOpen] = useState<boolean>(false);
+    const [newBranchName, setNewBranchName] = useState("");
     const [commitMenuOpen, setCommitMenuOpen] = useState<boolean>(false);
     const [commitComposerOpen, setCommitComposerOpen] = useState<boolean>(false);
     const [commitMessage, setCommitMessage] = useState("");
@@ -248,7 +251,10 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
         setViewMode("diff");
         setChangesFilter("uncommitted");
+        useWorkspaceStore.getState().setBranchSwitching(false);
         setBranchMenuOpen(false);
+        setBranchComposerOpen(false);
+        setNewBranchName("");
         setCommitMenuOpen(false);
         setCommitComposerOpen(false);
         setCommitMessage("");
@@ -410,7 +416,14 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
         setCommitMenuOpen(false);
         setChangesFilterMenuOpen(false);
-        setBranchMenuOpen((value) => !value);
+        setBranchMenuOpen((value) => {
+            const nextValue = !value;
+            if (!nextValue) {
+                setBranchComposerOpen(false);
+                setNewBranchName("");
+            }
+            return nextValue;
+        });
     }, [activeSessionId, hasRepo, isConnected]);
 
     const handleToggleCommitMenu = useCallback(() => {
@@ -419,6 +432,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         }
 
         setBranchMenuOpen(false);
+        setBranchComposerOpen(false);
+        setNewBranchName("");
         setCommitComposerOpen(false);
         setChangesFilterMenuOpen(false);
         setCommitMenuOpen((value) => !value);
@@ -426,6 +441,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
     const handleToggleChangesFilterMenu = useCallback(() => {
         setBranchMenuOpen(false);
+        setBranchComposerOpen(false);
+        setNewBranchName("");
         setCommitMenuOpen(false);
         setChangesFilterMenuOpen((value) => !value);
     }, []);
@@ -436,8 +453,45 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         }
 
         setBranchMenuOpen(false);
+        setBranchComposerOpen(false);
+        setNewBranchName("");
         void switchWorkspaceBranch(activeSessionId, branchName);
     }, [activeSessionId, isConnected, workspace.isSwitchingBranch]);
+
+    const handleOpenBranchComposer = useCallback(() => {
+        if (activeSessionId === null || !isConnected || !hasRepo || workspace.isSwitchingBranch) {
+            return;
+        }
+
+        setCommitMenuOpen(false);
+        setCommitComposerOpen(false);
+        setChangesFilterMenuOpen(false);
+        setBranchComposerOpen(true);
+    }, [activeSessionId, hasRepo, isConnected, workspace.isSwitchingBranch]);
+
+    const handleCancelBranchComposer = useCallback(() => {
+        setBranchComposerOpen(false);
+        setNewBranchName("");
+        Keyboard.dismiss();
+    }, []);
+
+    const handleSubmitBranchCreate = useCallback(() => {
+        const trimmedBranchName = newBranchName.trim();
+        if (
+            trimmedBranchName.length === 0
+            || activeSessionId === null
+            || !isConnected
+            || workspace.isSwitchingBranch
+        ) {
+            return;
+        }
+
+        void createWorkspaceBranch(activeSessionId, trimmedBranchName);
+        setBranchMenuOpen(false);
+        setBranchComposerOpen(false);
+        setNewBranchName("");
+        Keyboard.dismiss();
+    }, [activeSessionId, isConnected, newBranchName, workspace.isSwitchingBranch]);
 
     const hasGitContext = workspace.gitRoot !== null || activeContext?.gitRoot !== undefined;
     const branchLabel = workspace.branch ?? activeContext?.branch ?? (hasGitContext ? "main" : "workspace");
@@ -671,6 +725,67 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
 
                                 return rows;
                             })}
+                            {workspace.branches.length > 0 && <View style={styles.popoverSep} />}
+                            {!branchComposerOpen ? (
+                                <Pressable
+                                    style={({ pressed }) => [
+                                        styles.popoverItem,
+                                        pressed && styles.popoverItemPressed,
+                                    ]}
+                                    onPress={handleOpenBranchComposer}
+                                    disabled={workspace.isSwitchingBranch}
+                                >
+                                    <GitBranchIcon size={14} color={theme.colors.textPrimary} />
+                                    <Text style={styles.popoverLabel}>Create and checkout new branch</Text>
+                                </Pressable>
+                            ) : (
+                                <View style={styles.branchComposer}>
+                                    <Text style={styles.branchComposerTitle}>Create branch</Text>
+                                    <Text style={styles.branchComposerHint}>
+                                        A new local branch will be created and checked out immediately.
+                                    </Text>
+                                    <TextInput
+                                        style={styles.branchComposerInput}
+                                        value={newBranchName}
+                                        onChangeText={setNewBranchName}
+                                        placeholder="feature/my-branch"
+                                        placeholderTextColor={theme.colors.textTertiary}
+                                        autoCapitalize="none"
+                                        autoCorrect={false}
+                                        returnKeyType="done"
+                                        onSubmitEditing={handleSubmitBranchCreate}
+                                        editable={!workspace.isSwitchingBranch}
+                                    />
+                                    <View style={styles.branchComposerActions}>
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.branchComposerSecondaryButton,
+                                                pressed && styles.pressed,
+                                            ]}
+                                            onPress={handleCancelBranchComposer}
+                                        >
+                                            <Text style={styles.branchComposerSecondaryText}>Cancel</Text>
+                                        </Pressable>
+                                        <Pressable
+                                            style={({ pressed }) => [
+                                                styles.branchComposerPrimaryButton,
+                                                (newBranchName.trim().length === 0 || workspace.isSwitchingBranch)
+                                                    && styles.commitButtonDisabled,
+                                                pressed
+                                                    && newBranchName.trim().length > 0
+                                                    && !workspace.isSwitchingBranch
+                                                    && styles.pressed,
+                                            ]}
+                                            onPress={handleSubmitBranchCreate}
+                                            disabled={newBranchName.trim().length === 0 || workspace.isSwitchingBranch}
+                                        >
+                                            <Text style={styles.branchComposerPrimaryText}>
+                                                {workspace.isSwitchingBranch ? "Creating…" : "Create branch"}
+                                            </Text>
+                                        </Pressable>
+                                    </View>
+                                </View>
+                            )}
                         </View>
                     )}
                 </View>
@@ -1077,6 +1192,8 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                     setViewer(null);
                     setSelectedCommit(null);
                     setBranchMenuOpen(false);
+                    setBranchComposerOpen(false);
+                    setNewBranchName("");
                     setCommitMenuOpen(false);
                     setCommitComposerOpen(false);
                     setCommitMessage("");
@@ -1272,7 +1389,7 @@ function Banner({ tone, text }: { tone: "success" | "error"; text: string }) {
 export const WorkspacePanel = React.memo(WorkspacePanelComponent);
 
 function classifyDiffLine(line: string, theme: AppTheme): { color: string; bg: string | null } {
-    if (line.startsWith("+++") || line.startsWith("---")) return { color: theme.colors.textTertiary, bg: null };
+    if (line.startsWith("+++") || line.startsWith("---")) return { color: theme.colors.textPrimary, bg: null };
     if (line.startsWith("@@")) return { color: theme.colors.textSecondary, bg: null };
     if (line.startsWith("+")) return { color: "#3fb950", bg: "rgba(63,185,80,0.10)" };
     if (line.startsWith("-")) return { color: "#f85149", bg: "rgba(248,81,73,0.10)" };
@@ -1281,6 +1398,9 @@ function classifyDiffLine(line: string, theme: AppTheme): { color: string; bg: s
 
 // ---------- Styles ----------
 function createSheetStyles(theme: AppTheme) {
+const isAmoled = theme.variant === "amoled";
+const sheetSurface = isAmoled ? theme.colors.bg : theme.colors.bgTertiary;
+const sheetActiveSurface = isAmoled ? theme.colors.bg : theme.colors.bgElevated;
 return StyleSheet.create({
     tabBar: {
         flexDirection: "row",
@@ -1297,12 +1417,14 @@ return StyleSheet.create({
         alignItems: "center",
         justifyContent: "center",
         borderRadius: theme.borderRadius.full,
-        backgroundColor: theme.colors.bgTertiary,
-    },
-    tabButtonActive: {
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: sheetSurface,
         borderWidth: 1,
         borderColor: theme.colors.borderMuted,
+    },
+    tabButtonActive: {
+        backgroundColor: sheetActiveSurface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
     },
     tabButtonPressed: { opacity: 0.85 },
     tabLabel: {
@@ -1376,6 +1498,10 @@ const emphasizedLabelColor = theme.resolvedScheme === "light"
 const supportingLabelColor = theme.resolvedScheme === "light"
     ? "#5a5a54"
     : "#c9d1d9";
+const isAmoled = theme.variant === "amoled";
+const chromeSurface = isAmoled ? theme.colors.bg : theme.colors.bgElevated;
+const secondaryChromeSurface = isAmoled ? theme.colors.bg : theme.colors.bgSecondary;
+const tertiaryChromeSurface = isAmoled ? theme.colors.bg : theme.colors.bgTertiary;
 const successBadgeBg = theme.resolvedScheme === "light"
     ? theme.colors.successMuted
     : "#1b3f2a";
@@ -1431,9 +1557,9 @@ return StyleSheet.create({
         alignItems: "stretch",
         borderRadius: theme.borderRadius.full,
         overflow: "hidden",
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: chromeSurface,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
     },
     commitButton: {
         flexDirection: "row",
@@ -1460,9 +1586,9 @@ return StyleSheet.create({
         gap: theme.spacing.sm,
         padding: theme.spacing.md,
         borderRadius: theme.borderRadius.lg,
-        backgroundColor: theme.colors.bgSecondary,
+        backgroundColor: secondaryChromeSurface,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
     },
     commitComposerTitle: {
         fontSize: theme.fontSize.md,
@@ -1478,8 +1604,8 @@ return StyleSheet.create({
         minHeight: 44,
         borderRadius: theme.borderRadius.md,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
-        backgroundColor: theme.colors.bgElevated,
+        borderColor: theme.colors.border,
+        backgroundColor: chromeSurface,
         color: theme.colors.textPrimary,
         paddingHorizontal: theme.spacing.md,
         paddingVertical: theme.spacing.sm,
@@ -1496,8 +1622,8 @@ return StyleSheet.create({
         justifyContent: "center",
         paddingHorizontal: theme.spacing.md,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
-        backgroundColor: theme.colors.bgElevated,
+        borderColor: theme.colors.border,
+        backgroundColor: chromeSurface,
     },
     commitComposerSecondaryText: {
         fontSize: theme.fontSize.sm,
@@ -1522,9 +1648,9 @@ return StyleSheet.create({
         minWidth: 150,
         paddingVertical: 6,
         borderRadius: theme.borderRadius.md,
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: chromeSurface,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
         shadowColor: "#000000",
         shadowOpacity: 0.2,
         shadowRadius: 14,
@@ -1554,9 +1680,9 @@ return StyleSheet.create({
         paddingHorizontal: theme.spacing.md,
     },
     branchPopoverItemCurrent: { opacity: 0.72 },
-    popoverItemPressed: { backgroundColor: theme.colors.bgTertiary },
+    popoverItemPressed: { backgroundColor: tertiaryChromeSurface },
     popoverLabel: { fontSize: theme.fontSize.sm, color: theme.colors.textPrimary, fontWeight: "500" },
-    popoverSep: { height: 1, backgroundColor: theme.colors.borderMuted, marginHorizontal: theme.spacing.sm },
+    popoverSep: { height: 1, backgroundColor: theme.colors.border, marginHorizontal: theme.spacing.sm },
     branchCurrentLabel: {
         marginLeft: "auto",
         fontSize: theme.fontSize.xs,
@@ -1569,6 +1695,64 @@ return StyleSheet.create({
     branchEmptyText: {
         fontSize: theme.fontSize.sm,
         color: theme.colors.textTertiary,
+    },
+    branchComposer: {
+        gap: theme.spacing.sm,
+        padding: theme.spacing.md,
+    },
+    branchComposerTitle: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
+    },
+    branchComposerHint: {
+        fontSize: theme.fontSize.xs,
+        lineHeight: 18,
+        color: theme.colors.textSecondary,
+    },
+    branchComposerInput: {
+        minHeight: 42,
+        borderRadius: theme.borderRadius.md,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+        backgroundColor: secondaryChromeSurface,
+        color: theme.colors.textPrimary,
+        paddingHorizontal: theme.spacing.md,
+        paddingVertical: theme.spacing.sm,
+        fontSize: theme.fontSize.sm,
+    },
+    branchComposerActions: {
+        flexDirection: "row",
+        justifyContent: "flex-end",
+        gap: theme.spacing.sm,
+    },
+    branchComposerSecondaryButton: {
+        minHeight: 36,
+        borderRadius: theme.borderRadius.full,
+        justifyContent: "center",
+        paddingHorizontal: theme.spacing.md,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: secondaryChromeSurface,
+    },
+    branchComposerSecondaryText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "600",
+        color: theme.colors.textPrimary,
+    },
+    branchComposerPrimaryButton: {
+        minHeight: 36,
+        borderRadius: theme.borderRadius.full,
+        justifyContent: "center",
+        paddingHorizontal: theme.spacing.lg,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: chromeSurface,
+    },
+    branchComposerPrimaryText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "700",
+        color: theme.colors.textPrimary,
     },
 
     // Segmented "Uncommitted ▾" header
@@ -1594,7 +1778,11 @@ return StyleSheet.create({
         justifyContent: "center",
         borderRadius: theme.borderRadius.sm,
     },
-    viewModeBtnActive: { backgroundColor: theme.colors.bgElevated },
+    viewModeBtnActive: {
+        backgroundColor: chromeSurface,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+    },
 
     // Change rows
     changesList: { gap: 2 },
@@ -1692,9 +1880,9 @@ return StyleSheet.create({
         paddingHorizontal: 10,
         paddingVertical: 6,
         borderRadius: theme.borderRadius.full,
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: chromeSurface,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
     },
     commitFilesButtonText: {
         fontSize: theme.fontSize.xs,

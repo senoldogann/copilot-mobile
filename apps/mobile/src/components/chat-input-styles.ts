@@ -2,6 +2,11 @@ import { Platform, StyleSheet } from "react-native";
 import type { AppTheme } from "../theme/theme-context";
 
 export function createDropdownStyles(theme: AppTheme) {
+    const isAmoled = theme.variant === "amoled";
+    const dropdownSurface = isAmoled ? theme.colors.bg : theme.colors.bgElevated;
+    const dropdownChrome = isAmoled ? theme.colors.bg : theme.colors.bgSecondary;
+    const dropdownSelected = isAmoled ? theme.colors.bgTertiary : theme.colors.bgElevated;
+
     return StyleSheet.create({
         overlay: {
             flex: 1,
@@ -9,7 +14,7 @@ export function createDropdownStyles(theme: AppTheme) {
             justifyContent: "flex-end",
         },
         container: {
-            backgroundColor: theme.colors.bgElevated,
+            backgroundColor: dropdownSurface,
             borderRadius: theme.borderRadius.xl,
             borderWidth: 1,
             borderColor: theme.colors.border,
@@ -38,7 +43,7 @@ export function createDropdownStyles(theme: AppTheme) {
             paddingVertical: 14,
             borderBottomWidth: 1,
             borderBottomColor: theme.colors.borderMuted,
-            backgroundColor: theme.resolvedScheme === "light" ? theme.colors.bg : theme.colors.bgSecondary,
+            backgroundColor: theme.resolvedScheme === "light" ? theme.colors.bg : dropdownChrome,
         },
         headerLeft: {
             flexDirection: "row",
@@ -52,7 +57,7 @@ export function createDropdownStyles(theme: AppTheme) {
             borderRadius: theme.borderRadius.sm,
             borderWidth: 1,
             borderColor: theme.colors.borderMuted,
-            backgroundColor: theme.colors.bgTertiary,
+            backgroundColor: isAmoled ? theme.colors.bgTertiary : theme.colors.bgTertiary,
             justifyContent: "center",
             alignItems: "center",
         },
@@ -90,7 +95,7 @@ export function createDropdownStyles(theme: AppTheme) {
         itemSelected: {
             backgroundColor: theme.resolvedScheme === "light"
                 ? theme.colors.accentMuted
-                : theme.colors.bgElevated,
+                : dropdownSelected,
         },
         itemDisabled: {
             opacity: 0.4,
@@ -163,7 +168,7 @@ export function createDropdownStyles(theme: AppTheme) {
         effortItemSelected: {
             backgroundColor: theme.resolvedScheme === "light"
                 ? theme.colors.accentMuted
-                : theme.colors.bgSecondary,
+                : (isAmoled ? theme.colors.bgTertiary : theme.colors.bgSecondary),
         },
         effortItemLeft: {
             flexDirection: "row",
@@ -291,6 +296,24 @@ export function createToolbarStyles(theme: AppTheme) {
         spacer: {
             flex: 1,
         },
+        trailingControls: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+            flexShrink: 0,
+        },
+        contextMeterSlot: {
+            width: 24,
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+        },
+        sendControlSlot: {
+            minWidth: 94,
+            alignItems: "flex-end",
+            justifyContent: "center",
+            flexShrink: 0,
+        },
         sendGroup: {
             flexDirection: "row",
             alignItems: "center",
@@ -370,6 +393,10 @@ export function createToolbarStyles(theme: AppTheme) {
 }
 
 export function createStyles(theme: AppTheme) {
+    const isAmoled = theme.variant === "amoled";
+    const inputSurface = isAmoled ? theme.colors.bg : theme.colors.bgSecondary;
+    const pressedSurface = isAmoled ? theme.colors.bgTertiary : theme.colors.bgElevated;
+
     return StyleSheet.create({
         container: {
             paddingHorizontal: theme.spacing.md,
@@ -378,7 +405,7 @@ export function createStyles(theme: AppTheme) {
             backgroundColor: theme.colors.bg,
         },
         inputCard: {
-            backgroundColor: theme.colors.bgSecondary,
+            backgroundColor: inputSurface,
             borderRadius: theme.borderRadius.lg,
             borderWidth: 1,
             borderColor: theme.colors.border,
@@ -413,7 +440,7 @@ export function createStyles(theme: AppTheme) {
             alignItems: "center",
         },
         sendButtonDisabled: {
-            backgroundColor: theme.colors.bgElevated,
+            backgroundColor: pressedSurface,
         },
         abortButton: {
             width: 30,
@@ -543,9 +570,10 @@ export function createContextStyles(theme: AppTheme) {
 }
 
 export function createAutocompleteStyles(theme: AppTheme) {
+    const isAmoled = theme.variant === "amoled";
     return StyleSheet.create({
         popover: {
-            backgroundColor: theme.colors.bgElevated,
+            backgroundColor: isAmoled ? theme.colors.bg : theme.colors.bgElevated,
             borderWidth: 1,
             borderColor: theme.colors.border,
             borderRadius: theme.borderRadius.md,
@@ -585,7 +613,7 @@ export function createAutocompleteStyles(theme: AppTheme) {
             borderBottomColor: theme.colors.border,
         },
         itemPressed: {
-            backgroundColor: theme.colors.bgOverlay,
+            backgroundColor: isAmoled ? theme.colors.bgTertiary : theme.colors.bgOverlay,
         },
         itemIcon: {
             width: 18,
@@ -616,6 +644,7 @@ export function createAutocompleteStyles(theme: AppTheme) {
 }
 
 export function createQueuedDraftStyles(theme: AppTheme) {
+    const isAmoled = theme.variant === "amoled";
     return StyleSheet.create({
         container: {
             gap: 6,
@@ -627,7 +656,7 @@ export function createQueuedDraftStyles(theme: AppTheme) {
             borderWidth: 1,
             borderColor: theme.colors.border,
             borderRadius: theme.borderRadius.md,
-            backgroundColor: theme.colors.bgSecondary,
+            backgroundColor: isAmoled ? theme.colors.bg : theme.colors.bgSecondary,
             paddingLeft: theme.spacing.sm,
             paddingRight: 6,
             paddingVertical: 6,

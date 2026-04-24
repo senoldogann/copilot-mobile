@@ -12,6 +12,7 @@ import { loadOnboardingCompleted } from "../src/services/credentials";
 import { useThemeStore } from "../src/theme/theme-store";
 import { ThemeProvider, useAppTheme } from "../src/theme/theme-context";
 import { AnimatedSplash } from "../src/components/AnimatedSplash";
+import { BootSplash } from "../src/components/BootSplash";
 
 export default function RootLayout() {
     const [themeReady, setThemeReady] = useState(false);
@@ -27,10 +28,6 @@ export default function RootLayout() {
     useEffect(() => initializeAppRuntime(), []);
 
     useEffect(() => {
-        if (!themeReady) {
-            return;
-        }
-
         let cancelled = false;
 
         void loadOnboardingCompleted().then((completed) => {
@@ -44,10 +41,10 @@ export default function RootLayout() {
         return () => {
             cancelled = true;
         };
-    }, [pathname, themeReady]);
+    }, [pathname]);
 
     if (!themeReady || onboardingCompleted === null) {
-        return null;
+        return <BootSplash />;
     }
 
     return (

@@ -506,6 +506,12 @@ export function createMessageHandler(
                         message.payload.branchName
                     );
 
+                case "workspace.branch.create":
+                    return sessionManager.createWorkspaceBranch(
+                        message.payload.sessionId,
+                        message.payload.branchName
+                    );
+
                 case "workspace.file.request":
                     return sessionManager.readWorkspaceFile(
                         message.payload.sessionId,

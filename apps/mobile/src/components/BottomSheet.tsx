@@ -121,6 +121,9 @@ export function BottomSheet({
 }
 
 function createStyles(theme: AppTheme) {
+    const isAmoled = theme.variant === "amoled";
+    const chromeBackground = isAmoled ? theme.colors.bg : theme.colors.bgTertiary;
+
     return StyleSheet.create({
         overlay: {
             flex: 1,
@@ -168,7 +171,7 @@ function createStyles(theme: AppTheme) {
             width: 28,
             height: 28,
             borderRadius: theme.borderRadius.sm,
-            backgroundColor: theme.colors.bgTertiary,
+            backgroundColor: chromeBackground,
             borderWidth: 1,
             borderColor: theme.colors.border,
             justifyContent: "center",
@@ -196,7 +199,7 @@ function createStyles(theme: AppTheme) {
             width: 28,
             height: 28,
             borderRadius: theme.borderRadius.sm,
-            backgroundColor: theme.colors.bgTertiary,
+            backgroundColor: chromeBackground,
             justifyContent: "center",
             alignItems: "center",
             marginLeft: theme.spacing.sm,

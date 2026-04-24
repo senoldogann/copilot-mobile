@@ -986,6 +986,13 @@ export const ToolCard = React.memo(ToolCardComponent);
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const createDiffStyles = (theme: AppTheme) => StyleSheet.create({
+    fileHeader: {
+        backgroundColor: theme.variant === "amoled" ? theme.colors.bg : theme.colors.bgTertiary,
+        paddingHorizontal: 10,
+        paddingVertical: 4,
+        borderBottomWidth: 1,
+        borderBottomColor: theme.colors.codeBorder,
+    },
     loadingWrap: {
         flexDirection: "row",
         alignItems: "center",
@@ -1002,13 +1009,6 @@ const createDiffStyles = (theme: AppTheme) => StyleSheet.create({
         borderColor: theme.colors.codeBorder,
         backgroundColor: theme.colors.codeBg,
         overflow: "hidden",
-    },
-    fileHeader: {
-        backgroundColor: theme.colors.bgTertiary,
-        paddingHorizontal: 10,
-        paddingVertical: 4,
-        borderBottomWidth: 1,
-        borderBottomColor: theme.colors.codeBorder,
     },
     fileHeaderText: {
         fontSize: theme.fontSize.xs,
@@ -1068,7 +1068,7 @@ const createTerminalStyles = (theme: AppTheme) => StyleSheet.create({
         gap: 8,
         paddingHorizontal: theme.spacing.md,
         paddingVertical: 8,
-        backgroundColor: theme.colors.bgTertiary,
+        backgroundColor: theme.variant === "amoled" ? theme.colors.bg : theme.colors.bgTertiary,
         borderBottomWidth: 1,
         borderBottomColor: theme.colors.codeBorder,
     },
@@ -1162,7 +1162,7 @@ const createFileReadStyles = (theme: AppTheme) => StyleSheet.create({
 
 const createThoughtStyles = (theme: AppTheme) => StyleSheet.create({
     container: {
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: theme.variant === "amoled" ? theme.colors.bg : theme.colors.bgElevated,
         borderRadius: 6,
         borderWidth: 1,
         borderColor: theme.colors.border,
@@ -1302,7 +1302,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         borderRadius: 6,
         borderWidth: 1,
         borderColor: theme.colors.border,
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: theme.variant === "amoled" ? theme.colors.bg : theme.colors.bgElevated,
         overflow: "hidden",
     },
     metaRow: {
@@ -1336,7 +1336,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         letterSpacing: 0.6,
     },
     summaryCard: {
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: theme.variant === "amoled" ? theme.colors.bg : theme.colors.bgElevated,
         borderRadius: 6,
         borderWidth: 1,
         borderColor: theme.colors.border,

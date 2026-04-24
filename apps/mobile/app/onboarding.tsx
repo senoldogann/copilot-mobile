@@ -101,7 +101,7 @@ function SlideCard({ item, width }: { item: OnboardingSlide; width: number }) {
 
     return (
         <View style={[styles.slidePage, { width }]}>
-            <ScrollView 
+            <ScrollView
                 showsVerticalScrollIndicator={false}
                 contentContainerStyle={styles.slideSurface}
                 bounces={false}

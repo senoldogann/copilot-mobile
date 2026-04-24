@@ -1387,164 +1387,164 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 </View>
 
                 {showCloudSection && (
-                <View style={styles.providerSection}>
-                    <View style={styles.providerHeaderRow}>
-                        <View style={styles.providerHeaderLeft}>
-                            <Feather name="cloud" size={14} color={theme.colors.textSecondary} />
-                            <Text style={styles.providerHeaderText}>Cloud</Text>
-                        </View>
-                        <View style={styles.providerHeaderRight}>
-                            <Text style={styles.providerHeaderMeta}>
-                                {cloudConversationCount} chats
-                            </Text>
-                            {cloudWorkspaceKeys.length > 0 && (
-                                <Pressable
-                                    style={({ pressed }) => [
-                                        styles.providerHeaderAction,
-                                        pressed && styles.providerHeaderActionPressed,
-                                    ]}
-                                    onPress={() => toggleProviderWorkspaces(cloudWorkspaceKeys)}
-                                    hitSlop={8}
-                                >
-                                    <Text style={styles.providerHeaderActionText}>
-                                        {areWorkspaceKeysExpanded(cloudWorkspaceKeys) ? "Collapse" : "Expand"}
-                                    </Text>
-                                </Pressable>
-                            )}
-                        </View>
-                    </View>
-
-                    <View style={styles.cloudFilterRow}>
-                        {[
-                            { key: "all", label: "All" },
-                            { key: "recent", label: "Recently synced" },
-                            { key: "stale", label: "Stale cache" },
-                        ].map((option) => {
-                            const isSelected = cloudFilter === option.key;
-                            return (
-                                <Pressable
-                                    key={option.key}
-                                    style={({ pressed }) => [
-                                        styles.cloudFilterPill,
-                                        isSelected && styles.cloudFilterPillSelected,
-                                        pressed && styles.cloudFilterPillPressed,
-                                    ]}
-                                    onPress={() => setCloudFilter(option.key as CloudFilter)}
-                                    accessibilityLabel={`Filter cloud chats by ${option.label}`}
-                                >
-                                    <Text
-                                        style={[
-                                            styles.cloudFilterPillText,
-                                            isSelected && styles.cloudFilterPillTextSelected,
+                    <View style={styles.providerSection}>
+                        <View style={styles.providerHeaderRow}>
+                            <View style={styles.providerHeaderLeft}>
+                                <Feather name="cloud" size={14} color={theme.colors.textSecondary} />
+                                <Text style={styles.providerHeaderText}>Cloud</Text>
+                            </View>
+                            <View style={styles.providerHeaderRight}>
+                                <Text style={styles.providerHeaderMeta}>
+                                    {cloudConversationCount} chats
+                                </Text>
+                                {cloudWorkspaceKeys.length > 0 && (
+                                    <Pressable
+                                        style={({ pressed }) => [
+                                            styles.providerHeaderAction,
+                                            pressed && styles.providerHeaderActionPressed,
                                         ]}
+                                        onPress={() => toggleProviderWorkspaces(cloudWorkspaceKeys)}
+                                        hitSlop={8}
                                     >
-                                        {option.label}
-                                    </Text>
-                                </Pressable>
+                                        <Text style={styles.providerHeaderActionText}>
+                                            {areWorkspaceKeysExpanded(cloudWorkspaceKeys) ? "Collapse" : "Expand"}
+                                        </Text>
+                                    </Pressable>
+                                )}
+                            </View>
+                        </View>
+
+                        <View style={styles.cloudFilterRow}>
+                            {[
+                                { key: "all", label: "All" },
+                                { key: "recent", label: "Recently synced" },
+                                { key: "stale", label: "Stale cache" },
+                            ].map((option) => {
+                                const isSelected = cloudFilter === option.key;
+                                return (
+                                    <Pressable
+                                        key={option.key}
+                                        style={({ pressed }) => [
+                                            styles.cloudFilterPill,
+                                            isSelected && styles.cloudFilterPillSelected,
+                                            pressed && styles.cloudFilterPillPressed,
+                                        ]}
+                                        onPress={() => setCloudFilter(option.key as CloudFilter)}
+                                        accessibilityLabel={`Filter cloud chats by ${option.label}`}
+                                    >
+                                        <Text
+                                            style={[
+                                                styles.cloudFilterPillText,
+                                                isSelected && styles.cloudFilterPillTextSelected,
+                                            ]}
+                                        >
+                                            {option.label}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+
+                        {filteredCloudConversationGroups.length === 0 && (
+                            <View style={styles.inlineEmptyState}>
+                                <Text style={styles.inlineEmptyText}>
+                                    {cloudFilter === "all"
+                                        ? "No cached cloud conversations yet."
+                                        : "No cloud conversations match this filter."}
+                                </Text>
+                            </View>
+                        )}
+
+                        {filteredCloudConversationGroups.map((group) => {
+                            const expansionKey = makeWorkspaceSectionKey("cloud", group.workspace);
+                            const isExpanded = expandedWorkspaces.has(expansionKey);
+                            return (
+                                <View key={group.workspace} style={styles.workspaceGroup}>
+                                    <View style={styles.workspaceHeaderRow}>
+                                        <Pressable
+                                            style={styles.workspaceHeader}
+                                            onPress={() => toggleWorkspace(expansionKey)}
+                                        >
+                                            <Feather
+                                                name={isExpanded ? "chevron-down" : "chevron-right"}
+                                                size={12}
+                                                color={theme.colors.textTertiary}
+                                            />
+                                            <Feather name="cloud" size={14} color={theme.colors.textTertiary} />
+                                            <Text style={styles.workspaceName} numberOfLines={1}>
+                                                {group.displayName}
+                                            </Text>
+                                            <Text style={styles.workspaceCount}>
+                                                {group.conversations.length}
+                                            </Text>
+                                        </Pressable>
+                                    </View>
+
+                                    {isExpanded && group.conversations.map((conversation) => {
+                                        const remoteSessionAvailable = conversation.sessionId !== null
+                                            && liveSessionIds.has(conversation.sessionId);
+                                        const metadata = buildCloudConversationMetadata(
+                                            conversation.lastSyncedAt,
+                                            conversation.sessionId,
+                                            remoteSessionAvailable,
+                                            conversation.sessionId !== null
+                                                ? (resumeResultsBySessionId[conversation.sessionId] ?? "idle")
+                                                : "idle",
+                                            now,
+                                        );
+
+                                        return (
+                                            <View key={conversation.id} style={styles.conversationRow}>
+                                                <Pressable
+                                                    style={({ pressed }) => [
+                                                        styles.conversationItem,
+                                                        styles.conversationItemFlex,
+                                                        activeConversationId === conversation.id && activeSessionId === null && styles.conversationItemActive,
+                                                        pressed && styles.conversationItemPressed,
+                                                    ]}
+                                                    onPress={() => handleSelectCloudConversation(
+                                                        conversation.id,
+                                                        remoteSessionAvailable ? conversation.sessionId : null,
+                                                    )}
+                                                    onLongPress={() => openCloudConversationMenu(
+                                                        conversation.id,
+                                                        remoteSessionAvailable ? conversation.sessionId : null,
+                                                        conversation.title,
+                                                        conversation.preview,
+                                                        conversation.workspaceRoot,
+                                                    )}
+                                                    accessibilityLabel={conversation.title}
+                                                >
+                                                    {renderConversationBody({
+                                                        title: conversation.title,
+                                                        active: activeConversationId === conversation.id && activeSessionId === null,
+                                                        preview: conversation.preview,
+                                                        emptyPreview: "Cached cloud conversation",
+                                                        metadata,
+                                                    })}
+                                                </Pressable>
+                                                <Pressable
+                                                    style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
+                                                    onPress={(e) => openCloudConversationMenu(
+                                                        conversation.id,
+                                                        remoteSessionAvailable ? conversation.sessionId : null,
+                                                        conversation.title,
+                                                        conversation.preview,
+                                                        conversation.workspaceRoot,
+                                                        { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }
+                                                    )}
+                                                    hitSlop={8}
+                                                    accessibilityLabel="More actions"
+                                                >
+                                                    <Feather name="more-horizontal" size={14} color={theme.colors.textTertiary} />
+                                                </Pressable>
+                                            </View>
+                                        );
+                                    })}
+                                </View>
                             );
                         })}
                     </View>
-
-                    {filteredCloudConversationGroups.length === 0 && (
-                        <View style={styles.inlineEmptyState}>
-                            <Text style={styles.inlineEmptyText}>
-                                {cloudFilter === "all"
-                                    ? "No cached cloud conversations yet."
-                                    : "No cloud conversations match this filter."}
-                            </Text>
-                        </View>
-                    )}
-
-                    {filteredCloudConversationGroups.map((group) => {
-                        const expansionKey = makeWorkspaceSectionKey("cloud", group.workspace);
-                        const isExpanded = expandedWorkspaces.has(expansionKey);
-                        return (
-                            <View key={group.workspace} style={styles.workspaceGroup}>
-                                <View style={styles.workspaceHeaderRow}>
-                                    <Pressable
-                                        style={styles.workspaceHeader}
-                                        onPress={() => toggleWorkspace(expansionKey)}
-                                    >
-                                        <Feather
-                                            name={isExpanded ? "chevron-down" : "chevron-right"}
-                                            size={12}
-                                            color={theme.colors.textTertiary}
-                                        />
-                                        <Feather name="cloud" size={14} color={theme.colors.textTertiary} />
-                                        <Text style={styles.workspaceName} numberOfLines={1}>
-                                            {group.displayName}
-                                        </Text>
-                                        <Text style={styles.workspaceCount}>
-                                            {group.conversations.length}
-                                        </Text>
-                                    </Pressable>
-                                </View>
-
-                                {isExpanded && group.conversations.map((conversation) => {
-                                    const remoteSessionAvailable = conversation.sessionId !== null
-                                        && liveSessionIds.has(conversation.sessionId);
-                                    const metadata = buildCloudConversationMetadata(
-                                        conversation.lastSyncedAt,
-                                        conversation.sessionId,
-                                        remoteSessionAvailable,
-                                        conversation.sessionId !== null
-                                            ? (resumeResultsBySessionId[conversation.sessionId] ?? "idle")
-                                            : "idle",
-                                        now,
-                                    );
-
-                                    return (
-                                        <View key={conversation.id} style={styles.conversationRow}>
-                                            <Pressable
-                                                style={({ pressed }) => [
-                                                    styles.conversationItem,
-                                                    styles.conversationItemFlex,
-                                                    activeConversationId === conversation.id && activeSessionId === null && styles.conversationItemActive,
-                                                    pressed && styles.conversationItemPressed,
-                                                ]}
-                                                onPress={() => handleSelectCloudConversation(
-                                                    conversation.id,
-                                                    remoteSessionAvailable ? conversation.sessionId : null,
-                                                )}
-                                                onLongPress={() => openCloudConversationMenu(
-                                                    conversation.id,
-                                                    remoteSessionAvailable ? conversation.sessionId : null,
-                                                    conversation.title,
-                                                    conversation.preview,
-                                                    conversation.workspaceRoot,
-                                                )}
-                                                accessibilityLabel={conversation.title}
-                                            >
-                                                {renderConversationBody({
-                                                    title: conversation.title,
-                                                    active: activeConversationId === conversation.id && activeSessionId === null,
-                                                    preview: conversation.preview,
-                                                    emptyPreview: "Cached cloud conversation",
-                                                    metadata,
-                                                })}
-                                            </Pressable>
-                                            <Pressable
-                                                style={({ pressed }) => [styles.moreBtn, pressed && styles.moreBtnPressed]}
-                                                onPress={(e) => openCloudConversationMenu(
-                                                    conversation.id,
-                                                    remoteSessionAvailable ? conversation.sessionId : null,
-                                                    conversation.title,
-                                                    conversation.preview,
-                                                    conversation.workspaceRoot,
-                                                    { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }
-                                                )}
-                                                hitSlop={8}
-                                                accessibilityLabel="More actions"
-                                            >
-                                                <Feather name="more-horizontal" size={14} color={theme.colors.textTertiary} />
-                                            </Pressable>
-                                        </View>
-                                    );
-                                })}
-                            </View>
-                        );
-                    })}
-                </View>
                 )}
 
                 {archivedConversations.length > 0 && (
@@ -1663,11 +1663,11 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                 animationType="fade"
                 onRequestClose={closeChatActionMenu}
             >
-                <Pressable 
-                    style={[styles.actionMenuOverlay, chatActionMenu?.anchor ? { backgroundColor: "transparent" } : undefined]} 
+                <Pressable
+                    style={[styles.actionMenuOverlay, chatActionMenu?.anchor ? { backgroundColor: "transparent" } : undefined]}
                     onPress={closeChatActionMenu}
                 >
-                    <Pressable 
+                    <Pressable
                         style={[
                             styles.actionMenuCard,
                             chatActionMenu?.anchor ? {
@@ -1675,7 +1675,7 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
                                 top: Math.min(chatActionMenu.anchor.y + 10, 600),
                                 left: Math.max(10, chatActionMenu.anchor.x - 240),
                             } : undefined
-                        ]} 
+                        ]}
                         onPress={(event) => event.stopPropagation()}
                     >
                         <View
@@ -1812,643 +1812,650 @@ export default function DrawerContent(props: DrawerContentComponentProps) {
 }
 
 function createStyles(theme: AppTheme) {
-return StyleSheet.create({
-    container: {
-        flex: 1,
-        backgroundColor: theme.colors.sidebarBg,
-    },
-    header: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: 20,
-        paddingTop: theme.spacing.sm,
-        paddingBottom: theme.spacing.lg,
-    },
-    headerLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-    },
-    headerTitle: {
-        fontSize: 16,
-        fontWeight: "600",
-        color: theme.colors.textSecondary,
-    },
-    headerRefreshButton: {
-        width: 28,
-        height: 28,
-        borderRadius: theme.borderRadius.sm,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    headerRefreshButtonPressed: {
-        backgroundColor: theme.colors.bgElevated,
-    },
-    headerActions: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 6,
-    },
-    conversationList: {
-        flex: 1,
-        paddingHorizontal: 12,
-    },
-    providerSection: {
-        marginBottom: theme.spacing.sm,
-    },
-    providerHeaderRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        paddingHorizontal: theme.spacing.md,
-        paddingTop: theme.spacing.sm,
-        paddingBottom: theme.spacing.xs,
-    },
-    providerHeaderLeft: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: theme.spacing.xs,
-    },
-    providerHeaderRight: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: theme.spacing.sm,
-    },
-    providerHeaderText: {
-        fontSize: theme.fontSize.sm,
-        fontWeight: "700",
-        color: theme.colors.textPrimary,
-    },
-    providerHeaderMeta: {
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.textTertiary,
-        fontWeight: "600",
-    },
-    providerHeaderAction: {
-        paddingHorizontal: theme.spacing.sm,
-        paddingVertical: 4,
-        borderRadius: theme.borderRadius.sm,
-        backgroundColor: theme.colors.bgElevated,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    providerHeaderActionPressed: {
-        opacity: 0.8,
-    },
-    providerHeaderActionText: {
-        fontSize: theme.fontSize.xs,
-        fontWeight: "700",
-        color: theme.colors.textSecondary,
-    },
-    cloudFilterRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: theme.spacing.xs,
-        paddingHorizontal: theme.spacing.md,
-        paddingBottom: theme.spacing.xs,
-        flexWrap: "wrap",
-    },
-    cloudFilterPill: {
-        paddingHorizontal: theme.spacing.sm,
-        paddingVertical: 6,
-        borderRadius: theme.borderRadius.md,
-        backgroundColor: theme.colors.bgElevated,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    cloudFilterPillSelected: {
-        backgroundColor: theme.colors.bgTertiary,
-        borderColor: theme.colors.textSecondary,
-    },
-    cloudFilterPillPressed: {
-        opacity: 0.8,
-    },
-    cloudFilterPillText: {
-        fontSize: theme.fontSize.xs,
-        fontWeight: "600",
-        color: theme.colors.textTertiary,
-    },
-    cloudFilterPillTextSelected: {
-        color: theme.colors.textPrimary,
-    },
-    emptyState: {
-        paddingVertical: 32,
-        alignItems: "center",
-    },
-    emptyText: {
-        fontSize: theme.fontSize.sm,
-        color: theme.colors.textTertiary,
-    },
-    inlineEmptyState: {
-        paddingHorizontal: theme.spacing.lg,
-        paddingVertical: theme.spacing.sm,
-    },
-    inlineEmptyText: {
-        fontSize: theme.fontSize.sm,
-        color: theme.colors.textTertiary,
-    },
-    workspaceGroup: {
-        marginBottom: theme.spacing.xs,
-    },
-    sectionHeader: {
-        paddingHorizontal: theme.spacing.md,
-        paddingTop: theme.spacing.xs,
-        paddingBottom: 6,
-    },
-    sectionHeaderText: {
-        fontSize: theme.fontSize.xs,
-        fontWeight: "700",
-        color: theme.colors.textTertiary,
-        textTransform: "uppercase",
-        letterSpacing: 0.5,
-    },
-    workspaceHeader: {
-        flex: 1,
-        flexDirection: "row",
-        alignItems: "center",
-        paddingHorizontal: 16,
-        paddingVertical: 9,
-        gap: 10,
-    },
-    workspaceHeaderRow: {
-        flexDirection: "row",
-        alignItems: "center",
-    },
-    workspaceAddBtn: {
-        width: 26,
-        height: 26,
-        borderRadius: theme.borderRadius.sm,
-        alignItems: "center",
-        justifyContent: "center",
-        marginRight: theme.spacing.sm,
-    },
-    workspaceAddBtnPressed: {
-        backgroundColor: theme.colors.bgElevated,
-    },
-    workspaceChevron: {
-        width: 12,
-    },
-    workspaceIcon: {
-        width: 14,
-    },
-    workspaceName: {
-        flex: 1,
-        fontSize: theme.fontSize.sm,
-        fontWeight: "500",
-        color: theme.colors.textSecondary,
-    },
-    workspaceCount: {
-        fontSize: 10,
-        color: theme.colors.textTertiary,
-        backgroundColor: theme.colors.bgElevated,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: theme.borderRadius.xs,
-        overflow: "hidden",
-    },
-    conversationItem: {
-        paddingVertical: 9,
-        paddingHorizontal: 12,
-        borderRadius: 14,
-        marginBottom: 2,
-        marginLeft: 20,
-    },
-    conversationItemFlex: {
-        flex: 1,
-    },
-    conversationItemArchived: {
-        opacity: 0.6,
-    },
-    conversationRow: {
-        flexDirection: "row",
-        alignItems: "center",
-    },
-    selectionCheckBtn: {
-        width: 24,
-        height: 24,
-        borderRadius: theme.borderRadius.sm,
-        alignItems: "center",
-        justifyContent: "center",
-        marginLeft: theme.spacing.sm,
-    },
-    selectionActionsRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
-        paddingBottom: theme.spacing.xs,
-    },
-    selectionCountText: {
-        flex: 1,
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.textSecondary,
-        fontWeight: "600",
-    },
-    selectionActionBtn: {
-        paddingHorizontal: theme.spacing.sm,
-        paddingVertical: 6,
-        borderRadius: theme.borderRadius.sm,
-        backgroundColor: theme.colors.bgElevated,
-    },
-    selectionActionText: {
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.textSecondary,
-        fontWeight: "600",
-    },
-    selectionActionDeleteText: {
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.error,
-        fontWeight: "700",
-    },
-    moreBtn: {
-        width: 28,
-        height: 28,
-        borderRadius: theme.borderRadius.sm,
-        alignItems: "center",
-        justifyContent: "center",
-        marginRight: theme.spacing.sm,
-    },
-    moreBtnPressed: {
-        backgroundColor: theme.colors.bgElevated,
-    },
-    conversationItemActive: {
-        backgroundColor: theme.colors.sidebarItemActive,
-    },
-    conversationItemSelected: {
-        backgroundColor: theme.colors.bgElevated,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    conversationItemPressed: {
-        backgroundColor: theme.colors.sidebarItemHover,
-    },
-    projectConversationContent: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: 10,
-        minWidth: 0,
-    },
-    projectConversationState: {
-        width: 18,
-        height: 18,
-        borderRadius: 9,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    projectConversationStateRunning: {
-        backgroundColor: "transparent",
-        borderWidth: 0,
-    },
-    projectConversationTitle: {
-        flex: 1,
-        minWidth: 0,
-        fontSize: 15,
-        lineHeight: 21,
-        color: theme.colors.textPrimary,
-        fontWeight: "500",
-    },
-    projectConversationTitleActive: {
-        fontWeight: "700",
-    },
-    projectConversationTime: {
-        flexShrink: 0,
-        minWidth: 32,
-        textAlign: "right",
-        fontSize: 13,
-        fontWeight: "700",
-        color: theme.colors.textTertiary,
-    },
-    conversationTitle: {
-        flex: 1,
-        fontSize: theme.fontSize.sm,
-        color: theme.colors.textPrimary,
-        fontWeight: "500",
-    },
-    conversationTitleRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: theme.spacing.sm,
-    },
-    conversationTitleGroup: {
-        flex: 1,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: theme.spacing.xs,
-        minWidth: 0,
-    },
-    conversationTitleActive: {
-        color: theme.colors.textPrimary,
-        fontWeight: "600",
-    },
-    conversationDuplicateCount: {
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.textTertiary,
-        backgroundColor: theme.colors.bgElevated,
-        paddingHorizontal: 5,
-        paddingVertical: 1,
-        borderRadius: theme.borderRadius.xs,
-        overflow: "hidden",
-    },
-    conversationPreview: {
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.textTertiary,
-        marginTop: 2,
-    },
-    providerConversationMeta: {
-        flexShrink: 0,
-        maxWidth: "42%",
-        fontSize: 11,
-        color: theme.colors.textSecondary,
-        textAlign: "right",
-    },
-    metadataChipRow: {
-        flexDirection: "row",
-        alignItems: "center",
-        flexWrap: "wrap",
-        gap: theme.spacing.xs,
-        marginTop: 4,
-    },
-    metadataChip: {
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: theme.borderRadius.xs,
-        backgroundColor: theme.colors.bgElevated,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-    },
-    metadataChipNeutral: {
-        backgroundColor: theme.colors.bgElevated,
-        borderColor: theme.colors.border,
-    },
-    metadataChipSuccess: {
-        backgroundColor: theme.colors.successMuted,
-        borderColor: theme.colors.success,
-    },
-    metadataChipWarning: {
-        backgroundColor: theme.colors.accentMuted,
-        borderColor: theme.colors.warning,
-    },
-    metadataChipDanger: {
-        backgroundColor: theme.colors.errorMuted,
-        borderColor: theme.colors.error,
-    },
-    metadataChipText: {
-        fontSize: 10,
-        fontWeight: "700",
-        color: theme.colors.textSecondary,
-    },
-    metadataChipTextNeutral: {
-        color: theme.colors.textSecondary,
-    },
-    metadataChipTextSuccess: {
-        color: theme.colors.success,
-    },
-    metadataChipTextWarning: {
-        color: theme.colors.warning,
-    },
-    metadataChipTextDanger: {
-        color: theme.colors.error,
-    },
-    footer: {
-        paddingHorizontal: theme.spacing.md,
-        paddingBottom: theme.spacing.sm,
-    },
-    footerDivider: {
-        height: 1,
-        backgroundColor: theme.colors.border,
-        marginBottom: theme.spacing.sm,
-    },
-    footerActions: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "flex-start",
-        gap: theme.spacing.sm,
-    },
-    footerItem: {
-        flexDirection: "row",
-        alignItems: "center",
-        paddingVertical: 10,
-        paddingHorizontal: theme.spacing.md,
-        borderRadius: theme.borderRadius.sm,
-        gap: theme.spacing.sm,
-    },
-    footerItemCompact: {
-        flex: 1,
-    },
-    footerItemPressed: {
-        backgroundColor: theme.colors.bgElevated,
-    },
-    footerItemIcon: {
-        width: 16,
-        alignItems: "center",
-    },
-    footerItemText: {
-        fontSize: theme.fontSize.md,
-        color: theme.colors.textPrimary,
-        fontWeight: "400",
-    },
-    actionMenuOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: theme.colors.overlay,
-        justifyContent: "flex-start",
-        paddingHorizontal: theme.spacing.md,
-        paddingTop: 72,
-    },
-    actionMenuCard: {
-        width: 260,
-        alignSelf: "center",
-        maxHeight: 420,
-        borderRadius: theme.borderRadius.lg,
-        backgroundColor: theme.colors.bgElevated,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        overflow: "hidden",
-        shadowColor: "#000",
-        shadowOpacity: theme.resolvedScheme === "light" ? 0.08 : 0.24,
-        shadowRadius: 16,
-        shadowOffset: { width: 0, height: 8 },
-        elevation: 14,
-    },
-    actionMenuHeader: {
-        flexDirection: "row",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
-        paddingTop: theme.spacing.md,
-        paddingBottom: theme.spacing.sm,
-        backgroundColor: theme.colors.bgElevated,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-        borderBottomColor: theme.colors.borderMuted,
-    },
-    actionMenuHeaderNoDivider: {
-        borderBottomWidth: 0,
-    },
-    actionMenuHeaderLeft: {
-        flex: 1,
-        flexDirection: "row",
-        alignItems: "center",
-        gap: theme.spacing.sm,
-    },
-    actionMenuIconBadge: {
-        width: 30,
-        height: 30,
-        borderRadius: theme.borderRadius.sm,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: theme.colors.bgTertiary,
-        borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
-    },
-    actionMenuHeaderText: {
-        flex: 1,
-        minWidth: 0,
-    },
-    actionMenuTitle: {
-        fontSize: theme.fontSize.base,
-        fontWeight: "700",
-        color: theme.colors.textPrimary,
-    },
-    actionMenuSubtitle: {
-        marginTop: 2,
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.textTertiary,
-    },
-    actionMenuCloseButton: {
-        width: 28,
-        height: 28,
-        borderRadius: theme.borderRadius.sm,
-        alignItems: "center",
-        justifyContent: "center",
-        backgroundColor: theme.colors.bgTertiary,
-        borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
-    },
-    actionMenuCloseButtonPressed: {
-        opacity: 0.82,
-    },
-    actionMenuList: {
-        paddingVertical: theme.spacing.xs,
-    },
-    actionMenuItem: {
-        flexDirection: "row",
-        alignItems: "center",
-        gap: theme.spacing.sm,
-        paddingHorizontal: theme.spacing.md,
-        paddingVertical: 13,
-    },
-    actionMenuItemPressed: {
-        backgroundColor: theme.colors.bgSecondary,
-    },
-    actionMenuItemIconWrap: {
-        width: 16,
-        height: 16,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    actionMenuItemIconWrapDanger: {
-        opacity: 0.92,
-    },
-    actionMenuItemText: {
-        flex: 1,
-        fontSize: theme.fontSize.md,
-        fontWeight: "600",
-        color: theme.colors.textPrimary,
-    },
-    actionMenuItemTextDanger: {
-        color: theme.colors.error,
-    },
-    actionMenuSeparator: {
-        height: StyleSheet.hairlineWidth,
-        marginLeft: theme.spacing.md + 16 + theme.spacing.sm,
-        backgroundColor: theme.colors.borderMuted,
-    },
-    renameOverlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: theme.colors.overlay,
-        justifyContent: "center",
-        alignItems: "center",
-        paddingHorizontal: theme.spacing.lg,
-    },
-    renameKeyboardLayer: {
-        width: "100%",
-        alignItems: "center",
-    },
-    renameCard: {
-        width: "100%",
-        maxWidth: 420,
-        borderRadius: theme.borderRadius.lg,
-        backgroundColor: theme.colors.bgSecondary,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        padding: theme.spacing.lg,
-        gap: theme.spacing.md,
-        shadowColor: theme.colors.bg,
-        shadowOpacity: 0.35,
-        shadowRadius: 22,
-        shadowOffset: { width: 0, height: 8 },
-        elevation: 12,
-    },
-    renameTitle: {
-        fontSize: theme.fontSize.base,
-        fontWeight: "700",
-        color: theme.colors.textPrimary,
-    },
-    renameSubtitle: {
-        fontSize: theme.fontSize.sm,
-        color: theme.colors.textSecondary,
-        lineHeight: 20,
-    },
-    renameInput: {
-        minHeight: 46,
-        borderRadius: theme.borderRadius.sm,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        backgroundColor: theme.colors.bg,
-        color: theme.colors.textPrimary,
-        paddingHorizontal: theme.spacing.md,
-        paddingVertical: 10,
-        fontSize: theme.fontSize.base,
-    },
-    renameActions: {
-        flexDirection: "row",
-        gap: theme.spacing.sm,
-    },
-    renameSecondaryButton: {
-        flex: 1,
-        minHeight: 44,
-        borderRadius: theme.borderRadius.sm,
-        borderWidth: 1,
-        borderColor: theme.colors.border,
-        backgroundColor: theme.colors.bg,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    renameSecondaryButtonPressed: {
-        backgroundColor: theme.colors.bgElevated,
-    },
-    renameSecondaryButtonText: {
-        fontSize: theme.fontSize.sm,
-        fontWeight: "600",
-        color: theme.colors.textSecondary,
-    },
-    renamePrimaryButton: {
-        flex: 1,
-        minHeight: 44,
-        borderRadius: theme.borderRadius.sm,
-        backgroundColor: theme.colors.accent,
-        alignItems: "center",
-        justifyContent: "center",
-    },
-    renamePrimaryButtonPressed: {
-        backgroundColor: theme.colors.accentPressed,
-    },
-    renamePrimaryButtonText: {
-        fontSize: theme.fontSize.sm,
-        fontWeight: "700",
-        color: theme.colors.textOnAccent,
-    },
-});
+    const isAmoled = theme.variant === "amoled";
+    const badgeSurface = isAmoled ? theme.colors.bgTertiary : theme.colors.bgElevated;
+
+    return StyleSheet.create({
+        container: {
+            flex: 1,
+            backgroundColor: theme.colors.sidebarBg,
+        },
+        header: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: 20,
+            paddingTop: theme.spacing.sm,
+            paddingBottom: theme.spacing.lg,
+        },
+        headerLeft: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+        },
+        headerTitle: {
+            fontSize: 16,
+            fontWeight: "600",
+            color: theme.colors.textSecondary,
+        },
+        headerRefreshButton: {
+            width: 28,
+            height: 28,
+            borderRadius: theme.borderRadius.sm,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        headerRefreshButtonPressed: {
+            backgroundColor: theme.colors.bgElevated,
+        },
+        headerActions: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 6,
+        },
+        conversationList: {
+            flex: 1,
+            paddingHorizontal: 12,
+        },
+        providerSection: {
+            marginBottom: theme.spacing.sm,
+        },
+        providerHeaderRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            paddingHorizontal: theme.spacing.md,
+            paddingTop: theme.spacing.sm,
+            paddingBottom: theme.spacing.xs,
+        },
+        providerHeaderLeft: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.xs,
+        },
+        providerHeaderRight: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.sm,
+        },
+        providerHeaderText: {
+            fontSize: theme.fontSize.sm,
+            fontWeight: "700",
+            color: theme.colors.textPrimary,
+        },
+        providerHeaderMeta: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textTertiary,
+            fontWeight: "600",
+        },
+        providerHeaderAction: {
+            paddingHorizontal: theme.spacing.sm,
+            paddingVertical: 4,
+            borderRadius: theme.borderRadius.sm,
+            backgroundColor: theme.colors.bgElevated,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        providerHeaderActionPressed: {
+            opacity: 0.8,
+        },
+        providerHeaderActionText: {
+            fontSize: theme.fontSize.xs,
+            fontWeight: "700",
+            color: theme.colors.textSecondary,
+        },
+        cloudFilterRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.xs,
+            paddingHorizontal: theme.spacing.md,
+            paddingBottom: theme.spacing.xs,
+            flexWrap: "wrap",
+        },
+        cloudFilterPill: {
+            paddingHorizontal: theme.spacing.sm,
+            paddingVertical: 6,
+            borderRadius: theme.borderRadius.md,
+            backgroundColor: theme.colors.bgElevated,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        cloudFilterPillSelected: {
+            backgroundColor: theme.colors.bgTertiary,
+            borderColor: theme.colors.textSecondary,
+        },
+        cloudFilterPillPressed: {
+            opacity: 0.8,
+        },
+        cloudFilterPillText: {
+            fontSize: theme.fontSize.xs,
+            fontWeight: "600",
+            color: theme.colors.textTertiary,
+        },
+        cloudFilterPillTextSelected: {
+            color: theme.colors.textPrimary,
+        },
+        emptyState: {
+            paddingVertical: 32,
+            alignItems: "center",
+        },
+        emptyText: {
+            fontSize: theme.fontSize.sm,
+            color: theme.colors.textTertiary,
+        },
+        inlineEmptyState: {
+            paddingHorizontal: theme.spacing.lg,
+            paddingVertical: theme.spacing.sm,
+        },
+        inlineEmptyText: {
+            fontSize: theme.fontSize.sm,
+            color: theme.colors.textTertiary,
+        },
+        workspaceGroup: {
+            marginBottom: theme.spacing.xs,
+        },
+        sectionHeader: {
+            paddingHorizontal: theme.spacing.md,
+            paddingTop: theme.spacing.xs,
+            paddingBottom: 6,
+        },
+        sectionHeaderText: {
+            fontSize: theme.fontSize.xs,
+            fontWeight: "700",
+            color: theme.colors.textTertiary,
+            textTransform: "uppercase",
+            letterSpacing: 0.5,
+        },
+        workspaceHeader: {
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            paddingHorizontal: 16,
+            paddingVertical: 9,
+            gap: 10,
+        },
+        workspaceHeaderRow: {
+            flexDirection: "row",
+            alignItems: "center",
+        },
+        workspaceAddBtn: {
+            width: 26,
+            height: 26,
+            borderRadius: theme.borderRadius.sm,
+            alignItems: "center",
+            justifyContent: "center",
+            marginRight: theme.spacing.sm,
+        },
+        workspaceAddBtnPressed: {
+            backgroundColor: theme.colors.bgElevated,
+        },
+        workspaceChevron: {
+            width: 12,
+        },
+        workspaceIcon: {
+            width: 14,
+        },
+        workspaceName: {
+            flex: 1,
+            fontSize: theme.fontSize.sm,
+            fontWeight: "500",
+            color: theme.colors.textSecondary,
+        },
+        workspaceCount: {
+            fontSize: 10,
+            color: theme.colors.textTertiary,
+            backgroundColor: badgeSurface,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            paddingHorizontal: 5,
+            paddingVertical: 1,
+            borderRadius: theme.borderRadius.xs,
+            overflow: "hidden",
+        },
+        conversationItem: {
+            paddingVertical: 9,
+            paddingHorizontal: 12,
+            borderRadius: 14,
+            marginBottom: 2,
+            marginLeft: 20,
+        },
+        conversationItemFlex: {
+            flex: 1,
+        },
+        conversationItemArchived: {
+            opacity: 0.6,
+        },
+        conversationRow: {
+            flexDirection: "row",
+            alignItems: "center",
+        },
+        selectionCheckBtn: {
+            width: 24,
+            height: 24,
+            borderRadius: theme.borderRadius.sm,
+            alignItems: "center",
+            justifyContent: "center",
+            marginLeft: theme.spacing.sm,
+        },
+        selectionActionsRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.sm,
+            paddingHorizontal: theme.spacing.md,
+            paddingBottom: theme.spacing.xs,
+        },
+        selectionCountText: {
+            flex: 1,
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textSecondary,
+            fontWeight: "600",
+        },
+        selectionActionBtn: {
+            paddingHorizontal: theme.spacing.sm,
+            paddingVertical: 6,
+            borderRadius: theme.borderRadius.sm,
+            backgroundColor: theme.colors.bgElevated,
+        },
+        selectionActionText: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textSecondary,
+            fontWeight: "600",
+        },
+        selectionActionDeleteText: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.error,
+            fontWeight: "700",
+        },
+        moreBtn: {
+            width: 28,
+            height: 28,
+            borderRadius: theme.borderRadius.sm,
+            alignItems: "center",
+            justifyContent: "center",
+            marginRight: theme.spacing.sm,
+        },
+        moreBtnPressed: {
+            backgroundColor: theme.colors.bgElevated,
+        },
+        conversationItemActive: {
+            backgroundColor: theme.colors.sidebarItemActive,
+        },
+        conversationItemSelected: {
+            backgroundColor: theme.colors.bgElevated,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        conversationItemPressed: {
+            backgroundColor: theme.colors.sidebarItemHover,
+        },
+        projectConversationContent: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: 10,
+            minWidth: 0,
+        },
+        projectConversationState: {
+            width: 18,
+            height: 18,
+            borderRadius: 9,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        projectConversationStateRunning: {
+            backgroundColor: "transparent",
+            borderWidth: 0,
+        },
+        projectConversationTitle: {
+            flex: 1,
+            minWidth: 0,
+            fontSize: 15,
+            lineHeight: 21,
+            color: theme.colors.textPrimary,
+            fontWeight: "500",
+        },
+        projectConversationTitleActive: {
+            fontWeight: "700",
+        },
+        projectConversationTime: {
+            flexShrink: 0,
+            minWidth: 32,
+            textAlign: "right",
+            fontSize: 13,
+            fontWeight: "700",
+            color: theme.colors.textTertiary,
+        },
+        conversationTitle: {
+            flex: 1,
+            fontSize: theme.fontSize.sm,
+            color: theme.colors.textPrimary,
+            fontWeight: "500",
+        },
+        conversationTitleRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: theme.spacing.sm,
+        },
+        conversationTitleGroup: {
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.xs,
+            minWidth: 0,
+        },
+        conversationTitleActive: {
+            color: theme.colors.textPrimary,
+            fontWeight: "600",
+        },
+        conversationDuplicateCount: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textTertiary,
+            backgroundColor: badgeSurface,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            paddingHorizontal: 5,
+            paddingVertical: 1,
+            borderRadius: theme.borderRadius.xs,
+            overflow: "hidden",
+        },
+        conversationPreview: {
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textTertiary,
+            marginTop: 2,
+        },
+        providerConversationMeta: {
+            flexShrink: 0,
+            maxWidth: "42%",
+            fontSize: 11,
+            color: theme.colors.textSecondary,
+            textAlign: "right",
+        },
+        metadataChipRow: {
+            flexDirection: "row",
+            alignItems: "center",
+            flexWrap: "wrap",
+            gap: theme.spacing.xs,
+            marginTop: 4,
+        },
+        metadataChip: {
+            paddingHorizontal: 6,
+            paddingVertical: 2,
+            borderRadius: theme.borderRadius.xs,
+            backgroundColor: theme.colors.bgElevated,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+        },
+        metadataChipNeutral: {
+            backgroundColor: theme.colors.bgElevated,
+            borderColor: theme.colors.border,
+        },
+        metadataChipSuccess: {
+            backgroundColor: theme.colors.successMuted,
+            borderColor: theme.colors.success,
+        },
+        metadataChipWarning: {
+            backgroundColor: theme.colors.accentMuted,
+            borderColor: theme.colors.warning,
+        },
+        metadataChipDanger: {
+            backgroundColor: theme.colors.errorMuted,
+            borderColor: theme.colors.error,
+        },
+        metadataChipText: {
+            fontSize: 10,
+            fontWeight: "700",
+            color: theme.colors.textSecondary,
+        },
+        metadataChipTextNeutral: {
+            color: theme.colors.textSecondary,
+        },
+        metadataChipTextSuccess: {
+            color: theme.colors.success,
+        },
+        metadataChipTextWarning: {
+            color: theme.colors.warning,
+        },
+        metadataChipTextDanger: {
+            color: theme.colors.error,
+        },
+        footer: {
+            paddingHorizontal: theme.spacing.md,
+            paddingBottom: theme.spacing.sm,
+        },
+        footerDivider: {
+            height: 1,
+            backgroundColor: theme.colors.border,
+            marginBottom: theme.spacing.sm,
+        },
+        footerActions: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "flex-start",
+            gap: theme.spacing.sm,
+        },
+        footerItem: {
+            flexDirection: "row",
+            alignItems: "center",
+            paddingVertical: 10,
+            paddingHorizontal: theme.spacing.md,
+            borderRadius: theme.borderRadius.sm,
+            gap: theme.spacing.sm,
+        },
+        footerItemCompact: {
+            flex: 1,
+        },
+        footerItemPressed: {
+            backgroundColor: theme.colors.bgElevated,
+        },
+        footerItemIcon: {
+            width: 16,
+            alignItems: "center",
+        },
+        footerItemText: {
+            fontSize: theme.fontSize.md,
+            color: theme.colors.textPrimary,
+            fontWeight: "400",
+        },
+        actionMenuOverlay: {
+            ...StyleSheet.absoluteFillObject,
+            backgroundColor: theme.colors.overlay,
+            justifyContent: "flex-start",
+            paddingHorizontal: theme.spacing.md,
+            paddingTop: 72,
+        },
+        actionMenuCard: {
+            width: 260,
+            alignSelf: "center",
+            maxHeight: 420,
+            borderRadius: theme.borderRadius.lg,
+            backgroundColor: theme.colors.bgElevated,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            overflow: "hidden",
+            shadowColor: "#000",
+            shadowOpacity: theme.resolvedScheme === "light" ? 0.08 : 0.24,
+            shadowRadius: 16,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 14,
+        },
+        actionMenuHeader: {
+            flexDirection: "row",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: theme.spacing.sm,
+            paddingHorizontal: theme.spacing.md,
+            paddingTop: theme.spacing.md,
+            paddingBottom: theme.spacing.sm,
+            backgroundColor: theme.colors.bgElevated,
+            borderBottomWidth: StyleSheet.hairlineWidth,
+            borderBottomColor: theme.colors.borderMuted,
+        },
+        actionMenuHeaderNoDivider: {
+            borderBottomWidth: 0,
+        },
+        actionMenuHeaderLeft: {
+            flex: 1,
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.sm,
+        },
+        actionMenuIconBadge: {
+            width: 30,
+            height: 30,
+            borderRadius: theme.borderRadius.sm,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: theme.colors.bgTertiary,
+            borderWidth: 1,
+            borderColor: theme.colors.borderMuted,
+        },
+        actionMenuHeaderText: {
+            flex: 1,
+            minWidth: 0,
+        },
+        actionMenuTitle: {
+            fontSize: theme.fontSize.base,
+            fontWeight: "700",
+            color: theme.colors.textPrimary,
+        },
+        actionMenuSubtitle: {
+            marginTop: 2,
+            fontSize: theme.fontSize.xs,
+            color: theme.colors.textTertiary,
+        },
+        actionMenuCloseButton: {
+            width: 28,
+            height: 28,
+            borderRadius: theme.borderRadius.sm,
+            alignItems: "center",
+            justifyContent: "center",
+            backgroundColor: theme.colors.bgTertiary,
+            borderWidth: 1,
+            borderColor: theme.colors.borderMuted,
+        },
+        actionMenuCloseButtonPressed: {
+            opacity: 0.82,
+        },
+        actionMenuList: {
+            paddingVertical: theme.spacing.xs,
+        },
+        actionMenuItem: {
+            flexDirection: "row",
+            alignItems: "center",
+            gap: theme.spacing.sm,
+            paddingHorizontal: theme.spacing.md,
+            paddingVertical: 13,
+        },
+        actionMenuItemPressed: {
+            backgroundColor: theme.colors.bgSecondary,
+        },
+        actionMenuItemIconWrap: {
+            width: 16,
+            height: 16,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        actionMenuItemIconWrapDanger: {
+            opacity: 0.92,
+        },
+        actionMenuItemText: {
+            flex: 1,
+            fontSize: theme.fontSize.md,
+            fontWeight: "600",
+            color: theme.colors.textPrimary,
+        },
+        actionMenuItemTextDanger: {
+            color: theme.colors.error,
+        },
+        actionMenuSeparator: {
+            height: StyleSheet.hairlineWidth,
+            marginLeft: theme.spacing.md + 16 + theme.spacing.sm,
+            backgroundColor: theme.colors.borderMuted,
+        },
+        renameOverlay: {
+            ...StyleSheet.absoluteFillObject,
+            backgroundColor: theme.colors.overlay,
+            justifyContent: "center",
+            alignItems: "center",
+            paddingHorizontal: theme.spacing.lg,
+        },
+        renameKeyboardLayer: {
+            width: "100%",
+            alignItems: "center",
+        },
+        renameCard: {
+            width: "100%",
+            maxWidth: 420,
+            borderRadius: theme.borderRadius.lg,
+            backgroundColor: theme.colors.bgSecondary,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            padding: theme.spacing.lg,
+            gap: theme.spacing.md,
+            shadowColor: theme.colors.bg,
+            shadowOpacity: 0.35,
+            shadowRadius: 22,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 12,
+        },
+        renameTitle: {
+            fontSize: theme.fontSize.base,
+            fontWeight: "700",
+            color: theme.colors.textPrimary,
+        },
+        renameSubtitle: {
+            fontSize: theme.fontSize.sm,
+            color: theme.colors.textSecondary,
+            lineHeight: 20,
+        },
+        renameInput: {
+            minHeight: 46,
+            borderRadius: theme.borderRadius.sm,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.bg,
+            color: theme.colors.textPrimary,
+            paddingHorizontal: theme.spacing.md,
+            paddingVertical: 10,
+            fontSize: theme.fontSize.base,
+        },
+        renameActions: {
+            flexDirection: "row",
+            gap: theme.spacing.sm,
+        },
+        renameSecondaryButton: {
+            flex: 1,
+            minHeight: 44,
+            borderRadius: theme.borderRadius.sm,
+            borderWidth: 1,
+            borderColor: theme.colors.border,
+            backgroundColor: theme.colors.bg,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        renameSecondaryButtonPressed: {
+            backgroundColor: theme.colors.bgElevated,
+        },
+        renameSecondaryButtonText: {
+            fontSize: theme.fontSize.sm,
+            fontWeight: "600",
+            color: theme.colors.textSecondary,
+        },
+        renamePrimaryButton: {
+            flex: 1,
+            minHeight: 44,
+            borderRadius: theme.borderRadius.sm,
+            backgroundColor: theme.colors.accent,
+            alignItems: "center",
+            justifyContent: "center",
+        },
+        renamePrimaryButtonPressed: {
+            backgroundColor: theme.colors.accentPressed,
+        },
+        renamePrimaryButtonText: {
+            fontSize: theme.fontSize.sm,
+            fontWeight: "700",
+            color: theme.colors.textOnAccent,
+        },
+    });
 }

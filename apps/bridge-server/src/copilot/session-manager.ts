@@ -29,6 +29,7 @@ import { generateMessageId, nextSeq, nowMs } from "../utils/message.js";
 import {
     buildWorkspaceGitSummary,
     buildWorkspaceTree,
+    createAndSwitchWorkspaceBranch,
     commitWorkspaceChanges,
     performWorkspaceGitOperation,
     readWorkspaceDiff,
@@ -1384,6 +1385,47 @@ export function createSessionManager(
                         branchName,
                         success: false,
                         message: error instanceof Error ? error.message : "Workspace branch switch failed",
+                    },
+                });
+            }
+        },
+
+        async createWorkspaceBranch(sessionId: string, branchName: string): Promise<void> {
+            const context = getSessionContext(sessionId);
+            if (context === undefined) {
+                sendWorkspaceError("SESSION_NOT_FOUND", `Session ${sessionId} not found`, false);
+                return;
+            }
+
+            try {
+                const result = await createAndSwitchWorkspaceBranch(context, branchName);
+                send({
+                    ...makeBase(),
+                    type: "workspace.branch.switch.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        branchName,
+                        success: result.success,
+                        ...(result.stdout.length > 0 ? { stdout: result.stdout.trim() } : {}),
+                        ...(result.stderr.length > 0 ? { stderr: result.stderr.trim() } : {}),
+                        ...(result.exitCode !== undefined ? { exitCode: result.exitCode } : {}),
+                        ...(result.signal !== undefined ? { signal: result.signal } : {}),
+                        ...(result.message !== undefined
+                            ? { message: result.message }
+                            : (result.success ? { message: `Created and switched to ${branchName}` } : {})),
+                    },
+                });
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "workspace.branch.switch.result",
+                    payload: {
+                        sessionId,
+                        context,
+                        branchName,
+                        success: false,
+                        message: error instanceof Error ? error.message : "Workspace branch creation failed",
                     },
                 });
             }

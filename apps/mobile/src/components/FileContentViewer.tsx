@@ -245,7 +245,7 @@ export function FileContentViewer(props: Props): React.JSX.Element {
 
 function classifyDiffLine(line: string, theme: AppTheme): { readonly color: string; readonly bg: string | null } {
     if (line.startsWith("+++") || line.startsWith("---")) {
-        return { color: theme.colors.textTertiary, bg: null };
+        return { color: theme.colors.textPrimary, bg: null };
     }
     if (line.startsWith("@@")) {
         return { color: theme.colors.textSecondary, bg: null };
@@ -305,9 +305,11 @@ function FileBody({ content }: { readonly content: string }): React.JSX.Element 
 }
 
 function createStyles(theme: AppTheme) {
+    const isAmoled = theme.variant === "amoled";
     const fileBodyBackground = theme.resolvedScheme === "light"
         ? theme.colors.bgSecondary
         : theme.colors.bg;
+    const sheetSurfaceBackground = isAmoled ? theme.colors.bg : theme.colors.bgElevated;
 
     return StyleSheet.create({
         metaBanner: {
@@ -315,7 +317,7 @@ function createStyles(theme: AppTheme) {
             gap: 12,
             paddingHorizontal: theme.spacing.md,
             paddingVertical: 6,
-            backgroundColor: theme.colors.bgElevated,
+            backgroundColor: sheetSurfaceBackground,
             borderBottomWidth: 1,
             borderBottomColor: theme.colors.border,
         },
@@ -347,7 +349,7 @@ function createStyles(theme: AppTheme) {
             paddingHorizontal: theme.spacing.lg,
             paddingVertical: 8,
             borderRadius: theme.borderRadius.md,
-            backgroundColor: theme.colors.bgElevated,
+            backgroundColor: sheetSurfaceBackground,
             borderWidth: 1,
             borderColor: theme.colors.border,
         },

@@ -1225,9 +1225,7 @@ export function handleServerMessage(message: ServerMessage): void {
             const workspaceStore = useWorkspaceStore.getState();
             workspaceStore.setWorkspaceBranchSwitchResult(message.payload);
             if (message.payload.success) {
-                void import("./bridge").then(({ refreshWorkspaceGitSummary }) =>
-                    refreshWorkspaceGitSummary(message.payload.sessionId, 10)
-                );
+                requestWorkspaceSnapshot(message.payload.sessionId);
             }
             break;
         }

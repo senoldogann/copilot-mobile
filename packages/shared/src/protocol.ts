@@ -180,6 +180,14 @@ export type WorkspaceBranchSwitchRequestMessage = BaseBridgeMessage & {
     };
 };
 
+export type WorkspaceBranchCreateRequestMessage = BaseBridgeMessage & {
+    type: "workspace.branch.create";
+    payload: {
+        sessionId: string;
+        branchName: string;
+    };
+};
+
 export type WorkspaceBranchSwitchResultPayload = {
     sessionId: string;
     context: SessionContext;
@@ -851,6 +859,7 @@ export type ClientMessage =
     | WorkspaceGitSummaryRequestMessage
     | WorkspaceCommitRequestMessage
     | WorkspaceOperationRequestMessage
+    | WorkspaceBranchCreateRequestMessage
     | WorkspaceBranchSwitchRequestMessage
     | WorkspaceResolveRequestMessage
     | WorkspaceFileRequestMessage

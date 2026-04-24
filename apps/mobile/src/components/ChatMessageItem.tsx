@@ -1192,6 +1192,20 @@ const createMarkdownStyles = (theme: AppTheme) => StyleSheet.create({
 });
 
 const createStyles = (theme: AppTheme) => StyleSheet.create({
+    userBubble: {
+        backgroundColor: theme.variant === "amoled" ? theme.colors.bgTertiary : theme.colors.bgTertiary,
+        borderRadius: theme.borderRadius.lg,
+        paddingVertical: theme.spacing.md,
+        paddingHorizontal: theme.spacing.lg,
+        alignSelf: "flex-end",
+        maxWidth: "86%",
+        ...(theme.variant === "amoled"
+            ? {
+                borderWidth: 1,
+                borderColor: theme.colors.border,
+            }
+            : {}),
+    },
     // Copilot ikonu
     copilotIcon: {
         width: 24,
@@ -1227,14 +1241,6 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         marginVertical: theme.spacing.xs,
         alignItems: "flex-end",
     },
-    userBubble: {
-        backgroundColor: theme.colors.bgTertiary,
-        borderRadius: theme.borderRadius.lg,
-        paddingVertical: theme.spacing.md,
-        paddingHorizontal: theme.spacing.lg,
-        alignSelf: "flex-end",
-        maxWidth: "86%",
-    },
     userHeader: {
         flexDirection: "row",
         alignItems: "center",
@@ -1254,9 +1260,9 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
     },
     userAttachmentChip: {
         maxWidth: 180,
-        backgroundColor: theme.colors.bgElevated,
+        backgroundColor: theme.variant === "amoled" ? theme.colors.bg : theme.colors.bgElevated,
         borderWidth: 1,
-        borderColor: theme.colors.borderMuted,
+        borderColor: theme.colors.border,
         borderRadius: theme.borderRadius.full,
         paddingHorizontal: theme.spacing.sm,
         paddingVertical: 6,

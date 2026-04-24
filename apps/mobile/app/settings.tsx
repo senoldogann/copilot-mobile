@@ -38,6 +38,7 @@ const THEME_VARIANTS: ReadonlyArray<{ value: ThemeVariant; label: string; swatch
     { value: "midnight", label: "Midnight", swatch: "#4f8cff" },
     { value: "claude", label: "Claude", swatch: "#f78166" },
     { value: "ghostty", label: "Ghostty", swatch: "#8fb2ff" },
+    { value: "amoled", label: "Amoled", swatch: "#ffffff" },
 ];
 
 function SettingsGroup({
@@ -101,8 +102,8 @@ function SettingsRow({
         return (
             <Pressable
                 style={({ pressed }) => [
-                    styles.row, 
-                    active && styles.rowActive, 
+                    styles.row,
+                    active && styles.rowActive,
                     pressed && styles.rowPressed
                 ]}
                 onPress={onPress}
@@ -165,7 +166,10 @@ function ThemeSettings() {
                                     void applyThemeSelection(item.value, themeVariant);
                                 }}
                             >
-                                <Icon size={14} color={active ? "#ffffff" : "#8b8b92"} />
+                                <Icon
+                                    size={14}
+                                    color={active ? theme.colors.textOnAccent : theme.colors.textTertiary}
+                                />
                                 <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
                                     {item.label}
                                 </Text>
@@ -286,8 +290,8 @@ export default function SettingsScreen() {
             <Stack.Screen options={{ headerShown: false }} />
             <ScrollView style={styles.container} contentContainerStyle={styles.content}>
                 <View style={styles.pageHeader}>
-                    <Pressable 
-                        style={({ pressed }) => [styles.backButton, pressed && { opacity: 0.7 }]} 
+                    <Pressable
+                        style={({ pressed }) => [styles.backButton, pressed && { opacity: 0.7 }]}
                         onPress={() => router.back()}
                         hitSlop={20}
                     >
@@ -298,24 +302,24 @@ export default function SettingsScreen() {
 
                 <ThemeSettings />
 
-            <SettingsGroup
-                title="App Settings"
-                footer="Enable notifications to receive background completion alerts."
-            >
-                <SettingsRow
-                    icon={BookOpenIcon}
-                    label="Setup Guide"
-                    onPress={() => router.push("/onboarding")}
-                />
-                <SettingsRow
-                    icon={BellIcon}
-                    label="Notifications"
-                    isLast={true}
-                    onPress={() => {
-                        void handleEnableNotifications();
-                    }}
-                />
-            </SettingsGroup>
+                <SettingsGroup
+                    title="App Settings"
+                    footer="Enable notifications to receive background completion alerts."
+                >
+                    <SettingsRow
+                        icon={BookOpenIcon}
+                        label="Setup Guide"
+                        onPress={() => router.push("/onboarding")}
+                    />
+                    <SettingsRow
+                        icon={BellIcon}
+                        label="Notifications"
+                        isLast={true}
+                        onPress={() => {
+                            void handleEnableNotifications();
+                        }}
+                    />
+                </SettingsGroup>
 
                 <View style={styles.footerWrap}>
                     <Text style={styles.versionText}>v{appVersion}</Text>
@@ -462,7 +466,7 @@ function createStyles(theme: AppTheme) {
             color: theme.colors.textSecondary,
         },
         segmentTextActive: {
-            color: "#ffffff",
+            color: theme.colors.textOnAccent,
         },
         footerWrap: {
             alignItems: "center",

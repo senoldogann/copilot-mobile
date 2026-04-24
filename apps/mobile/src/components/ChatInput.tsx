@@ -1103,6 +1103,37 @@ function ChatInputComponent({
         selectionRef.current = selection;
     }, [selection]);
 
+    const resetVoiceCapture = useCallback(() => {
+        voiceStartPendingRef.current = false;
+        voiceLocaleResolutionRef.current = null;
+        voiceCaptureRef.current = {
+            active: false,
+            baseInput: "",
+            baseSelection: { start: 0, end: 0 },
+            transcript: "",
+        };
+        setVoiceState("idle");
+    }, []);
+
+    const stopVoiceCapture = useCallback((showErrorAlert: boolean) => {
+        if (voiceState === "idle" && !voiceStartPendingRef.current) {
+            return;
+        }
+
+        try {
+            ExpoSpeechRecognitionModule.abort();
+            resetVoiceCapture();
+        } catch (error) {
+            resetVoiceCapture();
+            if (!showErrorAlert) {
+                return;
+            }
+
+            const message = error instanceof Error ? error.message : String(error);
+            Alert.alert("Could not stop voice input", message);
+        }
+    }, [resetVoiceCapture, voiceState]);
+
     const handleSend = useCallback(
         (mode: SendMode) => {
             const trimmed = input.trim();
@@ -1126,12 +1157,14 @@ function ChatInputComponent({
                 signature: sendSignature,
                 sentAt: now,
             };
+
+            stopVoiceCapture(false);
             const currentImages = [...images];
             setInput("");
             setImages([]);
             onSend(trimmed, currentImages, mode);
         },
-        [input, disabled, images, onSend]
+        [input, disabled, images, onSend, stopVoiceCapture]
     );
 
     useEffect(() => {
@@ -1216,18 +1249,6 @@ function ChatInputComponent({
                 usedFallback: false,
             };
         }
-    }, []);
-
-    const resetVoiceCapture = useCallback(() => {
-        voiceStartPendingRef.current = false;
-        voiceLocaleResolutionRef.current = null;
-        voiceCaptureRef.current = {
-            active: false,
-            baseInput: "",
-            baseSelection: { start: 0, end: 0 },
-            transcript: "",
-        };
-        setVoiceState("idle");
     }, []);
 
     useSpeechRecognitionEvent("start", () => {
@@ -1315,29 +1336,14 @@ function ChatInputComponent({
         }
     }, [disabled, resetVoiceCapture, resolveActiveSpeechLocale, voiceAvailable, voiceState]);
 
-    const stopVoiceInput = useCallback(() => {
-        if (voiceState === "idle" && !voiceStartPendingRef.current) {
-            return;
-        }
-
-        try {
-            ExpoSpeechRecognitionModule.abort();
-            resetVoiceCapture();
-        } catch (error) {
-            resetVoiceCapture();
-            const message = error instanceof Error ? error.message : String(error);
-            Alert.alert("Could not stop voice input", message);
-        }
-    }, [resetVoiceCapture, voiceState]);
-
     const handleVoiceToggle = useCallback(() => {
         if (voiceState === "idle") {
             void startVoiceInput();
             return;
         }
 
-        stopVoiceInput();
-    }, [startVoiceInput, stopVoiceInput, voiceState]);
+        stopVoiceCapture(true);
+    }, [startVoiceInput, stopVoiceCapture, voiceState]);
 
     const activeToken = useMemo<AutocompleteToken>(
         () => detectAutocompleteToken(input, selection.start),
@@ -1907,48 +1913,54 @@ function ChatInputComponent({
 
                     <View style={toolbarStyles.spacer} />
 
-                    {(contextUsageLabel !== null || contextWindowLabel !== null) && (
-                        <Pressable
-                            style={toolbarStyles.contextMeterBtn}
-                            onPress={() => setShowContextWindowSheet(true)}
-                            accessibilityLabel="Show context window details"
-                        >
-                            <Svg width={18} height={18} viewBox="0 0 18 18">
-                                <Circle
-                                    cx={9}
-                                    cy={9}
-                                    r={contextMeterRadius}
-                                    stroke={theme.colors.border}
-                                    strokeWidth={1.8}
-                                    fill="none"
-                                />
-                                <Circle
-                                    cx={9}
-                                    cy={9}
-                                    r={contextMeterRadius}
-                                    stroke={theme.colors.textPrimary}
-                                    strokeWidth={1.8}
-                                    fill="none"
-                                    strokeDasharray={`${contextMeterStroke} ${contextMeterCircumference}`}
-                                    transform="rotate(-90 9 9)"
-                                    strokeLinecap="round"
-                                />
-                            </Svg>
-                        </Pressable>
-                    )}
+                    <View style={toolbarStyles.trailingControls}>
+                        <View style={toolbarStyles.contextMeterSlot}>
+                            {(contextUsageLabel !== null || contextWindowLabel !== null) && (
+                                <Pressable
+                                    style={toolbarStyles.contextMeterBtn}
+                                    onPress={() => setShowContextWindowSheet(true)}
+                                    accessibilityLabel="Show context window details"
+                                >
+                                    <Svg width={18} height={18} viewBox="0 0 18 18">
+                                        <Circle
+                                            cx={9}
+                                            cy={9}
+                                            r={contextMeterRadius}
+                                            stroke={theme.colors.border}
+                                            strokeWidth={1.8}
+                                            fill="none"
+                                        />
+                                        <Circle
+                                            cx={9}
+                                            cy={9}
+                                            r={contextMeterRadius}
+                                            stroke={theme.colors.textPrimary}
+                                            strokeWidth={1.8}
+                                            fill="none"
+                                            strokeDasharray={`${contextMeterStroke} ${contextMeterCircumference}`}
+                                            transform="rotate(-90 9 9)"
+                                            strokeLinecap="round"
+                                        />
+                                    </Svg>
+                                </Pressable>
+                            )}
+                        </View>
 
-                    {/* Send / Abort / Queue */}
-                    <ToolbarSendControls
-                        canSend={canSend}
-                        isTyping={isTyping}
-                        isAbortPending={isAbortPending}
-                        onAbort={onAbort}
-                        onDefaultSend={handleDefaultSend}
-                        onDirectSend={handleDirectSend}
-                        onToggleSendMenu={handleToggleSendMenu}
-                        onSelectSendMode={handleSendModeSelect}
-                        showSendMenu={showSendMenu}
-                    />
+                        <View style={toolbarStyles.sendControlSlot}>
+                            {/* Send / Abort / Queue */}
+                            <ToolbarSendControls
+                                canSend={canSend}
+                                isTyping={isTyping}
+                                isAbortPending={isAbortPending}
+                                onAbort={onAbort}
+                                onDefaultSend={handleDefaultSend}
+                                onDirectSend={handleDirectSend}
+                                onToggleSendMenu={handleToggleSendMenu}
+                                onSelectSendMode={handleSendModeSelect}
+                                showSendMenu={showSendMenu}
+                            />
+                        </View>
+                    </View>
                 </View>
             </View>
 

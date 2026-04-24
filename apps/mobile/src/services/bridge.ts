@@ -64,7 +64,9 @@ const DELETE_SESSION_PER_ITEM_TIMEOUT_MS = 300;
 const DELETE_SESSION_REFRESH_INTERVAL_MS = 300;
 const DELETE_SESSION_SEND_DELAY_MS = 40;
 const WORKSPACE_GIT_SUMMARY_THROTTLE_MS = 8_000;
+const WORKSPACE_BRANCH_RESPONSE_TIMEOUT_MS = 12_000;
 const workspaceGitSummaryRequestTimestamps = new Map<string, number>();
+let workspaceBranchResponseTimer: ReturnType<typeof setTimeout> | null = null;
 
 export type RemoteDeleteSessionsResult = {
     deletedSessionIds: ReadonlyArray<string>;
@@ -77,6 +79,23 @@ function mapPresenceState(nextAppState: AppStateStatus): NotificationPresenceSta
     }
 
     return "background";
+}
+
+function armWorkspaceBranchResponseTimeout(): void {
+    if (workspaceBranchResponseTimer !== null) {
+        clearTimeout(workspaceBranchResponseTimer);
+    }
+
+    workspaceBranchResponseTimer = setTimeout(() => {
+        workspaceBranchResponseTimer = null;
+        const workspaceStore = getBridgeWorkspaceState();
+        if (!workspaceStore.isSwitchingBranch) {
+            return;
+        }
+
+        workspaceStore.setBranchSwitching(false);
+        workspaceStore.setError("Branch update timed out. Reopen the branch menu and try again.");
+    }, WORKSPACE_BRANCH_RESPONSE_TIMEOUT_MS);
 }
 
 async function syncRemoteNotificationRegistrationInternal(
@@ -751,6 +770,7 @@ export async function switchWorkspaceBranch(sessionId: string, branchName: strin
     const c = getClient();
     const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setBranchSwitching(true);
+    armWorkspaceBranchResponseTimeout();
     try {
         await c.sendMessage("workspace.branch.switch", {
             sessionId,
@@ -760,6 +780,24 @@ export async function switchWorkspaceBranch(sessionId: string, branchName: strin
         workspaceStore.setBranchSwitching(false);
         workspaceStore.setError(
             `Failed to switch branch: ${error instanceof Error ? error.message : String(error)}`
+        );
+    }
+}
+
+export async function createWorkspaceBranch(sessionId: string, branchName: string): Promise<void> {
+    const c = getClient();
+    const workspaceStore = getBridgeWorkspaceState();
+    workspaceStore.setBranchSwitching(true);
+    armWorkspaceBranchResponseTimeout();
+    try {
+        await c.sendMessage("workspace.branch.create", {
+            sessionId,
+            branchName,
+        });
+    } catch (error) {
+        workspaceStore.setBranchSwitching(false);
+        workspaceStore.setError(
+            `Failed to create branch: ${error instanceof Error ? error.message : String(error)}`
         );
     }
 }

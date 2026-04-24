@@ -402,6 +402,30 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
             sessionId: payload.sessionId,
             context: payload.context,
             branch: payload.success ? payload.branchName : state.branch,
+            branches: payload.success
+                ? (() => {
+                    const existingBranch = state.branches.find((branch) => branch.name === payload.branchName);
+                    const nextBranches = state.branches.map((branch) => ({
+                        ...branch,
+                        current: branch.name === payload.branchName,
+                    }));
+
+                    if (existingBranch !== undefined) {
+                        return nextBranches;
+                    }
+
+                    return [
+                        ...nextBranches.map((branch) => ({ ...branch, current: false })),
+                        {
+                            name: payload.branchName,
+                            current: true,
+                        },
+                    ];
+                })()
+                : state.branches,
+            uncommittedChanges: payload.success ? [] : state.uncommittedChanges,
+            recentCommits: payload.success ? [] : state.recentCommits,
+            isLoadingGit: payload.success,
             isSwitchingBranch: false,
             operationMessage: payload.success
                 ? (payload.message ?? `Switched to ${payload.branchName}`)
