@@ -28,6 +28,7 @@ Kendi Mac'inizde çalışan kodlama oturumunu telefonunuzdan kullanmanızı sağ
 - macOS çalışan bir bilgisayar
 - Node.js ≥ 20
 - pnpm ≥ 9
+- OpenSSL — TLS sertifikası üretimi için gereklidir (doğrudan eşleştirme). macOS için: `brew install openssl`; Debian/Ubuntu için: `sudo apt-get install openssl`. Alternatif olarak manuel olarak `cert.pem` ve `key.pem` dosyalarını `~/.code-companion/` dizinine yerleştirebilirsiniz.
 - GitHub Copilot hesabı ve masaüstünde giriş yapılmış Copilot CLI
 - iOS veya Android cihaz
 - Dış ağ erişimi için public bir relay/control-plane deployment'ı
