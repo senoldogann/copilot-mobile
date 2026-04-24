@@ -3,22 +3,27 @@
     "version": "0.1.0",
     "type": "module",
     "main": "./dist/index.js",
+    "react-native": "./src/index.native.ts",
     "types": "./dist/index.d.ts",
     "exports": {
         ".": {
+            "react-native": "./src/index.native.ts",
             "types": "./dist/index.d.ts",
             "import": "./dist/index.js",
             "default": "./dist/index.js"
         },
         "./protocol": {
+            "react-native": "./src/protocol.ts",
             "types": "./dist/protocol.d.ts",
             "import": "./dist/protocol.js"
         },
         "./schemas": {
+            "react-native": "./src/schemas.ts",
             "types": "./dist/schemas.d.ts",
             "import": "./dist/schemas.js"
         },
         "./adapter": {
+            "react-native": "./src/adapter.native.ts",
             "types": "./dist/adapter.d.ts",
             "import": "./dist/adapter.js"
         }
