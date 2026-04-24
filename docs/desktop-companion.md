@@ -7,7 +7,7 @@ This is the current macOS-first desktop companion flow for Code Companion.
 The desktop side should feel like:
 
 1. Install the iPhone app.
-2. Install the desktop CLI with `npm install -g code-companion`.
+2. Install the desktop CLI with `npm install -g @senoldogann/code-companion`.
 3. Run `code-companion login` once.
 4. Run `code-companion up`.
 5. Scan the QR from the local dashboard.

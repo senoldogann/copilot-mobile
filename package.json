@@ -1,5 +1,5 @@
 {
-    "name": "code-companion",
+    "name": "@senoldogann/code-companion",
     "version": "0.1.0",
     "type": "module",
     "bin": {

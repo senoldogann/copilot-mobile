@@ -20,7 +20,7 @@ This note tracks the current App Store review risk for the iPhone app and the co
 
 - The app now has an in-app setup guide that clearly says a Mac companion is required.
 - The setup guide explains the exact Mac commands:
-  - `npm install -g code-companion`
+  - `npm install -g @senoldogann/code-companion`
   - `code-companion login`
   - `code-companion up`
 - The store-facing mobile app name has been moved to `Code Companion` to reduce third-party trademark risk.
@@ -110,7 +110,7 @@ This iPhone app is a companion client for a user-owned Mac.
 
 How to review:
 1. On the Mac, install the desktop companion with:
-   npm install -g code-companion
+   npm install -g @senoldogann/code-companion
 2. Sign in on the Mac:
    code-companion login
 3. Start the companion and display the pairing QR:

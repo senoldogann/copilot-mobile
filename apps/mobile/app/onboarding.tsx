@@ -64,7 +64,7 @@ const slides: ReadonlyArray<OnboardingSlide> = [
         note: "Use the same Mac later when you want to resume sessions.",
         icon: "terminal",
         commands: [
-            "npm install -g code-companion",
+            "npm install -g @senoldogann/code-companion",
             "code-companion login",
             "code-companion up",
         ],

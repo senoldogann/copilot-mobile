@@ -34,7 +34,7 @@ Kendi Mac'inizde çalışan kodlama oturumunu telefonunuzdan kullanmanızı sağ
 
 Son kullanıcı akışında ekstra masaüstü kurulumu şudur:
 
-1. Mac'e `npm install -g code-companion`
+1. Mac'e `npm install -g @senoldogann/code-companion`
 2. Bir kez `code-companion login`
 3. Servisi başlatmak için `code-companion up`
 4. Telefonda QR taratıp eşleştirmek
@@ -55,7 +55,7 @@ pnpm install
 Global npm kurulumunda hedef akış:
 
 ```bash
-npm install -g code-companion
+npm install -g @senoldogann/code-companion
 code-companion login
 code-companion up
 code-companion doctor

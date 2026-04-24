@@ -74,7 +74,7 @@ The iPhone app is a companion client for a user-owned Mac.
 
 Review setup:
 1. On the Mac, install the desktop companion:
-   npm install -g code-companion
+   npm install -g @senoldogann/code-companion
 2. Sign in on the Mac:
    code-companion login
 3. Start the Mac companion and show the pairing QR:

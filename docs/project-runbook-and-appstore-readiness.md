@@ -60,7 +60,7 @@ If the phone shows `No script URL provided`, Metro is not reachable. Check:
 Target end-user flow:
 
 ```bash
-npm install -g code-companion
+npm install -g @senoldogann/code-companion
 code-companion login
 code-companion up
 code-companion doctor
@@ -196,7 +196,7 @@ Current state: internal production-validation ready, but not yet claimable as pu
 
 Required outcome:
 
-- users install `code-companion` globally with npm
+- users install `@senoldogann/code-companion` globally with npm
 - users run `code-companion login` once
 - users run `code-companion up`
 - `code-companion doctor` returns `ready`
