@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { createServer as createHttpServer } from "node:http";
 import { appendFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
@@ -27,9 +29,6 @@ import { generatePairingToken, clearPairingToken } from "../../src/auth/pairing.
 import { clearRateLimitState } from "../../src/utils/rate-limit.js";
 import { resetSeq } from "../../src/utils/message.js";
 
-const TEST_PORT = 29877;
-const WORKSPACE_TEST_PORT = 29878;
-const WORKSPACE_LIMIT_PORT = 29879;
 const TEST_TIMEOUT_MS = 5_000;
 const execFileAsync = promisify(execFileCallback);
 
@@ -62,6 +61,29 @@ function wait(delayMs: number): Promise<void> {
     return new Promise((resolve) => {
         setTimeout(resolve, delayMs);
     });
+}
+
+async function listenHttpServer(server: ReturnType<typeof createHttpServer>): Promise<number> {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+        throw new Error("Failed to read listening address");
+    }
+    return address.port;
+}
+
+async function reservePort(): Promise<number> {
+    const server = createHttpServer((_req, res) => {
+        res.writeHead(404);
+        res.end();
+    });
+    try {
+        return await listenHttpServer(server);
+    } finally {
+        server.close();
+        await once(server, "close");
+    }
 }
 
 async function fetchManagement(port: number, path: string): Promise<Response> {
@@ -444,9 +466,11 @@ async function createPlainWorkspaceFixture(): Promise<{ root: string }> {
 describe("bridge reconnect and auth integration", () => {
     let session: FakeSession;
     let server: ReturnType<typeof createBridgeServer>;
+    let testPort = 0;
 
     beforeEach(async () => {
-        process.env["BRIDGE_PORT"] = String(TEST_PORT);
+        testPort = await reservePort();
+        process.env["BRIDGE_PORT"] = String(testPort);
         session = new FakeSession();
         session.setHistory([
             {
@@ -469,7 +493,7 @@ describe("bridge reconnect and auth integration", () => {
     });
 
     it("sanitizes client validation errors", async () => {
-        const client = await createWSClient(TEST_PORT);
+        const client = await createWSClient(testPort);
 
         try {
             client.send(makeClientMessage("session.create", {
@@ -494,7 +518,7 @@ describe("bridge reconnect and auth integration", () => {
     });
 
     it("serves the localhost dashboard and status endpoints", async () => {
-        const statusResponse = await fetchManagement(TEST_PORT, "/__copilot_mobile/status");
+        const statusResponse = await fetchManagement(testPort, "/__copilot_mobile/status");
         assert.equal(statusResponse.status, 200);
 
         const statusPayload = await statusResponse.json() as {
@@ -503,10 +527,10 @@ describe("bridge reconnect and auth integration", () => {
                 publicUrl: string;
             };
         };
-        assert.equal(statusPayload.status.port, TEST_PORT);
-        assert.equal(statusPayload.status.publicUrl, `ws://127.0.0.1:${TEST_PORT}`);
+        assert.equal(statusPayload.status.port, testPort);
+        assert.equal(statusPayload.status.publicUrl, `ws://127.0.0.1:${testPort}`);
 
-        const dashboardResponse = await fetchManagement(TEST_PORT, "/__copilot_mobile/dashboard");
+        const dashboardResponse = await fetchManagement(testPort, "/__copilot_mobile/dashboard");
         assert.equal(dashboardResponse.status, 200);
         assert.equal(
             dashboardResponse.headers.get("content-type")?.includes("text/html"),
@@ -521,7 +545,7 @@ describe("bridge reconnect and auth integration", () => {
 
     it("keeps the authenticated client active until a replacement authenticates", async () => {
         const token = generatePairingToken();
-        const clientA = await createWSClient(TEST_PORT);
+        const clientA = await createWSClient(testPort);
 
         try {
             clientA.send(makeClientMessage("auth.pair", {
@@ -540,7 +564,7 @@ describe("bridge reconnect and auth integration", () => {
             }));
             await clientA.waitForMessage("session.created");
 
-            const clientB = await createWSClient(TEST_PORT);
+            const clientB = await createWSClient(testPort);
             try {
                 session.emitAssistantMessage("still connected");
                 const assistantMessage = await clientA.waitForMessage("assistant.message");
@@ -560,7 +584,7 @@ describe("bridge reconnect and auth integration", () => {
 
     it("rate limits repeated auth.resume attempts from the same client ip", async () => {
         const token = generatePairingToken();
-        const pairedClient = await createWSClient(TEST_PORT);
+        const pairedClient = await createWSClient(testPort);
 
         try {
             pairedClient.send(makeClientMessage("auth.pair", {
@@ -572,7 +596,7 @@ describe("bridge reconnect and auth integration", () => {
             await pairedClient.close();
 
             for (let attempt = 0; attempt < 10; attempt += 1) {
-                const client = await createWSClient(TEST_PORT);
+                const client = await createWSClient(testPort);
                 try {
                     client.send(makeClientMessage("auth.resume", {
                         deviceCredential: pairingMessage.payload.deviceCredential,
@@ -587,7 +611,7 @@ describe("bridge reconnect and auth integration", () => {
                 }
             }
 
-            const blockedClient = await createWSClient(TEST_PORT);
+            const blockedClient = await createWSClient(testPort);
             try {
                 const closeEvent = new Promise<{ code: number; reason: string }>((resolve) => {
                     blockedClient.ws.once("close", (code, reason) => {
@@ -619,7 +643,7 @@ describe("bridge reconnect and auth integration", () => {
 
     it("replays pending permission prompts after reconnect", async () => {
         const token = generatePairingToken();
-        const clientA = await createWSClient(TEST_PORT);
+        const clientA = await createWSClient(testPort);
 
         try {
             clientA.send(makeClientMessage("auth.pair", {
@@ -647,7 +671,7 @@ describe("bridge reconnect and auth integration", () => {
             await clientA.waitForMessage("permission.request");
             await clientA.close();
 
-            const clientB = await createWSClient(TEST_PORT);
+            const clientB = await createWSClient(testPort);
             try {
                 clientB.send(makeClientMessage("auth.resume", {
                     deviceCredential: pairingMessage.payload.deviceCredential,
@@ -676,7 +700,7 @@ describe("bridge reconnect and auth integration", () => {
 
     it("does not replay stale error messages after reconnect", async () => {
         const token = generatePairingToken();
-        const clientA = await createWSClient(TEST_PORT);
+        const clientA = await createWSClient(testPort);
 
         try {
             clientA.send(makeClientMessage("auth.pair", {
@@ -694,7 +718,7 @@ describe("bridge reconnect and auth integration", () => {
             assert.equal(errorMessage.type, "error");
             await clientA.close();
 
-            const clientB = await createWSClient(TEST_PORT);
+            const clientB = await createWSClient(testPort);
             try {
                 clientB.send(makeClientMessage("auth.resume", {
                     deviceCredential: pairingMessage.payload.deviceCredential,
@@ -722,7 +746,7 @@ describe("bridge reconnect and auth integration", () => {
 
     it("replays pending prompts even when session history fetch fails during resume", async () => {
         const token = generatePairingToken();
-        const clientA = await createWSClient(TEST_PORT);
+        const clientA = await createWSClient(testPort);
 
         try {
             clientA.send(makeClientMessage("auth.pair", {
@@ -758,7 +782,7 @@ describe("bridge reconnect and auth integration", () => {
                 throw new Error("history unavailable");
             });
 
-            const clientB = await createWSClient(TEST_PORT);
+            const clientB = await createWSClient(testPort);
             try {
                 clientB.send(makeClientMessage("auth.resume", {
                     deviceCredential: pairingMessage.payload.deviceCredential,
@@ -804,7 +828,7 @@ describe("bridge reconnect and auth integration", () => {
 
     it("does not delay live resume events behind session history", async () => {
         const token = generatePairingToken();
-        const client = await createWSClient(TEST_PORT);
+        const client = await createWSClient(testPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -861,7 +885,7 @@ describe("bridge reconnect and auth integration", () => {
 
     it("cleans up session handlers explicitly when deleting a session", async () => {
         const token = generatePairingToken();
-        const client = await createWSClient(TEST_PORT);
+        const client = await createWSClient(testPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -895,9 +919,11 @@ describe("workspace explorer integration", () => {
     let session: FakeSession;
     let server: ReturnType<typeof createBridgeServer>;
     let workspaceRoot: string;
+    let workspaceTestPort = 0;
 
     beforeEach(async () => {
-        process.env["BRIDGE_PORT"] = String(WORKSPACE_TEST_PORT);
+        workspaceTestPort = await reservePort();
+        process.env["BRIDGE_PORT"] = String(workspaceTestPort);
         const fixture = await createWorkspaceFixture();
         workspaceRoot = fixture.root;
         session = new FakeSession();
@@ -923,7 +949,7 @@ describe("workspace explorer integration", () => {
 
     it("returns workspace tree listings for the active session", async () => {
         const token = generatePairingToken();
-        const client = await createWSClient(WORKSPACE_TEST_PORT);
+        const client = await createWSClient(workspaceTestPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -976,7 +1002,7 @@ describe("workspace explorer integration", () => {
 
     it("searches files within the active workspace for @file autocomplete", async () => {
         const token = generatePairingToken();
-        const client = await createWSClient(WORKSPACE_TEST_PORT);
+        const client = await createWSClient(workspaceTestPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -1016,7 +1042,7 @@ describe("workspace explorer integration", () => {
 
     it("returns git summary, supports commit, and reports safe pull/push results", async () => {
         const token = generatePairingToken();
-        const client = await createWSClient(WORKSPACE_TEST_PORT);
+        const client = await createWSClient(workspaceTestPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -1140,7 +1166,7 @@ describe("workspace explorer integration", () => {
         });
 
         const token = generatePairingToken();
-        const client = await createWSClient(WORKSPACE_TEST_PORT);
+        const client = await createWSClient(workspaceTestPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -1230,7 +1256,7 @@ describe("workspace explorer integration", () => {
         });
 
         const token = generatePairingToken();
-        const client = await createWSClient(WORKSPACE_TEST_PORT);
+        const client = await createWSClient(workspaceTestPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -1290,7 +1316,7 @@ describe("workspace explorer integration", () => {
         });
 
         const token = generatePairingToken();
-        const client = await createWSClient(WORKSPACE_TEST_PORT);
+        const client = await createWSClient(workspaceTestPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -1336,12 +1362,13 @@ describe("workspace explorer integration", () => {
             branch: "main",
         });
 
-        process.env["BRIDGE_PORT"] = String(WORKSPACE_LIMIT_PORT);
+        const workspaceLimitPort = await reservePort();
+        process.env["BRIDGE_PORT"] = String(workspaceLimitPort);
         const cappedServer = createBridgeServer(createFakeClient(cappedSession));
         await cappedServer.start();
 
         const token = generatePairingToken();
-        const client = await createWSClient(WORKSPACE_LIMIT_PORT);
+        const client = await createWSClient(workspaceLimitPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {
@@ -1395,12 +1422,13 @@ describe("workspace explorer integration", () => {
             workspaceRoot: fixture.root,
         });
 
-        process.env["BRIDGE_PORT"] = String(WORKSPACE_LIMIT_PORT);
+        const workspaceLimitPort = await reservePort();
+        process.env["BRIDGE_PORT"] = String(workspaceLimitPort);
         const plainServer = createBridgeServer(createFakeClient(plainSession));
         await plainServer.start();
 
         const token = generatePairingToken();
-        const client = await createWSClient(WORKSPACE_LIMIT_PORT);
+        const client = await createWSClient(workspaceLimitPort);
 
         try {
             client.send(makeClientMessage("auth.pair", {

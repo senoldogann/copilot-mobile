@@ -5,6 +5,8 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { createServer as createHttpServer } from "node:http";
+import { once } from "node:events";
 import WebSocket from "ws";
 import type { ServerMessage, ClientMessage } from "@copilot-mobile/shared";
 import { serverMessageSchema } from "@copilot-mobile/shared";
@@ -15,12 +17,34 @@ import { clearRateLimitState } from "../../src/utils/rate-limit.js";
 import { resetSeq } from "../../src/utils/message.js";
 import type { AdaptedCopilotClient, ModelInfo } from "@copilot-mobile/shared";
 
-const E2E_PORT = 29876;
 const E2E_TIMEOUT = 60_000; // Copilot CLI can be slow
 const LOW_COST_CHAT_MODEL_IDS: ReadonlyArray<string> = ["claude-haiku-4.5"];
 const LOW_COST_EFFORT_MODEL_IDS: ReadonlyArray<string> = ["gpt-5.4-mini", "gpt-5-mini", "gpt-5.4"];
 
 // --- Test Helpers ---
+
+async function listenHttpServer(server: ReturnType<typeof createHttpServer>): Promise<number> {
+    server.listen(0, "127.0.0.1");
+    await once(server, "listening");
+    const address = server.address();
+    if (address === null || typeof address === "string") {
+        throw new Error("Failed to read listening address");
+    }
+    return address.port;
+}
+
+async function reservePort(): Promise<number> {
+    const server = createHttpServer((_req, res) => {
+        res.writeHead(404);
+        res.end();
+    });
+    try {
+        return await listenHttpServer(server);
+    } finally {
+        server.close();
+        await once(server, "close");
+    }
+}
 
 function makeClientMsg(
     type: ClientMessage["type"],
@@ -142,9 +166,11 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
     let server: ReturnType<typeof createBridgeServer>;
     let cliAvailable = false;
     let skipReason: string | null = null;
+    let e2ePort = 0;
 
     before(async () => {
-        process.env["BRIDGE_PORT"] = String(E2E_PORT);
+        e2ePort = await reservePort();
+        process.env["BRIDGE_PORT"] = String(e2ePort);
         copilotAdapter = createCopilotAdapter();
 
         if (process.env["SKIP_COPILOT_E2E"] === "1") {
@@ -169,7 +195,7 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
 
         server = createBridgeServer(copilotAdapter);
         await server.start();
-        console.log(`✅ E2E bridge server started: ws://127.0.0.1:${E2E_PORT}`);
+        console.log(`✅ E2E bridge server started: ws://127.0.0.1:${e2ePort}`);
     });
 
     after(async () => {
@@ -197,7 +223,7 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
         }
         clearPairingToken();
         const token = generatePairingToken();
-        const client = await connectToServer(E2E_PORT);
+        const client = await connectToServer(e2ePort);
 
         try {
             // 1. Pairing
@@ -280,7 +306,7 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
         clearRateLimitState();
         clearPairingToken();
         const token = generatePairingToken();
-        const client = await connectToServer(E2E_PORT);
+        const client = await connectToServer(e2ePort);
 
         try {
             // Pair
@@ -361,7 +387,7 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
         clearRateLimitState();
         clearPairingToken();
         const token = generatePairingToken();
-        const client = await connectToServer(E2E_PORT);
+        const client = await connectToServer(e2ePort);
 
         try {
             client.send(makeClientMsg("auth.pair", {
@@ -412,7 +438,7 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
         clearRateLimitState();
         clearPairingToken();
         const token = generatePairingToken();
-        const client = await connectToServer(E2E_PORT);
+        const client = await connectToServer(e2ePort);
 
         try {
             // Pair
