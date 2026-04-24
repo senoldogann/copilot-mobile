@@ -141,10 +141,17 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
     let copilotAdapter: AdaptedCopilotClient;
     let server: ReturnType<typeof createBridgeServer>;
     let cliAvailable = false;
+    let skipReason: string | null = null;
 
     before(async () => {
         process.env["BRIDGE_PORT"] = String(E2E_PORT);
         copilotAdapter = createCopilotAdapter();
+
+        if (process.env["SKIP_COPILOT_E2E"] === "1") {
+            skipReason = "Copilot E2E disabled for this environment";
+            console.log(`⚠️  ${skipReason}`);
+            return;
+        }
 
         // Check if Copilot CLI is accessible
         try {
@@ -154,7 +161,8 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
         }
 
         if (!cliAvailable) {
-            console.log("⚠️  Copilot CLI not accessible — skipping E2E tests");
+            skipReason = "Copilot CLI not accessible";
+            console.log(`⚠️  ${skipReason} — skipping E2E tests`);
             console.log("   Sign in with gh auth login and ensure copilot CLI is installed");
             return;
         }
@@ -175,16 +183,16 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
     });
 
     it("should verify Copilot CLI connection", (t) => {
-        if (!cliAvailable) {
-            t.skip("Copilot CLI not accessible");
+        if (skipReason !== null) {
+            t.skip(skipReason);
             return;
         }
         assert.ok(cliAvailable, "Copilot CLI connection established");
     });
 
     it("QR pairing → capabilities.state → model capability normalization", async (t) => {
-        if (!cliAvailable) {
-            t.skip("Copilot CLI not accessible");
+        if (skipReason !== null) {
+            t.skip(skipReason);
             return;
         }
         clearPairingToken();
@@ -265,8 +273,8 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
     });
 
     it("should create session and send message (preferred low-cost model)", async (t) => {
-        if (!cliAvailable) {
-            t.skip("Copilot CLI not accessible");
+        if (skipReason !== null) {
+            t.skip(skipReason);
             return;
         }
         clearRateLimitState();
@@ -346,8 +354,8 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
     });
 
     it("should not send reasoningEffort for non-effort-supporting model", async (t) => {
-        if (!cliAvailable) {
-            t.skip("Copilot CLI not accessible");
+        if (skipReason !== null) {
+            t.skip(skipReason);
             return;
         }
         clearRateLimitState();
@@ -397,8 +405,8 @@ describe("Copilot E2E — Full flow with real CLI", { timeout: E2E_TIMEOUT * 2 }
     });
 
     it("should list and delete sessions", async (t) => {
-        if (!cliAvailable) {
-            t.skip("Copilot CLI not accessible");
+        if (skipReason !== null) {
+            t.skip(skipReason);
             return;
         }
         clearRateLimitState();
