@@ -778,6 +778,7 @@ export default function ChatScreen() {
         connectionState === "connecting" || connectionState === "connected";
     const inputDisabled = !isConnected || isSessionLoading;
     const isActiveSessionBusy = activeSessionId !== null && busySessions[activeSessionId] === true;
+    const isActiveTurnRunning = isTyping || isActiveSessionBusy;
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
     const activeAgentItems = useMemo(
         () => getActiveAgentItems(chatItems, isTyping),
@@ -1336,7 +1337,7 @@ export default function ChatScreen() {
                 <ChatInput
                     onSend={handleSend}
                     onAbort={handleAbort}
-                    isTyping={isTyping}
+                    isTyping={isActiveTurnRunning}
                     isAbortPending={isAbortPending}
                     disabled={inputDisabled}
                     queuedDrafts={visibleQueuedDrafts}
