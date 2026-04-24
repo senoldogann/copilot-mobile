@@ -1,6 +1,7 @@
 import type {
     AgentTodo,
     ChatItem,
+    SubagentRun,
     TodoItemStatus,
     ToolItem,
 } from "../stores/session-store-types";
@@ -748,6 +749,57 @@ export function getActiveAgentItems(
         ?.index ?? -1;
 
     return items.slice(previousUserIndex + 1);
+}
+
+export function deriveSubagentRunsFromItems(
+    currentTurnItems: ReadonlyArray<ChatItem>,
+    isAssistantTyping: boolean
+): ReadonlyArray<SubagentRun> {
+    const runMap = new Map<string, SubagentRun>();
+
+    for (const item of currentTurnItems) {
+        if (item.type !== "tool" || !isSubagentToolName(item.toolName)) {
+            continue;
+        }
+
+        runMap.set(item.requestId, {
+            requestId: item.requestId,
+            title: getSubagentDisplayName(item),
+            status: item.status === "failed"
+                ? "failed"
+                : isAssistantTyping
+                    ? "running"
+                    : item.status === "completed" || item.status === "no_results"
+                        ? "completed"
+                        : "running",
+        });
+    }
+
+    const runs = [...runMap.values()];
+    const hasRunningRun = runs.some((run) => run.status === "running");
+
+    if (hasRunningRun || (isAssistantTyping && runs.length > 0)) {
+        return runs;
+    }
+
+    return [];
+}
+
+export function areSubagentRunsEqual(
+    left: ReadonlyArray<SubagentRun>,
+    right: ReadonlyArray<SubagentRun>
+): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((run, index) => {
+        const candidate = right[index];
+        return candidate !== undefined
+            && candidate.requestId === run.requestId
+            && candidate.title === run.title
+            && candidate.status === run.status;
+    });
 }
 
 export function deriveAgentTodosFromItems(

@@ -63,6 +63,12 @@ export type AgentTodo = {
     priority?: "high" | "medium" | "low";
 };
 
+export type SubagentRun = {
+    requestId: string;
+    title: string;
+    status: "running" | "completed" | "failed";
+};
+
 export type ChatItem =
     | UserMessageItem
     | AssistantMessageItem
@@ -126,6 +132,7 @@ export type SessionStore = {
     isAbortRequested: boolean;
     currentIntent: string | null;
     agentTodos: ReadonlyArray<AgentTodo>;
+    subagentRuns: ReadonlyArray<SubagentRun>;
     permissionPrompt: PermissionPrompt | null;
     permissionPromptQueue: ReadonlyArray<PermissionPrompt>;
     deferredPermissionPrompts: Readonly<Record<string, ReadonlyArray<PermissionPrompt>>>;
@@ -190,6 +197,13 @@ export type SessionStore = {
     ) => void;
     setCurrentIntent: (intent: string | null) => void;
     setAgentTodos: (todos: ReadonlyArray<AgentTodo>) => void;
+    setSubagentRuns: (runs: ReadonlyArray<SubagentRun>) => void;
+    upsertSubagentRun: (run: SubagentRun) => void;
+    updateSubagentRunStatus: (
+        requestId: string,
+        status: SubagentRun["status"]
+    ) => void;
+    clearSubagentRuns: () => void;
     receivePermissionPrompt: (prompt: PermissionPrompt) => void;
     enqueuePermissionPrompt: (prompt: PermissionPrompt) => void;
     resolvePermissionPrompt: (requestId: string) => void;

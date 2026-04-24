@@ -139,7 +139,6 @@ export function createSessionManager(
     const sessionStates = new Map<string, SessionBehaviorState>();
     const abortedSessionIds = new Set<string>();
     const busyWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>();
-    const MAX_QUEUED_RESUME_MESSAGES = 200;
     let autoApproveReads = false;
     // Latest observed host session capabilities — merged per session.
     // Currently holds the value for the single active session model.
@@ -307,18 +306,6 @@ export function createSessionManager(
             runtimeMode: nextState.runtimeMode,
             busy: existingBusy,
         };
-    }
-
-    function isLiveSessionActivityMessage(type: ServerMessage["type"]): boolean {
-        return type === "assistant.message_delta"
-            || type === "assistant.reasoning_delta"
-            || type === "assistant.message"
-            || type === "assistant.reasoning"
-            || type === "assistant.intent"
-            || type === "tool.execution_start"
-            || type === "tool.execution_partial_result"
-            || type === "tool.execution_progress"
-            || type === "tool.execution_complete";
     }
 
     function createPermissionTimeout(
@@ -811,29 +798,12 @@ export function createSessionManager(
                 if (typeof resumedTitle === "string" && resumedTitle.trim().length > 0) {
                     completionNotifier.updateSessionTitle(session.id, resumedTitle);
                 }
-                let historyFetchStarted = false;
-                let historyDelivered = false;
-                let historyFetchDelayTimer: ReturnType<typeof setTimeout> | null = null;
-                const queuedResumeMessages: Array<ServerMessage> = [];
-
                 if (previousSession !== undefined && previousSession !== session) {
                     previousSession.unsubscribeAll();
                 }
 
-                // Clear previous listeners before re-wiring to avoid duplicate events after reconnect.
                 session.unsubscribeAll();
-                wireSessionEvents(session, (message) => {
-                    if (isLiveSessionActivityMessage(message.type)) {
-                        if (!historyDelivered) {
-                            if (queuedResumeMessages.length >= MAX_QUEUED_RESUME_MESSAGES) {
-                                queuedResumeMessages.shift();
-                            }
-                            queuedResumeMessages.push(message);
-                            return;
-                        }
-                    }
-                    send(message);
-                });
+                wireSessionEvents(session);
 
                 lastHostCapabilities = session.getCapabilities();
                 const resumedState = await session.getState(
@@ -850,57 +820,26 @@ export function createSessionManager(
                 emitCapabilitiesState();
                 emitSessionState(session.id);
 
-                const fetchHistory = (): void => {
-                    if (historyFetchStarted) {
-                        return;
-                    }
-
-                    historyFetchStarted = true;
-                    if (historyFetchDelayTimer !== null) {
-                        clearTimeout(historyFetchDelayTimer);
-                        historyFetchDelayTimer = null;
-                    }
-
-                    void session.getHistory()
-                        .then((history: ReadonlyArray<SessionHistoryItem>) => {
-                            send({
-                                ...makeBase(),
-                                type: "session.history",
-                                payload: {
-                                    sessionId: session.id,
-                                    items: history,
-                                },
-                            });
-                            historyDelivered = true;
-                            while (queuedResumeMessages.length > 0) {
-                                const queuedMessage = queuedResumeMessages.shift();
-                                if (queuedMessage !== undefined) {
-                                    send(queuedMessage);
-                                }
-                            }
-                        })
-                        .catch((error: unknown) => {
-                            console.warn("[session-manager] Failed to fetch session history during resume", {
+                void session.getHistory()
+                    .then((history: ReadonlyArray<SessionHistoryItem>) => {
+                        send({
+                            ...makeBase(),
+                            type: "session.history",
+                            payload: {
                                 sessionId: session.id,
-                                error: error instanceof Error ? error.message : String(error),
-                            });
-                            historyDelivered = true;
-                            while (queuedResumeMessages.length > 0) {
-                                const queuedMessage = queuedResumeMessages.shift();
-                                if (queuedMessage !== undefined) {
-                                    send(queuedMessage);
-                                }
-                            }
-                        })
-                        .finally(() => {
-                            replayPendingPrompts(session.id);
+                                items: history,
+                            },
                         });
-                };
-
-                historyFetchDelayTimer = setTimeout(() => {
-                    historyFetchDelayTimer = null;
-                    fetchHistory();
-                }, 350);
+                    })
+                    .catch((error: unknown) => {
+                        console.warn("[session-manager] Failed to fetch session history during resume", {
+                            sessionId: session.id,
+                            error: error instanceof Error ? error.message : String(error),
+                        });
+                    })
+                    .finally(() => {
+                        replayPendingPrompts(session.id);
+                    });
             } catch (err) {
                 if (isSessionNotFoundResumeError(err)) {
                     const errorMessage = err instanceof Error ? err.message : "Session not found";

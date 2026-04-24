@@ -28,7 +28,12 @@ import {
     consumeSessionPrefetchHistory,
     consumeSessionPrefetchResume,
 } from "./session-prefetch";
-import { extractAgentTodosFromArgumentsText } from "../utils/tool-introspection";
+import {
+    deriveSubagentRunsFromItems,
+    extractAgentTodosFromArgumentsText,
+    getSubagentDisplayName,
+    isSubagentToolName,
+} from "../utils/tool-introspection";
 
 let transientConnectionErrorTimer: ReturnType<typeof setTimeout> | null = null;
 const ASSISTANT_DELTA_BATCH_WINDOW_MS = 40;
@@ -675,13 +680,14 @@ function restoreCachedConversationForMissingSession(missingSessionId: string): b
     sessionStore.setAssistantTyping(false);
     sessionStore.setSessionBusy(missingSessionId, false);
     sessionStore.setAgentTodos([]);
+    sessionStore.clearSubagentRuns();
     sessionStore.clearPermissionPrompts();
     sessionStore.setUserInputPrompt(null);
     sessionStore.setPlanExitPrompt(null);
     chatHistoryStore.setActiveConversation(linkedConversation.id);
-    sessionStore.replaceChatItems(
-        chatHistoryStore.getConversationItems(linkedConversation.id)
-    );
+    const restoredItems = chatHistoryStore.getConversationItems(linkedConversation.id);
+    sessionStore.replaceChatItems(restoredItems);
+    sessionStore.setSubagentRuns(deriveSubagentRunsFromItems(restoredItems, false));
     sessionStore.removeSession(missingSessionId);
     connectionStore.setError(null);
     return true;
@@ -724,6 +730,7 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setAbortRequested(false);
             sessionStore.clearSessionBusy(message.payload.session.id);
             sessionStore.upsertSession(message.payload.session);
+            sessionStore.clearSubagentRuns();
             clearBackgroundCompletion(message.payload.session.id);
             clearSystemNotificationStreamState(message.payload.session.id);
 
@@ -781,6 +788,9 @@ export function handleServerMessage(message: ServerMessage): void {
             const localItems = chatHistoryStore.getConversationItems(conversationId);
             if (localItems.length > 0) {
                 sessionStore.replaceChatItems(localItems);
+                sessionStore.setSubagentRuns(deriveSubagentRunsFromItems(localItems, false));
+            } else {
+                sessionStore.clearSubagentRuns();
             }
             requestWorkspaceSnapshot(message.payload.session.id);
             break;
@@ -808,6 +818,7 @@ export function handleServerMessage(message: ServerMessage): void {
                 sessionStore.settleRunningTools("completed");
                 sessionStore.finalizeThinking();
             }
+            sessionStore.clearSubagentRuns();
             break;
         }
 
@@ -842,13 +853,17 @@ export function handleServerMessage(message: ServerMessage): void {
                 break;
             }
             if (sessionStore.chatItems.length > 0) {
-                sessionStore.replaceChatItems(
-                    mergeHistoryIntoExistingItems(sessionStore.chatItems, message.payload.items)
+                const mergedItems = mergeHistoryIntoExistingItems(sessionStore.chatItems, message.payload.items);
+                sessionStore.replaceChatItems(mergedItems);
+                sessionStore.setSubagentRuns(
+                    deriveSubagentRunsFromItems(mergedItems, sessionStore.isAssistantTyping)
                 );
                 break;
             }
-            sessionStore.replaceChatItems(
-                message.payload.items.map(mapHistoryItemToChatItem)
+            const historyItems = message.payload.items.map(mapHistoryItemToChatItem);
+            sessionStore.replaceChatItems(historyItems);
+            sessionStore.setSubagentRuns(
+                deriveSubagentRunsFromItems(historyItems, sessionStore.isAssistantTyping)
             );
             break;
         }
@@ -887,13 +902,24 @@ export function handleServerMessage(message: ServerMessage): void {
         case "tool.execution_start": {
             if (!isActiveSession(message.payload.sessionId)) break;
             sessionStore.setAssistantTyping(true);
+            const formattedArguments = formatToolArguments(message.payload.arguments);
             sessionStore.addToolStart(
                 message.payload.requestId,
                 message.payload.toolName,
-                formatToolArguments(message.payload.arguments),
+                formattedArguments,
             );
+            if (isSubagentToolName(message.payload.toolName)) {
+                sessionStore.upsertSubagentRun({
+                    requestId: message.payload.requestId,
+                    title: getSubagentDisplayName({
+                        toolName: message.payload.toolName,
+                        ...(formattedArguments !== undefined ? { argumentsText: formattedArguments } : {}),
+                    }),
+                    status: "running",
+                });
+            }
             const parsedTodos = extractAgentTodosFromArgumentsText(
-                formatToolArguments(message.payload.arguments)
+                formattedArguments
             );
             if (parsedTodos !== null) {
                 sessionStore.setAgentTodos(parsedTodos);
@@ -926,6 +952,12 @@ export function handleServerMessage(message: ServerMessage): void {
                 createToolPartialBufferKey(message.payload.sessionId, message.payload.requestId)
             );
             if (!isActiveSession(message.payload.sessionId)) break;
+            sessionStore.updateSubagentRunStatus(
+                message.payload.requestId,
+                (message.payload.completionStatus ?? (message.payload.success ? "completed" : "failed")) === "failed"
+                    ? "failed"
+                    : "completed"
+            );
             sessionStore.updateToolStatus(
                 message.payload.requestId,
                 message.payload.completionStatus
@@ -1005,6 +1037,7 @@ export function handleServerMessage(message: ServerMessage): void {
                 sessionStore.setSessionLoading(false);
                 sessionStore.setAssistantTyping(false);
                 sessionStore.setAgentTodos([]);
+                sessionStore.clearSubagentRuns();
                 sessionStore.clearPermissionPrompts();
                 sessionStore.setUserInputPrompt(null);
                 sessionStore.setPlanExitPrompt(null);
@@ -1038,6 +1071,7 @@ export function handleServerMessage(message: ServerMessage): void {
                 sessionStore.setSessionBusy(sessionStore.activeSessionId, false);
             }
             sessionStore.setAgentTodos([]);
+            sessionStore.clearSubagentRuns();
             // Clear open dialogs after a fatal error so they do not stay stuck onscreen.
             sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
@@ -1123,6 +1157,7 @@ export function handleServerMessage(message: ServerMessage): void {
                         sessionStore.setAgentTodos([]);
                         sessionStore.settleRunningTools("completed");
                         sessionStore.finalizeThinking();
+                        sessionStore.clearSubagentRuns();
                     }
                 }
                 sessionStore.setAssistantTyping(message.payload.busy);
@@ -1148,6 +1183,7 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setAssistantTyping(false);
             sessionStore.setAbortRequested(false);
             sessionStore.setAgentTodos([]);
+            sessionStore.clearSubagentRuns();
             sessionStore.clearPermissionPrompts();
             sessionStore.setUserInputPrompt(null);
             sessionStore.setPlanExitPrompt(null);

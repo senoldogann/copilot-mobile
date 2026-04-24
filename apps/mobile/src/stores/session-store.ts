@@ -8,6 +8,7 @@ import type {
     AssistantMessageItem,
     PermissionPrompt,
     SessionStore,
+    SubagentRun,
     SystemNotificationItem,
     SessionUsage,
     ThinkingItem,
@@ -38,6 +39,7 @@ export type {
     PermissionPrompt,
     PlanExitPrompt,
     SessionStore,
+    SubagentRun,
     SystemNotificationItem,
     SessionUsage,
     ThinkingItem,
@@ -48,6 +50,23 @@ export type {
 } from "./session-store-types";
 
 const MAX_TOOL_PROGRESS_MESSAGES = 40;
+
+function areSubagentRunsEqual(
+    left: ReadonlyArray<SubagentRun>,
+    right: ReadonlyArray<SubagentRun>
+): boolean {
+    if (left.length !== right.length) {
+        return false;
+    }
+
+    return left.every((run, index) => {
+        const candidate = right[index];
+        return candidate !== undefined
+            && candidate.requestId === run.requestId
+            && candidate.title === run.title
+            && candidate.status === run.status;
+    });
+}
 
 export const useSessionStore = create<SessionStore>((set) => ({
     activeSessionId: null,
@@ -70,6 +89,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
     isAbortRequested: false,
     currentIntent: null,
     agentTodos: [],
+    subagentRuns: [],
 
     permissionPrompt: null,
     permissionPromptQueue: [],
@@ -116,6 +136,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
                 activeSessionId: sessionId,
                 isAbortRequested: false,
                 agentTodos: [],
+                subagentRuns: [],
                 permissionPrompt: nextPermissionPrompt ?? null,
                 permissionPromptQueue: nextPermissionPromptQueue,
                 deferredPermissionPrompts: nextDeferredPermissionPrompts,
@@ -172,6 +193,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
                 sessions: state.sessions.filter((session) => session.id !== sessionId),
                 activeSessionId: nextActiveSessionId,
                 ...(state.activeSessionId === sessionId ? { isAbortRequested: false } : {}),
+                ...(state.activeSessionId === sessionId ? { subagentRuns: [] } : {}),
                 sessionUsage: nextUsage,
                 busySessions: nextBusySessions,
                 deferredPermissionPrompts: nextDeferredPermissionPrompts,
@@ -464,6 +486,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
                 busySessions: nextBusySessions,
                 currentIntent: null,
                 agentTodos: [],
+                subagentRuns: [],
                 permissionPrompt: null,
                 permissionPromptQueue: [],
                 userInputPrompt: null,
@@ -474,6 +497,52 @@ export const useSessionStore = create<SessionStore>((set) => ({
     setCurrentIntent: (intent) => set({ currentIntent: intent }),
 
     setAgentTodos: (todos) => set({ agentTodos: todos }),
+
+    setSubagentRuns: (runs) =>
+        set((state) => areSubagentRunsEqual(state.subagentRuns, runs)
+            ? state
+            : { subagentRuns: [...runs] }),
+
+    upsertSubagentRun: (run) =>
+        set((state) => {
+            const existingIndex = state.subagentRuns.findIndex((item) => item.requestId === run.requestId);
+            if (existingIndex === -1) {
+                return { subagentRuns: [...state.subagentRuns, run] };
+            }
+
+            const existingRun = state.subagentRuns[existingIndex];
+            if (
+                existingRun !== undefined
+                && existingRun.title === run.title
+                && existingRun.status === run.status
+            ) {
+                return state;
+            }
+
+            const nextRuns = [...state.subagentRuns];
+            nextRuns[existingIndex] = run;
+            return { subagentRuns: nextRuns };
+        }),
+
+    updateSubagentRunStatus: (requestId, status) =>
+        set((state) => {
+            const existingIndex = state.subagentRuns.findIndex((item) => item.requestId === requestId);
+            if (existingIndex === -1) {
+                return state;
+            }
+
+            const existingRun = state.subagentRuns[existingIndex];
+            if (existingRun === undefined || existingRun.status === status) {
+                return state;
+            }
+
+            const nextRuns = [...state.subagentRuns];
+            nextRuns[existingIndex] = { ...existingRun, status };
+            return { subagentRuns: nextRuns };
+        }),
+
+    clearSubagentRuns: () =>
+        set((state) => state.subagentRuns.length === 0 ? state : { subagentRuns: [] }),
 
     appendThinkingDelta: (delta, _index) => {
         set((s) => {
@@ -935,6 +1004,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             isAssistantTyping: false,
             isAbortRequested: false,
             agentTodos: [],
+            subagentRuns: [],
             permissionPrompt: null,
             permissionPromptQueue: [],
             userInputPrompt: null,
@@ -949,6 +1019,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             isAbortRequested: false,
             currentIntent: null,
             agentTodos: [],
+            subagentRuns: [],
             permissionPrompt: null,
             permissionPromptQueue: [],
             deferredPermissionPrompts: {},
@@ -981,6 +1052,7 @@ export const useSessionStore = create<SessionStore>((set) => ({
             isAbortRequested: false,
             currentIntent: null,
             agentTodos: [],
+            subagentRuns: [],
             permissionPrompt: null,
             permissionPromptQueue: [],
             deferredPermissionPrompts: {},

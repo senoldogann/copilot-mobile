@@ -644,6 +644,63 @@ function parseGitLog(stdout: string): Array<GitCommitSummary> {
     });
 }
 
+function mapCommitToWorkspaceScope(
+    commit: GitCommitSummary,
+    workspaceRoot: string,
+    gitRoot: string
+): GitCommitSummary | null {
+    const fileChanges = commit.fileChanges ?? commit.files.map((path) => ({ path }));
+    const mappedFileChanges = fileChanges
+        .map((file) => {
+            const workspacePath = mapGitPathToWorkspacePath(workspaceRoot, gitRoot, file.path);
+            if (workspacePath === null) {
+                return null;
+            }
+
+            return {
+                ...file,
+                path: workspacePath,
+            };
+        })
+        .filter((file): file is GitCommitFileChange => file !== null);
+
+    if (mappedFileChanges.length === 0) {
+        return null;
+    }
+
+    return {
+        ...commit,
+        files: mappedFileChanges.map((file) => file.path),
+        fileChanges: mappedFileChanges,
+    };
+}
+
+export function mapWorkspaceGitChange(
+    change: GitFileChange,
+    workspaceRoot: string,
+    gitRoot: string,
+    numstatMap: ReadonlyMap<string, { additions: number; deletions: number }>
+): GitFileChange | null {
+    const workspaceRelativePath = mapGitPathToWorkspacePath(workspaceRoot, gitRoot, change.path);
+    if (workspaceRelativePath === null) {
+        return null;
+    }
+
+    const workspaceOriginalPath = change.originalPath !== undefined
+        ? mapGitPathToWorkspacePath(workspaceRoot, gitRoot, change.originalPath)
+        : undefined;
+    const stats = numstatMap.get(change.path);
+
+    return {
+        ...change,
+        path: workspaceRelativePath,
+        ...(workspaceOriginalPath !== undefined && workspaceOriginalPath !== null
+            ? { originalPath: workspaceOriginalPath }
+            : {}),
+        ...(stats !== undefined ? { additions: stats.additions, deletions: stats.deletions } : {}),
+    };
+}
+
 function parseGitBranches(stdout: string, currentBranch: string | undefined): Array<GitBranchSummary> {
     const branches = stdout
         .split(/\r?\n/)
@@ -781,6 +838,9 @@ export async function buildWorkspaceGitSummary(
     }
     const gitRoot = resolve(topLevelResult.stdout.trim());
     const workspaceScoped = workspaceRoot !== gitRoot;
+    const workspaceGitRelativePath = workspaceScoped
+        ? toPosixRelativePath(gitRoot, workspaceRoot)
+        : null;
 
     const statusResult = await runGit(gitRoot, ["status", "--porcelain=v1", "--untracked-files=all", "--renames"]);
     if (!statusResult.success) {
@@ -793,14 +853,19 @@ export async function buildWorkspaceGitSummary(
         ? parseNumstat(numstatTrackedResult.stdout)
         : new Map<string, { additions: number; deletions: number }>();
 
-    const logResult = await runGit(gitRoot, [
+    const logArgs = [
         "log",
         `--max-count=${normalizedCommitLimit}`,
         "--date=unix",
         "--pretty=format:%x1e%H%x1f%ct%x1f%an%x1f%s",
         "--numstat",
         "--no-renames",
-    ]);
+    ];
+    if (workspaceGitRelativePath !== null) {
+        logArgs.push("--", workspaceGitRelativePath);
+    }
+
+    const logResult = await runGit(gitRoot, logArgs);
     if (!logResult.success) {
         throw new Error(logResult.stderr.trim() || logResult.message || "Unable to read git history");
     }
@@ -841,6 +906,8 @@ export async function buildWorkspaceGitSummary(
         }
     }
 
+    const parsedRecentCommits = parseGitLog(logResult.stdout);
+
     return {
         workspaceRoot,
         gitRoot,
@@ -857,25 +924,14 @@ export async function buildWorkspaceGitSummary(
                     return change;
                 }
 
-                const workspaceRelativePath = mapGitPathToWorkspacePath(workspaceRoot, gitRoot, change.path);
-                if (workspaceRelativePath === null) {
-                    return null;
-                }
-
-                const workspaceOriginalPath = change.originalPath !== undefined
-                    ? mapGitPathToWorkspacePath(workspaceRoot, gitRoot, change.originalPath)
-                    : undefined;
-                const stats = numstatMap.get(change.path);
-
-                return {
-                    ...change,
-                    path: workspaceRelativePath,
-                    ...(workspaceOriginalPath !== undefined ? { originalPath: workspaceOriginalPath } : {}),
-                    ...(stats !== undefined ? { additions: stats.additions, deletions: stats.deletions } : {}),
-                };
+                return mapWorkspaceGitChange(change, workspaceRoot, gitRoot, numstatMap);
             })
             .filter((change): change is GitFileChange => change !== null),
-        recentCommits: parseGitLog(logResult.stdout),
+        recentCommits: workspaceScoped
+            ? parsedRecentCommits
+                .map((commit) => mapCommitToWorkspaceScope(commit, workspaceRoot, gitRoot))
+                .filter((commit): commit is GitCommitSummary => commit !== null)
+            : parsedRecentCommits,
         truncated: false,
     };
 }

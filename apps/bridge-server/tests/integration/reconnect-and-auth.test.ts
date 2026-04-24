@@ -606,7 +606,89 @@ describe("bridge reconnect and auth integration", () => {
         }
     });
 
-    it("sends queued resume events after session.history", async () => {
+    it("replays pending prompts even when session history fetch fails during resume", async () => {
+        const token = generatePairingToken();
+        const clientA = await createWSClient(TEST_PORT);
+
+        try {
+            clientA.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            const pairingMessage = await clientA.waitForMessage("auth.authenticated");
+            assert.equal(pairingMessage.type, "auth.authenticated");
+
+            clientA.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await clientA.waitForMessage("session.created");
+
+            const pendingDecision = session.requestPermission({
+                id: "perm-history-failure",
+                kind: "shell",
+                metadata: { intention: "run command after failed history load" },
+            });
+            await clientA.waitForMessage("permission.request");
+            await clientA.close();
+
+            session.setHistoryResolver(async () => {
+                setTimeout(() => {
+                    session.emitAssistantMessage("live event after failed history load");
+                }, 10);
+                await wait(30);
+                throw new Error("history unavailable");
+            });
+
+            const clientB = await createWSClient(TEST_PORT);
+            try {
+                clientB.send(makeClientMessage("auth.resume", {
+                    deviceCredential: pairingMessage.payload.deviceCredential,
+                    sessionToken: pairingMessage.payload.sessionToken,
+                    lastSeenSeq: pairingMessage.seq,
+                    transportMode: "direct",
+                }));
+                await clientB.waitForMessage("auth.authenticated");
+                clientB.send(makeClientMessage("session.resume", { sessionId: session.id }));
+
+                const resumed = await clientB.waitForMessage("session.resumed");
+                assert.equal(resumed.type, "session.resumed");
+
+                const replayedPrompt = await clientB.waitForMessage("permission.request");
+                assert.equal(replayedPrompt.type, "permission.request");
+
+                const liveMessage = await clientB.waitForMessage("assistant.message");
+                assert.equal(liveMessage.type, "assistant.message");
+                assert.equal(liveMessage.payload.content, "live event after failed history load");
+
+                await wait(80);
+                assert.equal(
+                    clientB.messages.some((message) => message.type === "session.history"),
+                    false
+                );
+
+                clientB.send(makeClientMessage("permission.respond", {
+                    requestId: "perm-history-failure",
+                    approved: true,
+                }));
+                assert.equal(await pendingDecision, true);
+            } finally {
+                await clientB.close();
+            }
+        } finally {
+            if (clientA.ws.readyState !== WebSocket.CLOSED) {
+                await clientA.close();
+            }
+            session.setHistory([]);
+            session.setHistoryResolver(async () => []);
+        }
+    });
+
+    it("does not delay live resume events behind session history", async () => {
         const token = generatePairingToken();
         const client = await createWSClient(TEST_PORT);
 
@@ -642,8 +724,8 @@ describe("bridge reconnect and auth integration", () => {
 
             client.send(makeClientMessage("session.resume", { sessionId: session.id }));
             await client.waitForMessage("session.resumed");
-            await client.waitForMessage("session.history");
             await client.waitForMessage("assistant.message");
+            await client.waitForMessage("session.history");
 
             const relevantTypes = client.messages
                 .filter((message) =>
@@ -656,7 +738,7 @@ describe("bridge reconnect and auth integration", () => {
 
             assert.deepEqual(
                 relevantTypes,
-                ["session.resumed", "session.history", "assistant.message"]
+                ["session.resumed", "assistant.message", "session.history"]
             );
         } finally {
             await client.close();
@@ -981,6 +1063,118 @@ describe("workspace explorer integration", () => {
 
             assert.equal(diffMsg.payload.error, undefined);
             assert.match(diffMsg.payload.diff, /changed/);
+        } finally {
+            await client.close();
+        }
+    });
+
+    it("scopes recent commits to the active workspace root", async () => {
+        const nestedWorkspaceRoot = join(workspaceRoot, "apps", "bridge-server");
+        const nestedFilePath = join("src", "nested.ts");
+        await mkdir(join(nestedWorkspaceRoot, "src"), { recursive: true });
+        await writeFile(join(nestedWorkspaceRoot, nestedFilePath), "export const nested = true;\n");
+        await runGit(workspaceRoot, ["add", "."]);
+        await runGit(workspaceRoot, ["commit", "-m", "add nested workspace commit"]);
+
+        session.setContext({
+            sessionCwd: nestedWorkspaceRoot,
+            workspaceRoot: nestedWorkspaceRoot,
+            gitRoot: workspaceRoot,
+            repository: "example/copilot-mobile",
+            branch: "main",
+        });
+
+        const token = generatePairingToken();
+        const client = await createWSClient(WORKSPACE_TEST_PORT);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await client.waitForMessage("session.created");
+
+            client.send(makeClientMessage("workspace.git.request", {
+                sessionId: session.id,
+                commitLimit: 5,
+            }));
+            const gitMsg = await client.waitForMessage("workspace.git.summary");
+            if (gitMsg.type !== "workspace.git.summary") {
+                throw new Error("Expected workspace.git.summary");
+            }
+
+            assert.equal(gitMsg.payload.workspaceRoot, nestedWorkspaceRoot);
+            assert.equal(gitMsg.payload.recentCommits.length, 1);
+            assert.equal(
+                gitMsg.payload.recentCommits.some((commit) =>
+                    commit.fileChanges.some((file) => file.path === nestedFilePath)
+                ),
+                true
+            );
+            assert.equal(
+                gitMsg.payload.recentCommits.some((commit) =>
+                    commit.fileChanges.some((file) => file.path === "README.md" || file.path === "src/feature.ts")
+                ),
+                false
+            );
+        } finally {
+            await client.close();
+        }
+    });
+
+    it("returns no recent commits when none fall within the active workspace root", async () => {
+        const nestedWorkspaceRoot = join(workspaceRoot, "apps", "bridge-server");
+        await mkdir(nestedWorkspaceRoot, { recursive: true });
+
+        session.setContext({
+            sessionCwd: nestedWorkspaceRoot,
+            workspaceRoot: nestedWorkspaceRoot,
+            gitRoot: workspaceRoot,
+            repository: "example/copilot-mobile",
+            branch: "main",
+        });
+
+        const token = generatePairingToken();
+        const client = await createWSClient(WORKSPACE_TEST_PORT);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await client.waitForMessage("session.created");
+
+            client.send(makeClientMessage("workspace.git.request", {
+                sessionId: session.id,
+                commitLimit: 5,
+            }));
+            const gitMsg = await client.waitForMessage("workspace.git.summary");
+            if (gitMsg.type !== "workspace.git.summary") {
+                throw new Error("Expected workspace.git.summary");
+            }
+
+            assert.equal(gitMsg.payload.workspaceRoot, nestedWorkspaceRoot);
+            assert.deepEqual(gitMsg.payload.recentCommits, []);
         } finally {
             await client.close();
         }

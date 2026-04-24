@@ -47,7 +47,7 @@ import { ChatInput } from "../../src/components/ChatInput";
 import type { ImageAttachment, QueuedDraft, SendMode } from "../../src/components/chat-input-types";
 import { EmptyChat } from "../../src/components/EmptyChat";
 import { ActivityDots } from "../../src/components/ActivityDots";
-import { SubagentPanel, type SubagentRun } from "../../src/components/SubagentPanel";
+import { SubagentPanel } from "../../src/components/SubagentPanel";
 import { TodoPanel } from "../../src/components/TodoPanel";
 import { PermissionDialog, PlanExitDialog, UserInputDialog } from "../../src/components/Dialogs";
 import { useAppTheme, type AppTheme } from "../../src/theme/theme-context";
@@ -72,12 +72,9 @@ import { startDraftConversation } from "../../src/services/new-chat";
 import {
     deriveAgentTodosFromItems,
     getActiveAgentItems,
-    getSubagentDisplayName,
-    isSubagentToolName,
 } from "../../src/utils/tool-introspection";
 
 const CHAT_LIST_DRAW_DISTANCE = 320;
-const ACTIVE_TURN_VISUAL_GRACE_MS = 25_000;
 
 function basename(path: string): string {
     const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -123,57 +120,6 @@ function getChatItemType(item: ChatItem): string {
     }
 
     return "tool";
-}
-
-function buildSubagentRuns(
-    currentTurnItems: ReadonlyArray<ChatItem>,
-    isAssistantTyping: boolean
-): ReadonlyArray<SubagentRun> {
-    const runMap = new Map<string, SubagentRun>();
-
-    for (const item of currentTurnItems) {
-        if (item.type !== "tool" || !isSubagentToolName(item.toolName)) {
-            continue;
-        }
-
-        runMap.set(item.requestId, {
-            requestId: item.requestId,
-            title: getSubagentDisplayName(item),
-            status: item.status === "failed"
-                ? "failed"
-                : isAssistantTyping
-                    ? "running"
-                    : item.status === "completed" || item.status === "no_results"
-                        ? "completed"
-                        : "running",
-        });
-    }
-
-    const runs = [...runMap.values()];
-    const hasRunningRun = runs.some((run) => run.status === "running");
-
-    if (hasRunningRun || (isAssistantTyping && runs.length > 0)) {
-        return runs;
-    }
-
-    return [];
-}
-
-function areSubagentRunsEqual(
-    left: ReadonlyArray<SubagentRun>,
-    right: ReadonlyArray<SubagentRun>
-): boolean {
-    if (left.length !== right.length) {
-        return false;
-    }
-
-    return left.every((run, index) => {
-        const candidate = right[index];
-        return candidate !== undefined
-            && candidate.requestId === run.requestId
-            && candidate.title === run.title
-            && candidate.status === run.status;
-    });
 }
 
 function areAgentTodosEqual(
@@ -741,13 +687,10 @@ export default function ChatScreen() {
     const persistChatItemsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const persistInteractionRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(null);
     const foregroundLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const stableSubagentRunsRef = useRef<ReadonlyArray<SubagentRun>>([]);
+    const latestChatItemsRef = useRef<ReadonlyArray<ChatItem>>([]);
+    const activeConversationIdRef = useRef<string | null>(null);
     const stableAgentTodosRef = useRef<ReadonlyArray<AgentTodo>>([]);
     const stablePanelSessionIdRef = useRef<string | null>(null);
-    const previousActiveTurnSourceRef = useRef(false);
-    const activeTurnGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const suppressNextTurnGraceRef = useRef(false);
-    const [activeTurnGraceUntil, setActiveTurnGraceUntil] = useState(0);
 
     // Store'lardan state
     const chatItems = useSessionStore((s) => s.chatItems);
@@ -767,14 +710,17 @@ export default function ChatScreen() {
     const userInputPrompt = useSessionStore((s) => s.userInputPrompt);
     const planExitPrompt = useSessionStore((s) => s.planExitPrompt);
     const agentTodos = useSessionStore((s) => s.agentTodos);
+    const subagentRuns = useSessionStore((s) => s.subagentRuns);
     const setAbortRequested = useSessionStore((s) => s.setAbortRequested);
     const activeConversationId = useChatHistoryStore((s) => s.activeConversationId);
     const workspaceSessionId = useWorkspaceStore((s) => s.sessionId);
     const workspaceRoot = useWorkspaceStore((s) => s.workspaceRoot);
 
+    latestChatItemsRef.current = chatItems;
+    activeConversationIdRef.current = activeConversationId;
+
     if (stablePanelSessionIdRef.current !== activeSessionId) {
         stablePanelSessionIdRef.current = activeSessionId;
-        stableSubagentRunsRef.current = [];
         stableAgentTodosRef.current = [];
     }
 
@@ -786,67 +732,12 @@ export default function ChatScreen() {
     const inputDisabled = !isConnected || isSessionLoading;
     const isActiveSessionBusy = activeSessionId !== null && busySessions[activeSessionId] === true;
     const isActiveTurnSource = isTyping || isActiveSessionBusy || isAbortPending;
-    const isActiveTurnRunning = isActiveTurnSource || activeTurnGraceUntil > Date.now();
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
-
-    useEffect(() => {
-        if (activeTurnGraceTimerRef.current !== null) {
-            clearTimeout(activeTurnGraceTimerRef.current);
-            activeTurnGraceTimerRef.current = null;
-        }
-
-        if (isActiveTurnSource) {
-            previousActiveTurnSourceRef.current = true;
-            if (isAbortPending) {
-                suppressNextTurnGraceRef.current = true;
-            }
-            setActiveTurnGraceUntil(0);
-            return undefined;
-        }
-
-        if (previousActiveTurnSourceRef.current) {
-            previousActiveTurnSourceRef.current = false;
-            if (suppressNextTurnGraceRef.current) {
-                suppressNextTurnGraceRef.current = false;
-                setActiveTurnGraceUntil(0);
-                return undefined;
-            }
-            const nextGraceUntil = Date.now() + ACTIVE_TURN_VISUAL_GRACE_MS;
-            setActiveTurnGraceUntil(nextGraceUntil);
-            activeTurnGraceTimerRef.current = setTimeout(() => {
-                setActiveTurnGraceUntil(0);
-                activeTurnGraceTimerRef.current = null;
-            }, ACTIVE_TURN_VISUAL_GRACE_MS);
-        }
-
-        return () => {
-            if (activeTurnGraceTimerRef.current !== null) {
-                clearTimeout(activeTurnGraceTimerRef.current);
-                activeTurnGraceTimerRef.current = null;
-            }
-        };
-    }, [activeSessionId, isAbortPending, isActiveTurnSource]);
 
     const activeAgentItems = useMemo(
         () => getActiveAgentItems(chatItems, isTyping),
         [chatItems, isTyping],
     );
-    const subagentRunsSignature = useMemo(() => (
-        activeAgentItems
-            .filter((item): item is Extract<ChatItem, { type: "tool" }> =>
-                item.type === "tool" && isSubagentToolName(item.toolName)
-            )
-            .map((item) => `${item.requestId}:${item.status}:${item.toolName}:${item.argumentsText ?? ""}`)
-            .join("|")
-    ), [activeAgentItems]);
-    const nextSubagentRuns = useMemo(
-        () => buildSubagentRuns(activeAgentItems, isTyping),
-        [isTyping, subagentRunsSignature],
-    );
-    if (!areSubagentRunsEqual(stableSubagentRunsRef.current, nextSubagentRuns)) {
-        stableSubagentRunsRef.current = nextSubagentRuns;
-    }
-    const subagentRuns = stableSubagentRunsRef.current;
     const subagentPanelSignature = useMemo(
         () => subagentRuns.map((run) => `${run.requestId}:${run.title}`).join("|"),
         [subagentRuns],
@@ -978,6 +869,14 @@ export default function ChatScreen() {
 
     useEffect(() => {
         const subscription = AppState.addEventListener("change", (nextState) => {
+            const conversationId = activeConversationIdRef.current;
+            if (nextState !== "active" && conversationId !== null) {
+                useChatHistoryStore.getState().setConversationItems(
+                    conversationId,
+                    latestChatItemsRef.current
+                );
+            }
+
             if (nextState !== "active") {
                 return;
             }
@@ -1110,7 +1009,6 @@ export default function ChatScreen() {
                     },
                 ]);
                 if (!isAbortPending) {
-                    suppressNextTurnGraceRef.current = true;
                     setAbortRequested(true);
                     void abortMessage(activeSessionId).catch(() => {
                         useSessionStore.getState().setAbortRequested(false);
@@ -1213,7 +1111,6 @@ export default function ChatScreen() {
     // Abort message
     const handleAbort = useCallback(() => {
         if (activeSessionId !== null && !isAbortPending) {
-            suppressNextTurnGraceRef.current = true;
             setAbortRequested(true);
             void abortMessage(activeSessionId).catch(() => {
                 useSessionStore.getState().setAbortRequested(false);
@@ -1416,7 +1313,7 @@ export default function ChatScreen() {
                 <ChatInput
                     onSend={handleSend}
                     onAbort={handleAbort}
-                    isTyping={isActiveTurnRunning}
+                    isTyping={isActiveTurnSource}
                     isAbortPending={isAbortPending}
                     disabled={inputDisabled}
                     queuedDrafts={visibleQueuedDrafts}

@@ -216,7 +216,7 @@ function isSessionAlreadyDeletedError(error: unknown): boolean {
         && /session not found|no such session|unknown session|file not found/i.test(error.message);
 }
 
-function adaptSessionInfoFromMetadata(metadata: SessionMetadata): SessionInfo {
+export function adaptSessionInfoFromMetadata(metadata: SessionMetadata): SessionInfo {
     const context = adaptSessionContext(metadata);
 
     return {
@@ -228,6 +228,23 @@ function adaptSessionInfoFromMetadata(metadata: SessionMetadata): SessionInfo {
         ...(metadata.summary !== undefined ? { summary: metadata.summary } : {}),
         ...(context !== undefined ? { context } : {}),
     };
+}
+
+export function mergeResumedSessionInfoFromMetadata(
+    target: SessionInfo,
+    metadata: SessionMetadata
+): SessionInfo {
+    const adapted = adaptSessionInfoFromMetadata(metadata);
+
+    Object.assign(target, {
+        ...target,
+        ...adapted,
+        id: target.id,
+        model: target.model,
+        status: target.status,
+    });
+
+    return target;
 }
 
 function buildSessionContextFromWorkingDirectory(
@@ -1239,7 +1256,6 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
         async resumeSession(sessionId: string): Promise<AdaptedCopilotSession> {
             const existing = sessions.get(sessionId);
             if (existing !== undefined) {
-                existing.info.status = "active";
                 existing.info.lastActiveAt = Date.now();
                 return existing.session;
             }
@@ -1281,11 +1297,7 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             const record = sessions.get(session.id);
 
             if (record !== undefined && metadata !== undefined) {
-                Object.assign(record.info, adaptSessionInfoFromMetadata(metadata), {
-                    status: "active",
-                    model: record.info.model,
-                    id: record.info.id,
-                });
+                mergeResumedSessionInfoFromMetadata(record.info, metadata);
             }
 
             return session;
