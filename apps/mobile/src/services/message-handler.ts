@@ -81,6 +81,33 @@ function normalizeSystemNotification(content: string): string {
         .trim();
 }
 
+function normalizeAssistantIntent(intent: string): string {
+    const trimmed = intent.trim();
+    if (trimmed.length === 0) {
+        return trimmed;
+    }
+
+    if (!trimmed.startsWith("{") || !trimmed.endsWith("}")) {
+        return trimmed;
+    }
+
+    try {
+        const parsed: unknown = JSON.parse(trimmed);
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+            const candidate = (parsed as { intent?: unknown; intention?: unknown; text?: unknown }).intent
+                ?? (parsed as { intent?: unknown; intention?: unknown; text?: unknown }).intention
+                ?? (parsed as { intent?: unknown; intention?: unknown; text?: unknown }).text;
+            if (typeof candidate === "string" && candidate.trim().length > 0) {
+                return candidate.trim();
+            }
+        }
+    } catch {
+        return trimmed;
+    }
+
+    return trimmed;
+}
+
 function readEmittedSystemNotificationKeys(sessionId: string): Set<string> {
     const existingKeys = emittedSystemNotificationKeys.get(sessionId);
     if (existingKeys !== undefined) {
@@ -1384,7 +1411,7 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "assistant.intent": {
             if (!isActiveSession(message.payload.sessionId)) break;
-            sessionStore.setCurrentIntent(message.payload.intent);
+            sessionStore.setCurrentIntent(normalizeAssistantIntent(message.payload.intent));
             break;
         }
 

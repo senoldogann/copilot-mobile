@@ -1149,19 +1149,17 @@ export async function searchWorkspaceFiles(
 }
 
 // Disconnect
-export function disconnect(): void {
+export async function disconnect(): Promise<void> {
     const existingClient = client;
-    void (async () => {
-        if (existingClient !== null) {
-            await unregisterRemoteNotificationsBeforeDisconnect(existingClient);
-            existingClient.disconnect();
-        } else {
-            clearBridgeRemotePushRegistration();
-        }
-        client = null;
-        getBridgeConnectionState().reset();
-        getBridgeSessionState().reset();
-        // Kal\u0131c\u0131 kimlik bilgilerini de temizle: QR'\u0131 tekrar taramak gerekecek.
-        await clearCredentials();
-    })();
+    if (existingClient !== null) {
+        await unregisterRemoteNotificationsBeforeDisconnect(existingClient);
+        existingClient.disconnect();
+    } else {
+        clearBridgeRemotePushRegistration();
+    }
+    client = null;
+    getBridgeConnectionState().reset();
+    getBridgeSessionState().reset();
+    // Kal\u0131c\u0131 kimlik bilgilerini de temizle: QR'\u0131 tekrar taramak gerekecek.
+    await clearCredentials();
 }

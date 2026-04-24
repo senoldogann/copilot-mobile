@@ -31,6 +31,7 @@ import {
     ChevronDownIcon,
     CirclePlusIcon,
     SettingsIcon,
+    RefreshIcon,
     WifiOffIcon,
     GitHubIcon,
     GitPullRequestIcon,
@@ -203,8 +204,15 @@ const ChatHeader = React.memo(function ChatHeader() {
     const handleDisconnect = React.useCallback(() => {
         setMenuOpen(false);
         handleCloseGitMenu();
-        disconnect();
-        router.replace("/scan");
+        void disconnect().then(
+            () => {
+                router.replace("/scan");
+            },
+            (error: unknown) => {
+                console.warn("Failed to disconnect before opening QR scan", error);
+                router.replace("/scan");
+            }
+        );
     }, [handleCloseGitMenu, router]);
 
     const handleOpenWorkspaceChanges = React.useCallback(() => {
@@ -452,6 +460,28 @@ const ChatHeader = React.memo(function ChatHeader() {
                             <WifiOffIcon size={16} color={theme.colors.error} />
                             <Text style={[headerStyles.menuItemText, headerStyles.menuItemDanger]}>
                                 Disconnect
+                            </Text>
+                        </Pressable>
+                        <View style={headerStyles.menuSep} />
+                        <Pressable
+                            style={headerStyles.menuItem}
+                            onPress={() => {
+                                setMenuOpen(false);
+                                handleCloseGitMenu();
+                                void disconnect().then(
+                                    () => {
+                                        router.replace("/scan");
+                                    },
+                                    (error: unknown) => {
+                                        console.warn("Failed to disconnect before rescanning QR", error);
+                                        router.replace("/scan");
+                                    }
+                                );
+                            }}
+                        >
+                            <RefreshIcon size={16} color={theme.colors.textSecondary} />
+                            <Text style={headerStyles.menuItemText}>
+                                Rescan QR code
                             </Text>
                         </Pressable>
                     </Pressable>
@@ -714,6 +744,7 @@ export default function ChatScreen() {
     const workspaceSessionId = useWorkspaceStore((s) => s.sessionId);
     const workspaceRoot = useWorkspaceStore((s) => s.workspaceRoot);
     const hasActiveEntitlement = useSubscriptionStore((s) => s.hasActiveEntitlement);
+    const router = useRouter();
 
     latestChatItemsRef.current = chatItems;
     activeConversationIdRef.current = activeConversationId;
@@ -1338,6 +1369,25 @@ export default function ChatScreen() {
                 {connectionError !== null && (
                     <View style={styles.errorBanner}>
                         <Text style={styles.errorBannerText}>{connectionError}</Text>
+                        <Pressable
+                            style={({ pressed }) => [
+                                styles.errorBannerAction,
+                                pressed && styles.errorBannerActionPressed,
+                            ]}
+                            onPress={() => {
+                                void disconnect().then(
+                                    () => {
+                                        router.replace("/scan");
+                                    },
+                                    (error: unknown) => {
+                                        console.warn("Failed to disconnect before rescanning QR", error);
+                                        router.replace("/scan");
+                                    }
+                                );
+                            }}
+                        >
+                            <Text style={styles.errorBannerActionText}>Rescan QR code</Text>
+                        </Pressable>
                     </View>
                 )}
 
@@ -1682,6 +1732,22 @@ return StyleSheet.create({
         fontSize: theme.fontSize.md,
         lineHeight: 18,
         color: theme.colors.error,
+    },
+    errorBannerAction: {
+        alignSelf: "flex-start",
+        marginTop: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.sm,
+        paddingVertical: 6,
+        borderRadius: theme.borderRadius.sm,
+        backgroundColor: theme.colors.bg,
+    },
+    errorBannerActionPressed: {
+        opacity: 0.85,
+    },
+    errorBannerActionText: {
+        fontSize: theme.fontSize.sm,
+        fontWeight: "600",
+        color: theme.colors.textSecondary,
     },
     workspaceToast: {
         position: "absolute",
