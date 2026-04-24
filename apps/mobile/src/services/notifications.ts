@@ -3,6 +3,7 @@ import Constants from "expo-constants";
 import type { NotificationPlatform, NotificationProvider } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
 import { BACKGROUND_NOTIFICATION_TASK } from "./notification-background-shared";
+import { readAppVersion } from "./app-version";
 
 const SESSION_EVENTS_CHANNEL_ID = "session-events";
 const MAX_LOCAL_NOTIFICATION_KEYS = 200;
@@ -143,11 +144,6 @@ function readExpoProjectId(): string | null {
     }
 
     return readExpoProjectIdFromExtra();
-}
-
-function readAppVersion(): string | undefined {
-    const version = Constants.expoConfig?.version;
-    return typeof version === "string" && version.trim().length > 0 ? version.trim() : undefined;
 }
 
 function readNotificationPlatform(): NotificationPlatform {

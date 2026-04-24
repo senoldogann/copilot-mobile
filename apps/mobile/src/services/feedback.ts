@@ -1,11 +1,11 @@
-import Constants from "expo-constants";
 import { Alert, Linking, Platform } from "react-native";
+import { readAppName, readAppVersion } from "./app-version";
 
 const FEEDBACK_EMAIL = "contact@senoldogan.dev";
 
 function buildFeedbackMailtoUrl(message: string, sessionId: string | null): string {
-    const appName = Constants.expoConfig?.name ?? "Code Companion";
-    const appVersion = Constants.expoConfig?.version ?? "unknown";
+    const appName = readAppName();
+    const appVersion = readAppVersion();
     const bodyLines = [
         message.trim().length > 0
             ? message.trim()

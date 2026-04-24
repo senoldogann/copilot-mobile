@@ -49,9 +49,7 @@
       "url": "https://u.expo.dev/33e68d9a-4ae3-47b2-b130-04b0c57ed91e",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": {
-      "policy": "appVersion"
-    },
+    "runtimeVersion": "0.1.5",
     "plugins": [
       "expo-router",
       "expo-updates",

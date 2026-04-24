@@ -2,8 +2,9 @@
 
 import React, { useEffect, useRef } from "react";
 import { View, Text, Animated, StyleSheet } from "react-native";
-import { useThemedStyles, type AppTheme } from "../theme/theme-context";
+import { useThemedStyles, useAppTheme, type AppTheme } from "../theme/theme-context";
 import { useAppIsActive } from "../services/app-visibility";
+import { BrainIcon } from "./Icons";
 
 type Props = {
     active: boolean;
@@ -56,6 +57,7 @@ function Dot({ delay, active }: { delay: number; active: boolean }) {
 
 export function ActivityDots({ active, intent }: Props) {
     const styles = useThemedStyles(createStyles);
+    const theme = useAppTheme();
     const appIsActive = useAppIsActive();
     if (!active) {
         return null;
@@ -71,7 +73,15 @@ export function ActivityDots({ active, intent }: Props) {
                 <Dot delay={320} active={shouldAnimate} />
             </View>
             {active && intent !== undefined && intent !== null && intent.length > 0 && (
-                <Text style={styles.intent} numberOfLines={1}>{intent}</Text>
+                <View style={styles.intentCard}>
+                    <View style={styles.intentIcon}>
+                        <BrainIcon size={12} color={theme.colors.textSecondary} />
+                    </View>
+                    <View style={styles.intentBody}>
+                        <Text style={styles.intentLabel}>Intent</Text>
+                        <Text style={styles.intent} numberOfLines={2}>{intent}</Text>
+                    </View>
+                </View>
             )}
         </View>
     );
@@ -80,7 +90,7 @@ export function ActivityDots({ active, intent }: Props) {
 const createStyles = (theme: AppTheme) => StyleSheet.create({
     container: {
         flexDirection: "row",
-        alignItems: "center",
+        alignItems: "flex-start",
         gap: theme.spacing.sm,
         paddingHorizontal: theme.spacing.lg,
         paddingVertical: 10,
@@ -90,6 +100,7 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         alignItems: "center",
         gap: 5,
         marginLeft: 8,
+        marginTop: 4,
     },
     dot: {
         width: 5,
@@ -98,8 +109,39 @@ const createStyles = (theme: AppTheme) => StyleSheet.create({
         backgroundColor: theme.colors.accent,
     },
     intent: {
-        fontSize: theme.fontSize.xs,
-        color: theme.colors.textTertiary,
+        fontSize: theme.fontSize.sm,
+        lineHeight: 18,
+        color: theme.colors.textSecondary,
         flexShrink: 1,
+    },
+    intentCard: {
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "flex-start",
+        gap: theme.spacing.sm,
+        paddingHorizontal: theme.spacing.sm,
+        paddingVertical: theme.spacing.xs,
+        borderRadius: theme.borderRadius.md,
+        borderWidth: 1,
+        borderColor: theme.colors.borderMuted,
+        backgroundColor: theme.colors.bgSecondary,
+    },
+    intentIcon: {
+        width: 22,
+        height: 22,
+        borderRadius: 11,
+        alignItems: "center",
+        justifyContent: "center",
+        backgroundColor: theme.colors.bgTertiary,
+        marginTop: 1,
+    },
+    intentBody: {
+        flex: 1,
+        gap: 1,
+    },
+    intentLabel: {
+        fontSize: theme.fontSize.xs,
+        fontWeight: "600",
+        color: theme.colors.textTertiary,
     },
 });

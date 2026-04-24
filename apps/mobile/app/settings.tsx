@@ -11,6 +11,7 @@ import { APP_FONT_OPTIONS, type AppFontPreference } from "../src/theme/typograph
 import { prepareNotificationPermissions } from "../src/services/notifications";
 import { syncRemoteNotificationRegistration } from "../src/services/bridge";
 import { POLICY_URL } from "../src/services/legal";
+import { readAppVersion } from "../src/services/app-version";
 import {
     initializeRevenueCat,
     openSubscriptionManagement,
@@ -391,7 +392,7 @@ function RevenueCatSettings() {
 export default function SettingsScreen() {
     const theme = useAppTheme();
     const styles = useThemedStyles(createStyles);
-    const appVersion = Constants.expoConfig?.version ?? "0.1.0";
+    const appVersion = readAppVersion();
     const router = useRouter();
 
     async function handleEnableNotifications(): Promise<void> {
