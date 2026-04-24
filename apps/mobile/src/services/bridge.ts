@@ -192,6 +192,29 @@ function sleep(milliseconds: number): Promise<void> {
     });
 }
 
+function ensureWorkspaceRequestSession(sessionId: string): void {
+    const workspaceStore = getBridgeWorkspaceState();
+    if (workspaceStore.sessionId !== sessionId) {
+        workspaceStore.beginWorkspaceSession(sessionId);
+    }
+}
+
+function createWorkspaceGitSummaryThrottleKey(sessionId: string): string {
+    const workspaceStore = getBridgeWorkspaceState();
+    const workspaceRoot = workspaceStore.sessionId === sessionId
+        ? workspaceStore.workspaceRoot ?? "pending"
+        : "pending";
+    return `${sessionId}:${workspaceRoot}`;
+}
+
+function clearWorkspaceGitSummaryThrottle(sessionId: string): void {
+    for (const key of workspaceGitSummaryRequestTimestamps.keys()) {
+        if (key.startsWith(`${sessionId}:`)) {
+            workspaceGitSummaryRequestTimestamps.delete(key);
+        }
+    }
+}
+
 async function waitForRemoteSessionDeletion(
     c: ReturnType<typeof createWSClient>,
     sessionIds: ReadonlyArray<string>
@@ -669,6 +692,7 @@ export async function requestWorkspaceTree(
     pageSize?: number
 ): Promise<void> {
     const c = getClient();
+    ensureWorkspaceRequestSession(sessionId);
     const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setTreeLoading(workspaceRelativePath ?? "__root__", true);
     try {
@@ -692,7 +716,9 @@ export async function requestWorkspaceGitSummary(
     sessionId: string,
     commitLimit?: number
 ): Promise<void> {
-    const lastRequestedAt = workspaceGitSummaryRequestTimestamps.get(sessionId);
+    ensureWorkspaceRequestSession(sessionId);
+    const throttleKey = createWorkspaceGitSummaryThrottleKey(sessionId);
+    const lastRequestedAt = workspaceGitSummaryRequestTimestamps.get(throttleKey);
     const now = Date.now();
     if (
         lastRequestedAt !== undefined
@@ -701,7 +727,7 @@ export async function requestWorkspaceGitSummary(
         return;
     }
 
-    workspaceGitSummaryRequestTimestamps.set(sessionId, now);
+    workspaceGitSummaryRequestTimestamps.set(throttleKey, now);
     await sendWorkspaceGitSummaryRequest(sessionId, commitLimit);
 }
 
@@ -709,7 +735,8 @@ export async function refreshWorkspaceGitSummary(
     sessionId: string,
     commitLimit?: number
 ): Promise<void> {
-    workspaceGitSummaryRequestTimestamps.delete(sessionId);
+    clearWorkspaceGitSummaryThrottle(sessionId);
+    ensureWorkspaceRequestSession(sessionId);
     await sendWorkspaceGitSummaryRequest(sessionId, commitLimit);
 }
 
@@ -718,6 +745,7 @@ async function sendWorkspaceGitSummaryRequest(
     commitLimit?: number
 ): Promise<void> {
     const c = getClient();
+    ensureWorkspaceRequestSession(sessionId);
     const workspaceStore = getBridgeWorkspaceState();
     workspaceStore.setGitLoading(true);
     try {

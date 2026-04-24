@@ -609,6 +609,29 @@ export const useSessionStore = create<SessionStore>((set) => ({
         }));
     },
 
+    settleRunningTools: (status, errorMessage) => {
+        set((s) => ({
+            chatItems: s.chatItems.map((item) => {
+                if (item.type !== "tool" || item.status !== "running") {
+                    return item;
+                }
+
+                if (errorMessage !== undefined) {
+                    return {
+                        ...item,
+                        status,
+                        errorMessage,
+                    };
+                }
+
+                return {
+                    ...item,
+                    status,
+                };
+            }),
+        }));
+    },
+
     receivePermissionPrompt: (prompt) =>
         set((state) => {
             if (prompt.sessionId !== state.activeSessionId) {

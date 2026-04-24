@@ -706,7 +706,7 @@ const WorkspaceOperationToast = React.memo(function WorkspaceOperationToast() {
 });
 
 const MAX_TOTAL_ATTACHMENT_BASE64_CHARS = 700_000;
-const STREAMING_PERSIST_DELAY_MS = 5_000;
+const STREAMING_PERSIST_DELAY_MS = 15_000;
 const TYPING_PERSIST_DELAY_MS = 2_200;
 const IDLE_PERSIST_DELAY_MS = 1_200;
 
@@ -733,17 +733,20 @@ export default function ChatScreen() {
     const [showScrollToBottom, setShowScrollToBottom] = useState(false);
     const [queuedDrafts, setQueuedDrafts] = useState<Array<QueuedDraft>>([]);
     const [editingDraft, setEditingDraft] = useState<QueuedDraft | null>(null);
+    const [listLayoutRevision, setListLayoutRevision] = useState(0);
     const [dismissedSubagentSignature, setDismissedSubagentSignature] = useState<string | null>(null);
     const [dismissedTodoSignature, setDismissedTodoSignature] = useState<string | null>(null);
     const prevSessionIdRef = useRef<string | null>(null);
     const autoSentQueuedDraftIdRef = useRef<string | null>(null);
     const persistChatItemsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const persistInteractionRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(null);
+    const foregroundLayoutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const stableSubagentRunsRef = useRef<ReadonlyArray<SubagentRun>>([]);
     const stableAgentTodosRef = useRef<ReadonlyArray<AgentTodo>>([]);
     const stablePanelSessionIdRef = useRef<string | null>(null);
     const previousActiveTurnSourceRef = useRef(false);
     const activeTurnGraceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const suppressNextTurnGraceRef = useRef(false);
     const [activeTurnGraceUntil, setActiveTurnGraceUntil] = useState(0);
 
     // Store'lardan state
@@ -794,12 +797,20 @@ export default function ChatScreen() {
 
         if (isActiveTurnSource) {
             previousActiveTurnSourceRef.current = true;
+            if (isAbortPending) {
+                suppressNextTurnGraceRef.current = true;
+            }
             setActiveTurnGraceUntil(0);
             return undefined;
         }
 
         if (previousActiveTurnSourceRef.current) {
             previousActiveTurnSourceRef.current = false;
+            if (suppressNextTurnGraceRef.current) {
+                suppressNextTurnGraceRef.current = false;
+                setActiveTurnGraceUntil(0);
+                return undefined;
+            }
             const nextGraceUntil = Date.now() + ACTIVE_TURN_VISUAL_GRACE_MS;
             setActiveTurnGraceUntil(nextGraceUntil);
             activeTurnGraceTimerRef.current = setTimeout(() => {
@@ -814,7 +825,7 @@ export default function ChatScreen() {
                 activeTurnGraceTimerRef.current = null;
             }
         };
-    }, [activeSessionId, isActiveTurnSource]);
+    }, [activeSessionId, isAbortPending, isActiveTurnSource]);
 
     const activeAgentItems = useMemo(
         () => getActiveAgentItems(chatItems, isTyping),
@@ -965,6 +976,35 @@ export default function ChatScreen() {
         }
     }, [activeSessionId, connectionError]);
 
+    useEffect(() => {
+        const subscription = AppState.addEventListener("change", (nextState) => {
+            if (nextState !== "active") {
+                return;
+            }
+
+            if (foregroundLayoutTimerRef.current !== null) {
+                clearTimeout(foregroundLayoutTimerRef.current);
+            }
+            flatListRef.current?.clearLayoutCacheOnUpdate();
+            setListLayoutRevision((value) => value + 1);
+            foregroundLayoutTimerRef.current = setTimeout(() => {
+                flatListRef.current?.recomputeViewableItems();
+                if (isNearBottomRef.current) {
+                    flatListRef.current?.scrollToEnd({ animated: false });
+                }
+                foregroundLayoutTimerRef.current = null;
+            }, 80);
+        });
+
+        return () => {
+            if (foregroundLayoutTimerRef.current !== null) {
+                clearTimeout(foregroundLayoutTimerRef.current);
+                foregroundLayoutTimerRef.current = null;
+            }
+            subscription.remove();
+        };
+    }, []);
+
     // When the active session changes, jump to the newest content once.
     useEffect(() => {
         if (prevSessionIdRef.current !== activeSessionId) {
@@ -1070,6 +1110,7 @@ export default function ChatScreen() {
                     },
                 ]);
                 if (!isAbortPending) {
+                    suppressNextTurnGraceRef.current = true;
                     setAbortRequested(true);
                     void abortMessage(activeSessionId).catch(() => {
                         useSessionStore.getState().setAbortRequested(false);
@@ -1172,6 +1213,7 @@ export default function ChatScreen() {
     // Abort message
     const handleAbort = useCallback(() => {
         if (activeSessionId !== null && !isAbortPending) {
+            suppressNextTurnGraceRef.current = true;
             setAbortRequested(true);
             void abortMessage(activeSessionId).catch(() => {
                 useSessionStore.getState().setAbortRequested(false);
@@ -1317,6 +1359,7 @@ export default function ChatScreen() {
                                     keyboardShouldPersistTaps="always"
                                     ListFooterComponent={activityFooter}
                                     drawDistance={CHAT_LIST_DRAW_DISTANCE}
+                                    extraData={listLayoutRevision}
                                 />
                                 {showScrollToBottom && (
                                     <Pressable

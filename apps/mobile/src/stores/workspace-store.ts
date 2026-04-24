@@ -258,6 +258,22 @@ function treeHasPendingChildren(node: WorkspaceTreeNode | null): boolean {
     return node.children.some((child) => treeHasPendingChildren(child));
 }
 
+function shouldIgnoreWorkspacePayload(
+    state: WorkspaceState,
+    sessionId: string
+): boolean {
+    return state.sessionId !== null && state.sessionId !== sessionId;
+}
+
+function shouldResetWorkspacePayload(
+    state: WorkspaceState,
+    sessionId: string,
+    workspaceRoot: string
+): boolean {
+    return state.sessionId !== sessionId
+        || (state.workspaceRoot !== null && state.workspaceRoot !== workspaceRoot);
+}
+
 function setPathFlag(
     flags: Record<string, boolean>,
     path: string,
@@ -321,8 +337,17 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
 
     setWorkspaceTree: (payload) =>
         set((state) => {
+            if (shouldIgnoreWorkspacePayload(state, payload.sessionId)) {
+                return state;
+            }
+
+            const shouldReset = shouldResetWorkspacePayload(
+                state,
+                payload.sessionId,
+                payload.workspaceRoot
+            );
             const mergedTree = mergeWorkspaceTree(
-                state.tree,
+                shouldReset ? null : state.tree,
                 payload.requestedWorkspaceRelativePath,
                 payload.tree,
                 payload.offset
@@ -336,12 +361,12 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
                 tree: mergedTree,
                 treeTruncated: treeHasPendingChildren(mergedTree) || payload.truncated,
                 expandedPaths: {
-                    ...state.expandedPaths,
+                    ...(shouldReset ? {} : state.expandedPaths),
                     [payload.workspaceRoot]: true,
                     [payload.requestedWorkspaceRelativePath]: true,
                 },
                 loadingTreePaths: setPathFlag(
-                    state.loadingTreePaths,
+                    shouldReset ? {} : state.loadingTreePaths,
                     payload.requestedWorkspaceRelativePath,
                     false
                 ),
@@ -350,24 +375,40 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         }),
 
     setWorkspaceGitSummary: (payload) =>
-        set((state) => ({
-            sessionId: payload.sessionId,
-            context: payload.context,
-            workspaceRoot: payload.workspaceRoot,
-            gitRoot: payload.gitRoot,
-            repository: payload.repository ?? null,
-            branch: payload.branch ?? null,
-            branches: payload.branches,
-            uncommittedChanges: payload.uncommittedChanges,
-            recentCommits: payload.recentCommits,
-            gitTruncated: payload.truncated,
-            isLoadingGit: false,
-            error: null,
-            expandedPaths: {
-                ...state.expandedPaths,
-                [payload.workspaceRoot]: true,
-            },
-        })),
+        set((state) => {
+            if (shouldIgnoreWorkspacePayload(state, payload.sessionId)) {
+                return state;
+            }
+
+            const shouldReset = shouldResetWorkspacePayload(
+                state,
+                payload.sessionId,
+                payload.workspaceRoot
+            );
+
+            return {
+                sessionId: payload.sessionId,
+                context: payload.context,
+                workspaceRoot: payload.workspaceRoot,
+                tree: shouldReset ? null : state.tree,
+                treeTruncated: shouldReset ? false : state.treeTruncated,
+                requestedWorkspaceRelativePath: shouldReset ? null : state.requestedWorkspaceRelativePath,
+                gitRoot: payload.gitRoot,
+                repository: payload.repository ?? null,
+                branch: payload.branch ?? null,
+                branches: payload.branches,
+                uncommittedChanges: payload.uncommittedChanges,
+                recentCommits: payload.recentCommits,
+                gitTruncated: payload.truncated,
+                isLoadingGit: false,
+                loadingTreePaths: shouldReset ? {} : state.loadingTreePaths,
+                error: null,
+                expandedPaths: {
+                    ...(shouldReset ? {} : state.expandedPaths),
+                    [payload.workspaceRoot]: true,
+                },
+            };
+        }),
 
     setBranchSwitching: (loading) =>
         set({

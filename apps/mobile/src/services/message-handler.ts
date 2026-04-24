@@ -259,6 +259,7 @@ function flushThinkingDeltaBuffer(sessionId: string): void {
     }
 
     armBackgroundCompletion(sessionId);
+    sessionStore.setAssistantTyping(true);
     sessionStore.appendThinkingDelta(delta, 0);
 }
 
@@ -799,9 +800,12 @@ export function handleServerMessage(message: ServerMessage): void {
                 break;
             }
             sessionStore.setAssistantTyping(false);
-            if (!abortInFlight) {
+            if (abortInFlight) {
+                sessionStore.stopActiveTurn();
+            } else {
                 sessionStore.setAbortRequested(false);
                 sessionStore.setAgentTodos([]);
+                sessionStore.settleRunningTools("completed");
                 sessionStore.finalizeThinking();
             }
             break;
@@ -1112,10 +1116,13 @@ export function handleServerMessage(message: ServerMessage): void {
                     flushSessionStreamBuffers(message.payload.sessionId);
                     if (abortInFlight) {
                         clearBackgroundCompletion(message.payload.sessionId);
+                        sessionStore.stopActiveTurn();
                     } else {
                         notifyIfBackgroundCompletion(message.payload.sessionId);
                         sessionStore.setAbortRequested(false);
                         sessionStore.setAgentTodos([]);
+                        sessionStore.settleRunningTools("completed");
+                        sessionStore.finalizeThinking();
                     }
                 }
                 sessionStore.setAssistantTyping(message.payload.busy);
@@ -1134,6 +1141,7 @@ export function handleServerMessage(message: ServerMessage): void {
             clearBackgroundCompletion(message.payload.sessionId);
             sessionStore.clearSessionPrompts(message.payload.sessionId);
             if (sessionStore.activeSessionId === message.payload.sessionId) {
+                sessionStore.settleRunningTools("failed", message.payload.message);
                 sessionStore.setActiveSession(null);
             }
             sessionStore.setSessionLoading(false);

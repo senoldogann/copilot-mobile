@@ -86,12 +86,13 @@ const workspaceViewerCache = new Map<string, ViewerCacheEntry>();
 
 type WorkspaceViewer = {
     path: string;
+    workspaceRoot: string;
     mode: "file" | "diff";
     commitHash?: string;
 };
 
 function createViewerCacheKey(sessionId: string, viewer: WorkspaceViewer): string {
-    return `${sessionId}:${viewer.mode}:${viewer.commitHash ?? "working-tree"}:${viewer.path}`;
+    return `${sessionId}:${viewer.workspaceRoot}:${viewer.mode}:${viewer.commitHash ?? "working-tree"}:${viewer.path}`;
 }
 
 function readViewerCache(key: string): Extract<InlineLoadState, { status: "ready" }> | null {
@@ -190,6 +191,21 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
         [workspace.branch, workspace.recentCommits, workspace.uncommittedChanges],
     );
 
+    const openViewer = useCallback(
+        (viewerInput: Omit<WorkspaceViewer, "workspaceRoot">) => {
+            const workspaceRoot = workspace.workspaceRoot;
+            if (workspaceRoot === null) {
+                return;
+            }
+
+            setViewer({
+                ...viewerInput,
+                workspaceRoot,
+            });
+        },
+        [workspace.workspaceRoot],
+    );
+
     // Load diff/file whenever viewer changes
     useEffect(() => {
         if (viewer === null || activeSessionId === null) return;
@@ -252,7 +268,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             return () => { finish(); unsub(); };
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [viewer?.path, viewer?.mode, viewer?.commitHash, activeSessionId]);
+    }, [viewer?.path, viewer?.workspaceRoot, viewer?.mode, viewer?.commitHash, activeSessionId]);
 
     useEffect(() => {
         if (!visible) return;
@@ -554,7 +570,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
             <Pressable
                 key={change.path}
                 style={({ pressed }) => [styles.changeRow, pressed && styles.changeRowPressed]}
-                onPress={() => setViewer({ path: change.path, mode: "diff" })}
+                onPress={() => openViewer({ path: change.path, mode: "diff" })}
             >
                 <View style={styles.changeIconWrap}>
                     <FileTypeIcon name={name} size={18} />
@@ -584,7 +600,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 </View>
             </Pressable>
         );
-    }, []);
+    }, [openViewer, styles]);
 
     const renderTreeNode = useCallback(
         (node: NonNullable<typeof workspace.tree>, depth: number): React.ReactNode => {
@@ -607,7 +623,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                         void requestWorkspaceTree(activeSessionId, node.path, DIRECTORY_TREE_DEPTH, 0, TREE_PAGE_SIZE);
                     }
                 } else {
-                    setViewer({ path: node.path, mode: "file" });
+                    openViewer({ path: node.path, mode: "file" });
                 }
             };
 
@@ -691,7 +707,16 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 </View>
             );
         },
-        [activeSessionId, isConnected, workspace.expandedPaths, workspace.loadingTreePaths],
+        [
+            activeSessionId,
+            isConnected,
+            openViewer,
+            theme.colors,
+            theme.spacing.lg,
+            treeStyles,
+            workspace.expandedPaths,
+            workspace.loadingTreePaths,
+        ],
     );
 
     // ---------- Changes tab content ----------
@@ -1034,7 +1059,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                 <View style={styles.changesList}>
                     {renderChangesAsTree(
                         workspace.uncommittedChanges,
-                        (path) => setViewer({ path, mode: "diff" }),
+                        (path) => openViewer({ path, mode: "diff" }),
                         styles,
                         treeStyles,
                         theme,
@@ -1192,7 +1217,7 @@ function WorkspacePanelComponent({ visible, onClose }: Props) {
                             style={({ pressed }) => [styles.changeRow, pressed && styles.changeRowPressed]}
                             onPress={() => {
                                 setSelectedCommit(null);
-                                setViewer({ path: filePath, mode: "diff", commitHash: selectedCommit.hash });
+                                openViewer({ path: filePath, mode: "diff", commitHash: selectedCommit.hash });
                             }}
                         >
                             <View style={styles.changeIconWrap}>

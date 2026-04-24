@@ -57,10 +57,15 @@ export function SunshineText({ active, text, textStyle, style, numberOfLines }: 
     const bandProps = useAnimatedProps(() => ({ x: sweepX.value }));
 
     const handleLayout = useCallback(
-        (e: LayoutChangeEvent) => setDims({
-            width: e.nativeEvent.layout.width,
-            height: e.nativeEvent.layout.height,
-        }),
+        (e: LayoutChangeEvent) => {
+            const nextWidth = e.nativeEvent.layout.width;
+            const nextHeight = e.nativeEvent.layout.height;
+            setDims((current) => (
+                current.width === nextWidth && current.height === nextHeight
+                    ? current
+                    : { width: nextWidth, height: nextHeight }
+            ));
+        },
         [],
     );
 

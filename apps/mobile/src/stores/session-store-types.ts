@@ -184,6 +184,10 @@ export type SessionStore = {
         status: "completed" | "failed" | "no_results",
         errorMessage?: string
     ) => void;
+    settleRunningTools: (
+        status: "completed" | "failed" | "no_results",
+        errorMessage?: string
+    ) => void;
     setCurrentIntent: (intent: string | null) => void;
     setAgentTodos: (todos: ReadonlyArray<AgentTodo>) => void;
     receivePermissionPrompt: (prompt: PermissionPrompt) => void;
