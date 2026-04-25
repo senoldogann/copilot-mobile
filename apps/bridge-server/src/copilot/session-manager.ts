@@ -42,6 +42,7 @@ import {
 import type { createCompletionNotifier } from "../notifications/completion-notifier.js";
 import type { createAttachmentUploadStore } from "../uploads/attachment-upload-store.js";
 import type { createVSCodeExternalSessionStore } from "../vscode/external-session-store.js";
+import { listInteractiveCommands } from "./interactive-commands.js";
 
 type SendFn = (message: ServerMessage) => void;
 type CompletionNotifier = ReturnType<typeof createCompletionNotifier>;
@@ -128,6 +129,16 @@ function normalizeToolCompletionStatus(
 function isSessionNotFoundResumeError(error: unknown): boolean {
     return error instanceof Error
         && /session not found|no such session|unknown session|file not found/i.test(error.message);
+}
+
+function isCorruptedSessionResumeError(error: unknown): boolean {
+    if (!(error instanceof Error)) {
+        return false;
+    }
+
+    return /session file is corrupted|unterminated string in json|unexpected end of json input|syntaxerror:.*json/i.test(
+        error.message
+    );
 }
 
 export function createSessionManager(
@@ -237,6 +248,45 @@ export function createSessionManager(
         });
     }
 
+    async function removeSessionArtifacts(
+        sessionId: string,
+        options: { deleteRemote: boolean }
+    ): Promise<void> {
+        const session = activeSessions.get(sessionId);
+        if (session !== undefined) {
+            activeSessions.delete(sessionId);
+            session.unsubscribeAll();
+            session.close();
+        }
+        clearBusyWatchdog(sessionId);
+        sessionStates.delete(sessionId);
+        completionNotifier.forgetSession(sessionId);
+
+        if (externalSessionStore !== undefined) {
+            try {
+                await externalSessionStore.removeSession(sessionId);
+            } catch (error: unknown) {
+                console.warn("[vscode-sync] Failed to remove external session", {
+                    sessionId,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        }
+
+        if (!options.deleteRemote) {
+            return;
+        }
+
+        try {
+            await copilotClient.deleteSession(sessionId);
+        } catch (error: unknown) {
+            console.warn("[session-manager] Failed to delete corrupted session after resume error", {
+                sessionId,
+                error: error instanceof Error ? error.message : String(error),
+            });
+        }
+    }
+
     function clearBusyWatchdog(sessionId: string): void {
         const timer = busyWatchdogTimers.get(sessionId);
         if (timer === undefined) {
@@ -320,6 +370,40 @@ export function createSessionManager(
             pendingInputs.delete(requestId);
             pending.resolve("");
         }
+    }
+
+    function hasPendingSessionInteractions(sessionId: string): boolean {
+        for (const pending of pendingPermissions.values()) {
+            if (pending.payload.payload.sessionId === sessionId) {
+                return true;
+            }
+        }
+
+        for (const pending of pendingInputs.values()) {
+            if (pending.payload.payload.sessionId === sessionId) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    function releaseIdleSessionOnDisconnect(sessionId: string): void {
+        const session = activeSessions.get(sessionId);
+        const state = sessionStates.get(sessionId);
+        if (session === undefined || state === undefined) {
+            return;
+        }
+
+        if (state.busy || hasPendingSessionInteractions(sessionId)) {
+            return;
+        }
+
+        activeSessions.delete(sessionId);
+        clearBusyWatchdog(sessionId);
+        completionNotifier.forgetSession(sessionId);
+        session.unsubscribeAll();
+        session.close();
     }
 
     function adaptSessionState(
@@ -954,6 +1038,20 @@ export function createSessionManager(
                     return;
                 }
 
+                if (isCorruptedSessionResumeError(err)) {
+                    await removeSessionArtifacts(sessionId, { deleteRemote: true });
+                    send({
+                        ...makeBase(),
+                        type: "error",
+                        payload: {
+                            code: "SESSION_NOT_FOUND",
+                            message: "Session data was corrupted and the broken session was removed",
+                            retry: false,
+                        },
+                    });
+                    return;
+                }
+
                 const message = err instanceof Error ? err.message : "Session resume failed";
                 send({
                     ...makeBase(),
@@ -1014,23 +1112,7 @@ export function createSessionManager(
         },
 
         async deleteSession(sessionId: string): Promise<void> {
-            const session = activeSessions.get(sessionId);
-            if (session !== undefined) {
-                activeSessions.delete(sessionId);
-                session.unsubscribeAll();
-                session.close();
-            }
-            clearBusyWatchdog(sessionId);
-            sessionStates.delete(sessionId);
-            completionNotifier.forgetSession(sessionId);
-            if (externalSessionStore !== undefined) {
-                void externalSessionStore.removeSession(sessionId).catch((error: unknown) => {
-                    console.warn("[vscode-sync] Failed to remove external session", {
-                        sessionId,
-                        error: error instanceof Error ? error.message : String(error),
-                    });
-                });
-            }
+            await removeSessionArtifacts(sessionId, { deleteRemote: false });
             try {
                 await copilotClient.deleteSession(sessionId);
             } catch (err) {
@@ -1192,6 +1274,74 @@ export function createSessionManager(
                     ...makeBase(),
                     type: "skills.list.response",
                     payload: { skills: [] },
+                });
+            }
+        },
+
+        async listCommands(): Promise<void> {
+            try {
+                const commands = await listInteractiveCommands();
+                send({
+                    ...makeBase(),
+                    type: "commands.list.response",
+                    payload: { commands },
+                });
+            } catch {
+                send({
+                    ...makeBase(),
+                    type: "commands.list.response",
+                    payload: { commands: [] },
+                });
+            }
+        },
+
+        async compactSessionHistory(sessionId: string): Promise<void> {
+            const session = activeSessions.get(sessionId);
+            if (session === undefined) {
+                send({
+                    ...makeBase(),
+                    type: "session.history.compact.response",
+                    payload: {
+                        sessionId,
+                        success: false,
+                        tokensRemoved: 0,
+                        messagesRemoved: 0,
+                        error: "Session is not active",
+                    },
+                });
+                return;
+            }
+
+            try {
+                const result = await session.compactHistory();
+                send({
+                    ...makeBase(),
+                    type: "session.history.compact.response",
+                    payload: {
+                        sessionId,
+                        success: result.success,
+                        tokensRemoved: result.tokensRemoved,
+                        messagesRemoved: result.messagesRemoved,
+                    },
+                });
+
+                const items = await session.getHistory();
+                send({
+                    ...makeBase(),
+                    type: "session.history",
+                    payload: { sessionId, items },
+                });
+            } catch (error) {
+                send({
+                    ...makeBase(),
+                    type: "session.history.compact.response",
+                    payload: {
+                        sessionId,
+                        success: false,
+                        tokensRemoved: 0,
+                        messagesRemoved: 0,
+                        error: error instanceof Error ? error.message : "History compaction failed",
+                    },
                 });
             }
         },
@@ -1704,7 +1854,9 @@ export function createSessionManager(
         },
 
         cleanupOnDisconnect(): void {
-            // Geçici bağlantı kopmalarında pending prompt'ları koru.
+            for (const sessionId of [...activeSessions.keys()]) {
+                releaseIdleSessionOnDisconnect(sessionId);
+            }
         },
 
         async shutdown(): Promise<void> {

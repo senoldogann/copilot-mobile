@@ -5,6 +5,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const currentFilePath = fileURLToPath(import.meta.url);
 const packageRoot = path.resolve(path.dirname(currentFilePath), "..");
-const daemonModuleUrl = pathToFileURL(path.join(packageRoot, "dist", "desktop", "bridge-daemon.cjs")).href;
+const daemonModuleUrl = pathToFileURL(path.join(packageRoot, "dist", "desktop", "bridge-daemon.mjs")).href;
 
 await import(daemonModuleUrl);

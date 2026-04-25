@@ -54,7 +54,7 @@ function makeClientMsg(
         id: randomUUID(),
         timestamp: Date.now(),
         seq: 1,
-        protocolVersion: 1,
+        protocolVersion: 2,
         type,
         payload,
     };

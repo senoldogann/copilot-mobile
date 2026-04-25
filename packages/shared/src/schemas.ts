@@ -611,6 +611,26 @@ const skillsListResponseSchema = baseBridgeMessageSchema.extend({
     }),
 });
 
+const commandsListResponseSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("commands.list.response"),
+    payload: z.object({
+        commands: z.array(
+            z.object({ name: z.string().min(1), description: z.string() })
+        ).readonly(),
+    }),
+});
+
+const sessionHistoryCompactResponseSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("session.history.compact.response"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+        success: z.boolean(),
+        tokensRemoved: z.number().int().nonnegative(),
+        messagesRemoved: z.number().int().nonnegative(),
+        error: z.string().min(1).optional(),
+    }),
+});
+
 export const serverMessageSchema = z.discriminatedUnion("type", [
     authAuthenticatedSchema,
     sessionCreatedSchema,
@@ -651,6 +671,8 @@ export const serverMessageSchema = z.discriminatedUnion("type", [
     workspaceDiffResponseSchema,
     workspaceSearchResponseSchema,
     skillsListResponseSchema,
+    commandsListResponseSchema,
+    sessionHistoryCompactResponseSchema,
 ]);
 
 // --- Client → Server Message Schemas ---
@@ -908,12 +930,25 @@ const skillsListRequestSchema = baseBridgeMessageSchema.extend({
     payload: z.object({}).strict(),
 });
 
+const commandsListRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("commands.list.request"),
+    payload: z.object({}).strict(),
+});
+
+const sessionHistoryCompactRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("session.history.compact.request"),
+    payload: z.object({
+        sessionId: z.string().min(1),
+    }),
+});
+
 export const clientMessageSchema = z.discriminatedUnion("type", [
     authPairSchema,
     authResumeSchema,
     sessionCreateSchema,
     sessionResumeSchema,
     sessionHistoryRequestSchema,
+    sessionHistoryCompactRequestSchema,
     sessionListRequestSchema,
     sessionDeleteSchema,
     attachmentUploadStartSchema,
@@ -943,6 +978,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     workspaceFileRequestSchema,
     workspaceDiffRequestSchema,
     skillsListRequestSchema,
+    commandsListRequestSchema,
 ]);
 
 // --- QR Payload Schema ---

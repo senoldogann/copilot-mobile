@@ -18,6 +18,10 @@ export type QueuedDraft = {
 
 export type ChatInputProps = {
     onSend: (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => void;
+    onRunUsage: () => void;
+    onRunCompact: () => void;
+    onStartNewChat: () => void;
+    onOpenSettings: () => void;
     onAbort: () => void;
     onLockedPress: () => void;
     isTyping: boolean;

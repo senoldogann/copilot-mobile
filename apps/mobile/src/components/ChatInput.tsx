@@ -888,41 +888,13 @@ function isLegacyFileMentionQuery(query: string): boolean {
         || query.startsWith("./");
 }
 
-const SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
-    // Chat management
-    { command: "/clear", description: "Start new chat, archive current", category: "chat" },
-    { command: "/compact", description: "Compact conversation to save context", category: "chat" },
-    { command: "/fork", description: "Fork conversation into a new session", category: "chat" },
-    { command: "/rename", description: "Rename this chat", category: "chat" },
-    // Code actions
-    { command: "/explain", description: "Explain selected code", category: "code" },
-    { command: "/fix", description: "Suggest a fix for the current issue", category: "code" },
-    { command: "/doc", description: "Add documentation to code", category: "code" },
-    { command: "/new", description: "Start a new session", category: "code" },
-    { command: "/tests", description: "Generate tests", category: "code" },
-    { command: "/newNotebook", description: "Create a new notebook", category: "code" },
-    { command: "/setupTests", description: "Set up the test framework", category: "code" },
-    // Copilot configuration
-    { command: "/agents", description: "Configure custom agents", category: "config" },
-    { command: "/debug", description: "Show chat debug view", category: "config" },
-    { command: "/hooks", description: "Configure hooks", category: "config" },
-    { command: "/instructions", description: "Configure instructions", category: "config" },
+const APP_SLASH_COMMANDS: ReadonlyArray<SlashCommand> = [
+    { command: "/new", description: "Start a new chat", category: "chat" },
     { command: "/models", description: "Open the model picker", category: "config" },
-    { command: "/plugins", description: "Manage plugins", category: "config" },
-    { command: "/prompts", description: "Configure prompt files", category: "config" },
-    { command: "/skills", description: "Configure skills", category: "config" },
-    { command: "/tools", description: "Configure tools", category: "config" },
-    // Session permissions
-    { command: "/autoApprove", description: "Set permissions to bypass approvals", category: "session" },
-    { command: "/autopilot", description: "Set permissions to autopilot mode", category: "session" },
-    { command: "/yolo", description: "Set permissions to bypass approvals", category: "session" },
-    { command: "/disableAutoApprove", description: "Set permissions back to default", category: "session" },
-    { command: "/disableYolo", description: "Set permissions back to default", category: "session" },
-    { command: "/exitAutopilot", description: "Set permissions back to default", category: "session" },
-    // Support
-    { command: "/feedback", description: "Send app feedback by email", category: "help" },
-    // Help
-    { command: "/help", description: "Show help and available commands", category: "help" },
+    { command: "/settings", description: "Open app settings", category: "app" },
+    { command: "/usage", description: "Show current session usage", category: "session" },
+    { command: "/compact", description: "Compact conversation to save context", category: "session" },
+    { command: "/app-feedback", description: "Send app feedback by email", category: "app" },
 ];
 
 function shouldSearchWorkspaceFiles(token: AutocompleteToken): boolean {
@@ -1169,6 +1141,10 @@ function areChatInputPropsEqual(
         );
 
     return previousProps.onSend === nextProps.onSend
+        && previousProps.onRunUsage === nextProps.onRunUsage
+        && previousProps.onRunCompact === nextProps.onRunCompact
+        && previousProps.onStartNewChat === nextProps.onStartNewChat
+        && previousProps.onOpenSettings === nextProps.onOpenSettings
         && previousProps.onAbort === nextProps.onAbort
         && previousProps.onLockedPress === nextProps.onLockedPress
         && previousProps.isTyping === nextProps.isTyping
@@ -1186,6 +1162,10 @@ function areChatInputPropsEqual(
 
 function ChatInputComponent({
     onSend,
+    onRunUsage,
+    onRunCompact,
+    onStartNewChat,
+    onOpenSettings,
     onAbort,
     onLockedPress,
     isTyping,
@@ -1246,11 +1226,20 @@ function ChatInputComponent({
     const setSelectedModel = useSessionStore((s) => s.setSelectedModel);
     const reasoningEffort = useSessionStore((s) => s.reasoningEffort);
     const setReasoningEffort = useSessionStore((s) => s.setReasoningEffort);
-    const skills = useSessionStore((s) => s.skills);
     const sessionUsage = useSessionStore((s) =>
         s.activeSessionId !== null ? s.sessionUsage[s.activeSessionId] : undefined
     );
     const currentModel = models.find((m) => m.id === selectedModel);
+    const activeSession = activeSessionId !== null
+        ? sessions.find((session) => session.id === activeSessionId)
+        : undefined;
+    const resolvedSessionModelName = (() => {
+        if (activeSession === undefined || activeSession.model === MODEL_UNKNOWN) {
+            return null;
+        }
+        const resolvedModel = models.find((model) => model.id === activeSession.model);
+        return resolvedModel?.name ?? activeSession.model;
+    })();
     const effortInfo = deriveAvailableReasoningEfforts(currentModel);
     const voiceAvailable = useMemo(() => ExpoSpeechRecognitionModule.isRecognitionAvailable(), []);
 
@@ -1305,9 +1294,9 @@ function ChatInputComponent({
 
             void (async () => {
                 const normalized = trimmed.toLowerCase();
-                if (normalized === "/feedback" || normalized.startsWith("/feedback ")) {
+                if (normalized === "/app-feedback" || normalized.startsWith("/app-feedback ")) {
                     stopVoiceCapture(false);
-                    const feedbackMessage = trimmed.slice("/feedback".length).trim();
+                    const feedbackMessage = trimmed.slice("/app-feedback".length).trim();
                     const opened = await openFeedbackEmail(feedbackMessage, activeSessionId);
                     if (!opened) {
                         return;
@@ -1315,6 +1304,47 @@ function ChatInputComponent({
 
                     setInput("");
                     setImages([]);
+                    return;
+                }
+
+                if (normalized === "/usage") {
+                    stopVoiceCapture(false);
+                    setInput("");
+                    setImages([]);
+                    onRunUsage();
+                    return;
+                }
+
+                if (normalized === "/compact") {
+                    stopVoiceCapture(false);
+                    setInput("");
+                    setImages([]);
+                    onRunCompact();
+                    return;
+                }
+
+                if (normalized === "/new") {
+                    stopVoiceCapture(false);
+                    setInput("");
+                    setImages([]);
+                    onStartNewChat();
+                    return;
+                }
+
+                if (normalized === "/settings") {
+                    stopVoiceCapture(false);
+                    setInput("");
+                    setImages([]);
+                    onOpenSettings();
+                    return;
+                }
+
+                if (normalized === "/models") {
+                    stopVoiceCapture(false);
+                    setInput("");
+                    setImages([]);
+                    Keyboard.dismiss();
+                    setShowModelPicker(true);
                     return;
                 }
 
@@ -1344,7 +1374,7 @@ function ChatInputComponent({
                 onSend(trimmed, currentImages, mode);
             })();
         },
-        [activeSessionId, input, disabled, images, isComposerLocked, onSend, stopVoiceCapture]
+        [activeSessionId, input, disabled, images, isComposerLocked, onOpenSettings, onRunCompact, onRunUsage, onSend, onStartNewChat, stopVoiceCapture]
     );
 
     useEffect(() => {
@@ -1612,11 +1642,12 @@ function ChatInputComponent({
             const contextMatches = CONTEXT_SUGGESTIONS.filter((item) =>
                 item.label.slice(1).toLowerCase().includes(query)
             );
-            const fileMatches = [...new Set([
+            const matchingContextFilePaths = [...new Set([
                 ...filePaths.filter((p) => pathMatchesQuery(p, query)),
                 ...workspaceFileMatches,
-            ])]
-                .slice(0, 8)
+            ])];
+            const fileMatches = matchingContextFilePaths
+                .slice(0, query.length === 0 ? matchingContextFilePaths.length : 8)
                 .map((p) => ({
                     label: `#${p}`,
                     value: `#${p} `,
@@ -1624,20 +1655,26 @@ function ChatInputComponent({
                     category: "File",
                     icon: <FileTextIcon size={14} color={theme.colors.textTertiary} />,
                 }));
-            return [...contextMatches, ...fileMatches].slice(0, 10);
+            const combinedContextMatches = [...contextMatches, ...fileMatches];
+            if (query.length === 0) {
+                return combinedContextMatches;
+            }
+            return combinedContextMatches.slice(0, 10);
         }
 
         if (activeToken.kind === "mention") {
             const participantMatches = PARTICIPANT_SUGGESTIONS.filter((item) =>
                 item.label.slice(1).toLowerCase().includes(query)
             );
-            const legacyFileMatches = !isLegacyFileMentionQuery(activeToken.query)
+            const shouldIncludeLegacyFileMatches = query.length === 0 || isLegacyFileMentionQuery(activeToken.query);
+            const matchingMentionFilePaths = [...new Set([
+                ...filePaths.filter((p) => pathMatchesQuery(p, query)),
+                ...workspaceFileMatches,
+            ])];
+            const legacyFileMatches = !shouldIncludeLegacyFileMatches
                 ? []
-                : [...new Set([
-                    ...filePaths.filter((p) => pathMatchesQuery(p, query)),
-                    ...workspaceFileMatches,
-                ])]
-                    .slice(0, 8)
+                : matchingMentionFilePaths
+                    .slice(0, query.length === 0 ? matchingMentionFilePaths.length : 8)
                     .map((p) => ({
                         label: `@${p}`,
                         value: `@${p} `,
@@ -1645,10 +1682,14 @@ function ChatInputComponent({
                         category: "File",
                         icon: <FileTextIcon size={14} color={theme.colors.textTertiary} />,
                     }));
-            return [...participantMatches, ...legacyFileMatches].slice(0, 10);
+            const combinedMentionMatches = [...participantMatches, ...legacyFileMatches];
+            if (query.length === 0) {
+                return combinedMentionMatches;
+            }
+            return combinedMentionMatches.slice(0, 10);
         }
 
-        const staticMatches = SLASH_COMMANDS
+        const staticMatches = APP_SLASH_COMMANDS
             .filter((c) => c.command.slice(1).toLowerCase().startsWith(query))
             .map((c) => ({
                 label: c.command,
@@ -1657,19 +1698,11 @@ function ChatInputComponent({
                 category: "Command",
                 icon: <SlidersIcon size={13} color={theme.colors.textTertiary} />,
             }));
-
-        const skillMatches = skills
-            .filter((s) => s.name.toLowerCase().startsWith(query))
-            .map((s) => ({
-                label: `/${s.name}`,
-                value: `/${s.name} `,
-                hint: s.description.length > 0 ? s.description : "Agent skill",
-                category: "Skill",
-                icon: <AgentIcon size={13} color={theme.colors.textTertiary} />,
-            }));
-
-        return [...staticMatches, ...skillMatches].slice(0, 10);
-    }, [activeToken, filePaths, skills, theme.colors.textTertiary, workspaceFileMatches]);
+        if (query.length === 0) {
+            return staticMatches;
+        }
+        return staticMatches.slice(0, 10);
+    }, [activeToken, filePaths, theme.colors.textTertiary, workspaceFileMatches]);
 
     // Apply selected suggestion: replace token and move cursor to end.
     const applySuggestion = useCallback((value: string) => {
@@ -1852,15 +1885,12 @@ function ChatInputComponent({
             return null;
         }
 
-        const activeSession = sessions.find((session) => session.id === activeSessionId);
         if (activeSession === undefined || activeSession.model === MODEL_UNKNOWN) {
             return null;
         }
 
-        const resolvedModel = models.find((model) => model.id === activeSession.model);
-        const resolvedModelName = resolvedModel?.name ?? activeSession.model;
-        return `Used ${resolvedModelName}`;
-    }, [activeSessionId, currentModel?.id, currentModel?.name, isTyping, models, selectedModel, sessions]);
+        return `Used ${resolvedSessionModelName ?? activeSession.model}`;
+    }, [activeSession, activeSessionId, currentModel?.id, currentModel?.name, isTyping, resolvedSessionModelName, selectedModel]);
 
     const supportsVision = currentModel?.supportsVision === true;
     // Live context usage takes priority over static model limit.
@@ -1879,6 +1909,9 @@ function ChatInputComponent({
         : null;
     const contextLimit = sessionUsage?.tokenLimit ?? currentModel?.contextWindowTokens ?? null;
     const contextCurrent = sessionUsage?.currentTokens ?? null;
+    const remainingTokens = contextLimit !== null && contextCurrent !== null
+        ? Math.max(0, contextLimit - contextCurrent)
+        : null;
     const contextPercent = contextLimit !== null && contextCurrent !== null && contextLimit > 0
         ? Math.min(100, Math.round((contextCurrent / contextLimit) * 100))
         : null;
@@ -1901,6 +1934,15 @@ function ChatInputComponent({
         }
         return `${((value / contextLimit) * 100).toFixed(1)}%`;
     };
+    const formatUsageValue = (value: number | null | undefined): string => {
+        if (value === null || value === undefined) {
+            return "—";
+        }
+        return formatCtxWindow(value);
+    };
+    const messageCountLabel = sessionUsage?.messagesLength !== undefined
+        ? String(sessionUsage.messagesLength)
+        : "—";
 
     const contextMeterPercent = contextPercent ?? 0;
     const contextMeterRadius = 6.5;
@@ -2129,7 +2171,7 @@ function ChatInputComponent({
                                 <Pressable
                                     style={toolbarStyles.contextMeterBtn}
                                     onPress={() => setShowContextWindowSheet(true)}
-                                    accessibilityLabel="Show context window details"
+                                    accessibilityLabel="Show usage center"
                                 >
                                     <Svg width={18} height={18} viewBox="0 0 18 18">
                                         <Circle
@@ -2217,7 +2259,8 @@ function ChatInputComponent({
             <DropdownModal
                 visible={showContextWindowSheet}
                 onClose={() => setShowContextWindowSheet(false)}
-                title="Context Window"
+                title="Usage Center"
+                iconNode={<HashIcon size={15} color={theme.colors.textSecondary} />}
             >
                 <View style={contextStyles.container}>
                     <View style={contextStyles.heroCard}>
@@ -2234,6 +2277,12 @@ function ChatInputComponent({
                                     ? `${contextWindowLabel} tokens`
                                     : "Context unavailable"}
                         </Text>
+                        <Text style={contextStyles.summaryMeta}>
+                            {resolvedSessionModelName ?? (currentModel?.name ?? "Current model")}
+                            {sessionUsage?.messagesLength !== undefined
+                                ? ` · ${sessionUsage.messagesLength} messages`
+                                : ""}
+                        </Text>
                         {reservedPercent !== null ? (
                             <View style={contextStyles.reservePill}>
                                 <Text style={contextStyles.reservePillText}>
@@ -2248,15 +2297,34 @@ function ChatInputComponent({
                         ) : null}
                     </View>
 
+                    <View style={contextStyles.statGrid}>
+                        <View style={contextStyles.statCard}>
+                            <Text style={contextStyles.statLabel}>Used</Text>
+                            <Text style={contextStyles.statValue}>{formatUsageValue(contextCurrent)}</Text>
+                        </View>
+                        <View style={contextStyles.statCard}>
+                            <Text style={contextStyles.statLabel}>Remaining</Text>
+                            <Text style={contextStyles.statValue}>{formatUsageValue(remainingTokens)}</Text>
+                        </View>
+                        <View style={contextStyles.statCard}>
+                            <Text style={contextStyles.statLabel}>Messages</Text>
+                            <Text style={contextStyles.statValue}>{messageCountLabel}</Text>
+                        </View>
+                    </View>
+
                     <View style={contextStyles.sectionCard}>
                         <Text style={contextStyles.sectionTitle}>System</Text>
                         <View style={contextStyles.metricRow}>
                             <Text style={contextStyles.metricLabel}>System Instructions</Text>
-                            <Text style={contextStyles.metricValue}>{detailPercent(sessionUsage?.systemTokens)}</Text>
+                            <Text style={contextStyles.metricValue}>
+                                {formatUsageValue(sessionUsage?.systemTokens)} · {detailPercent(sessionUsage?.systemTokens)}
+                            </Text>
                         </View>
                         <View style={contextStyles.metricRow}>
                             <Text style={contextStyles.metricLabel}>Tool Definitions</Text>
-                            <Text style={contextStyles.metricValue}>{detailPercent(sessionUsage?.toolDefinitionsTokens)}</Text>
+                            <Text style={contextStyles.metricValue}>
+                                {formatUsageValue(sessionUsage?.toolDefinitionsTokens)} · {detailPercent(sessionUsage?.toolDefinitionsTokens)}
+                            </Text>
                         </View>
                     </View>
 
@@ -2264,28 +2332,44 @@ function ChatInputComponent({
                         <Text style={contextStyles.sectionTitle}>User Context</Text>
                         <View style={contextStyles.metricRow}>
                             <Text style={contextStyles.metricLabel}>Messages</Text>
-                            <Text style={contextStyles.metricValue}>{detailPercent(sessionUsage?.conversationTokens)}</Text>
+                            <Text style={contextStyles.metricValue}>
+                                {formatUsageValue(sessionUsage?.conversationTokens)} · {detailPercent(sessionUsage?.conversationTokens)}
+                            </Text>
                         </View>
                         <View style={contextStyles.metricRow}>
                             <Text style={contextStyles.metricLabel}>Tool Results</Text>
-                            <Text style={contextStyles.metricValue}>{detailPercent(toolResultsTokens)}</Text>
+                            <Text style={contextStyles.metricValue}>
+                                {formatUsageValue(toolResultsTokens)} · {detailPercent(toolResultsTokens)}
+                            </Text>
                         </View>
                     </View>
 
-                    <Pressable
-                        style={contextStyles.compactButton}
-                        onPress={() => {
-                            setShowContextWindowSheet(false);
-                            // Send /compact directly so the user does not need to type it manually.
-                            // Once processed by the SDK slash command handler, the stream shows "Compacting conversation…".
-                            if (!disabled) {
-                                onSend("/compact", [], "send");
-                            }
-                        }}
-                        disabled={disabled}
-                    >
-                        <Text style={contextStyles.compactButtonText}>Compact Conversation</Text>
-                    </Pressable>
+                    <View style={contextStyles.actionRow}>
+                        <Pressable
+                            style={[contextStyles.actionButton, contextStyles.secondaryActionButton]}
+                            onPress={() => {
+                                setShowContextWindowSheet(false);
+                                if (!disabled) {
+                                    onRunUsage();
+                                }
+                            }}
+                            disabled={disabled}
+                        >
+                            <Text style={contextStyles.secondaryActionButtonText}>Run /usage</Text>
+                        </Pressable>
+                        <Pressable
+                            style={[contextStyles.actionButton, contextStyles.primaryActionButton]}
+                            onPress={() => {
+                                setShowContextWindowSheet(false);
+                                if (!disabled) {
+                                    onRunCompact();
+                                }
+                            }}
+                            disabled={disabled}
+                        >
+                            <Text style={contextStyles.primaryActionButtonText}>Compact Conversation</Text>
+                        </Pressable>
+                    </View>
                 </View>
             </DropdownModal>
             {resolvedAutoModelLabel !== null && (

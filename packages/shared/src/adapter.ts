@@ -61,6 +61,11 @@ export type AdaptedPlanExitRequest = {
 export type AdaptedCopilotSession = {
     readonly id: string;
     send(message: SessionMessageInput): Promise<void>;
+    compactHistory(): Promise<{
+        success: boolean;
+        tokensRemoved: number;
+        messagesRemoved: number;
+    }>;
     abort(): void;
     onMessage(handler: (content: string) => void): void;
     onDelta(handler: (delta: string, index: number) => void): void;

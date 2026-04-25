@@ -1391,8 +1391,8 @@ export function handleServerMessage(message: ServerMessage): void {
             break;
         }
 
-        case "skills.list.response": {
-            sessionStore.setSkills(message.payload.skills);
+        case "skills.list.response":
+        case "commands.list.response": {
             break;
         }
 
@@ -1444,24 +1444,22 @@ export function handleServerMessage(message: ServerMessage): void {
             clearSessionPrefetch(message.payload.sessionId);
             flushSessionStreamBuffers(message.payload.sessionId);
             sessionStore.setSessionBusy(message.payload.sessionId, false);
+            const formattedError = `[${message.payload.errorType}] ${message.payload.message}`;
             notifyBackgroundCompletionFailure(
                 message.payload.sessionId,
-                `[${message.payload.errorType}] ${message.payload.message}`
+                formattedError
             );
             clearBackgroundCompletion(message.payload.sessionId);
             sessionStore.clearSessionPrompts(message.payload.sessionId);
             if (sessionStore.activeSessionId === message.payload.sessionId) {
                 sessionStore.settleRunningTools("failed", message.payload.message);
-                sessionStore.setActiveSession(null);
+                sessionStore.setSessionLoading(false);
+                sessionStore.setAssistantTyping(false);
+                sessionStore.setAbortRequested(false);
+                sessionStore.setAgentTodos([]);
+                sessionStore.clearSubagentRuns();
+                addSystemNotificationForActiveSession(message.payload.sessionId, formattedError);
             }
-            sessionStore.setSessionLoading(false);
-            sessionStore.setAssistantTyping(false);
-            sessionStore.setAbortRequested(false);
-            sessionStore.setAgentTodos([]);
-            sessionStore.clearSubagentRuns();
-            connectionStore.setError(
-                `[${message.payload.errorType}] ${message.payload.message}`
-            );
             break;
         }
 
@@ -1485,6 +1483,16 @@ export function handleServerMessage(message: ServerMessage): void {
 
         case "session.usage": {
             sessionStore.setSessionUsage(message.payload);
+            break;
+        }
+
+        case "session.history.compact.response": {
+            if (!isActiveSession(message.payload.sessionId)) break;
+
+            const content = message.payload.success
+                ? `Conversation compacted. Removed ${message.payload.messagesRemoved} messages and freed ${message.payload.tokensRemoved} tokens.`
+                : `Could not compact conversation: ${message.payload.error ?? "Unknown error"}`;
+            sessionStore.finalizeAssistantMessage(content);
             break;
         }
 

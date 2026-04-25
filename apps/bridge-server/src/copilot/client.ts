@@ -898,6 +898,19 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
                 );
             },
 
+            async compactHistory(): Promise<{
+                success: boolean;
+                tokensRemoved: number;
+                messagesRemoved: number;
+            }> {
+                const result = await sdkSession.rpc.history.compact();
+                return {
+                    success: result.success,
+                    tokensRemoved: result.tokensRemoved,
+                    messagesRemoved: result.messagesRemoved,
+                };
+            },
+
             abort(): void {
                 sdkSession.abort().catch((err: unknown) => {
                     console.error(`[sdk] Session ${sessionId} abort error:`, err);

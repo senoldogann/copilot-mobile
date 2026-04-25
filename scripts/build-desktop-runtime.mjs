@@ -6,15 +6,17 @@ const rootDirectory = process.cwd();
 const outDirectory = path.join(rootDirectory, "dist", "desktop");
 
 mkdirSync(outDirectory, { recursive: true });
+rmSync(path.join(outDirectory, "bridge-daemon.cjs"), { force: true });
+rmSync(path.join(outDirectory, "bridge-daemon.cjs.map"), { force: true });
 rmSync(path.join(outDirectory, "bridge-daemon.mjs"), { force: true });
 rmSync(path.join(outDirectory, "bridge-daemon.mjs.map"), { force: true });
 
 await build({
     entryPoints: [path.join(rootDirectory, "apps", "bridge-server", "src", "daemon.ts")],
-    outfile: path.join(outDirectory, "bridge-daemon.cjs"),
+    outfile: path.join(outDirectory, "bridge-daemon.mjs"),
     bundle: true,
     platform: "node",
-    format: "cjs",
+    format: "esm",
     target: "node20",
     tsconfigRaw: {
         compilerOptions: {},

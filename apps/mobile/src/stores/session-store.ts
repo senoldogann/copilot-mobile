@@ -57,7 +57,6 @@ export const useSessionStore = create<SessionStore>((set) => ({
     isSessionLoading: false,
     sessions: [],
     models: [],
-    skills: [],
     selectedModel: "",
     reasoningEffort: null,
     autoApproveReads: false,
@@ -221,8 +220,6 @@ export const useSessionStore = create<SessionStore>((set) => ({
                 reasoningEffort: nextEffort,
             };
         }),
-
-    setSkills: (skills) => set({ skills }),
 
     setSelectedModel: (model) =>
         set((state) => {
@@ -1026,7 +1023,6 @@ export const useSessionStore = create<SessionStore>((set) => ({
             isSessionLoading: false,
             sessions: [],
             models: [],
-            skills: [],
             selectedModel: "",
             reasoningEffort: null,
             autoApproveReads: false,

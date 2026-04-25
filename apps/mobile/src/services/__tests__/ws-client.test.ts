@@ -177,7 +177,7 @@ describe("createWSClient", () => {
                 id: "52c7894e-3fef-419c-a60d-b3195466d077",
                 timestamp: Date.now(),
                 seq: 1,
-                protocolVersion: 1,
+                protocolVersion: 2,
                 type: "auth.authenticated",
                 payload: {
                     authMethod: "pair",

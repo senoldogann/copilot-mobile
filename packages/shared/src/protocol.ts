@@ -434,6 +434,11 @@ export type SkillInfo = {
     description: string;
 };
 
+export type CommandInfo = {
+    name: string;
+    description: string;
+};
+
 // --- Host + Bridge Capability State ---
 
 export type HostSessionCapabilities = {
@@ -721,7 +726,9 @@ export type ServerMessage =
     | WorkspaceFileResponseMessage
     | WorkspaceDiffResponseMessage
     | WorkspaceSearchResponseMessage
-    | SkillsListResponseMessage;
+    | SkillsListResponseMessage
+    | CommandsListResponseMessage
+    | SessionHistoryCompactResponseMessage;
 
 // --- Client → Server Messages (Discriminated Union) ---
 
@@ -755,6 +762,11 @@ export type SessionResumeMessage = BaseBridgeMessage & {
 
 export type SessionHistoryRequestMessage = BaseBridgeMessage & {
     type: "session.history.request";
+    payload: { sessionId: string };
+};
+
+export type SessionHistoryCompactRequestMessage = BaseBridgeMessage & {
+    type: "session.history.compact.request";
     payload: { sessionId: string };
 };
 
@@ -875,9 +887,30 @@ export type SkillsListRequestMessage = BaseBridgeMessage & {
     payload: Record<string, never>;
 };
 
+export type CommandsListRequestMessage = BaseBridgeMessage & {
+    type: "commands.list.request";
+    payload: Record<string, never>;
+};
+
 export type SkillsListResponseMessage = BaseBridgeMessage & {
     type: "skills.list.response";
     payload: { skills: ReadonlyArray<SkillInfo> };
+};
+
+export type CommandsListResponseMessage = BaseBridgeMessage & {
+    type: "commands.list.response";
+    payload: { commands: ReadonlyArray<CommandInfo> };
+};
+
+export type SessionHistoryCompactResponseMessage = BaseBridgeMessage & {
+    type: "session.history.compact.response";
+    payload: {
+        sessionId: string;
+        success: boolean;
+        tokensRemoved: number;
+        messagesRemoved: number;
+        error?: string;
+    };
 };
 
 export type ClientMessage =
@@ -886,6 +919,7 @@ export type ClientMessage =
     | SessionCreateMessage
     | SessionResumeMessage
     | SessionHistoryRequestMessage
+    | SessionHistoryCompactRequestMessage
     | SessionListRequestMessage
     | SessionDeleteMessage
     | AttachmentUploadStartMessage
@@ -904,6 +938,7 @@ export type ClientMessage =
     | NotificationDeviceUnregisterMessage
     | NotificationPresenceUpdateMessage
     | SkillsListRequestMessage
+    | CommandsListRequestMessage
     | WorkspaceSearchRequestMessage
     | WorkspaceTreeRequestMessage
     | WorkspaceGitSummaryRequestMessage

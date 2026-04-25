@@ -346,6 +346,14 @@ export function createWSClient(config: WSClientConfig) {
         }
 
         const message = result.data as ServerMessage;
+
+        if (message.protocolVersion !== PROTOCOL_VERSION) {
+            disconnectWithError(
+                `[PROTOCOL_MISMATCH] Unsupported protocol version ${message.protocolVersion}; expected ${PROTOCOL_VERSION}`
+            );
+            return;
+        }
+
         lastServerSeq = message.seq;
 
         if (message.type === "error" && state !== "authenticated") {

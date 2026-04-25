@@ -100,7 +100,7 @@ function makeClientMessage(
         id: randomUUID(),
         timestamp: Date.now(),
         seq: 1,
-        protocolVersion: 1,
+        protocolVersion: 2,
         type,
         payload,
     };
@@ -366,18 +366,34 @@ class FakeSession implements AdaptedCopilotSession {
     }
 }
 
-function createFakeClient(session: FakeSession): AdaptedCopilotClient {
+function createFakeClient(
+    session: FakeSession,
+    options: {
+        resumeSession?: (sessionId: string) => Promise<AdaptedCopilotSession>;
+        listSessions?: () => Promise<ReadonlyArray<SessionInfo>>;
+        deleteSession?: (sessionId: string) => Promise<void>;
+    } = {}
+): AdaptedCopilotClient {
     return {
         async createSession(_config: SessionConfig): Promise<AdaptedCopilotSession> {
             return session;
         },
-        async resumeSession(_sessionId: string): Promise<AdaptedCopilotSession> {
+        async resumeSession(sessionId: string): Promise<AdaptedCopilotSession> {
+            if (options.resumeSession !== undefined) {
+                return options.resumeSession(sessionId);
+            }
             return session;
         },
         async listSessions(): Promise<ReadonlyArray<SessionInfo>> {
+            if (options.listSessions !== undefined) {
+                return options.listSessions();
+            }
             return [session.getInfo()];
         },
-        async deleteSession(): Promise<void> {
+        async deleteSession(sessionId: string): Promise<void> {
+            if (options.deleteSession !== undefined) {
+                return options.deleteSession(sessionId);
+            }
             return Promise.resolve();
         },
         async listModels(): Promise<ReadonlyArray<ModelInfo>> {
@@ -579,6 +595,70 @@ describe("bridge reconnect and auth integration", () => {
             }
         } finally {
             await clientA.close();
+        }
+    });
+
+    it("releases idle sessions on disconnect so later resumes do not conflict", async () => {
+        await server.shutdown();
+
+        let resumeCallCount = 0;
+        server = createBridgeServer(createFakeClient(session, {
+            async resumeSession(): Promise<AdaptedCopilotSession> {
+                resumeCallCount += 1;
+                return session;
+            },
+        }));
+        await server.start();
+
+        const token = generatePairingToken();
+        const clientA = await createWSClient(testPort);
+
+        try {
+            clientA.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            const pairingMessage = await clientA.waitForMessage("auth.authenticated");
+            assert.equal(pairingMessage.type, "auth.authenticated");
+
+            clientA.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            const created = await clientA.waitForMessage("session.created");
+            assert.equal(created.type, "session.created");
+
+            await clientA.close();
+            await wait(25);
+            assert.equal(session.closeCallCount, 1);
+
+            const clientB = await createWSClient(testPort);
+            try {
+                clientB.send(makeClientMessage("auth.resume", {
+                    deviceCredential: pairingMessage.payload.deviceCredential,
+                    sessionToken: pairingMessage.payload.sessionToken,
+                    lastSeenSeq: pairingMessage.seq,
+                    transportMode: "direct",
+                }));
+                await clientB.waitForMessage("auth.authenticated");
+
+                clientB.send(makeClientMessage("session.resume", {
+                    sessionId: created.payload.session.id,
+                }));
+                const resumed = await clientB.waitForMessage("session.resumed");
+                assert.equal(resumed.type, "session.resumed");
+                assert.equal(resumeCallCount, 1);
+            } finally {
+                await clientB.close();
+            }
+        } finally {
+            if (clientA.ws.readyState !== WebSocket.CLOSED) {
+                await clientA.close();
+            }
         }
     });
 
@@ -823,6 +903,46 @@ describe("bridge reconnect and auth integration", () => {
             }
             session.setHistory([]);
             session.setHistoryResolver(async () => []);
+        }
+    });
+
+    it("removes corrupted sessions instead of surfacing a fatal resume SDK error", async () => {
+        await server.shutdown();
+
+        const corruptedSessionId = session.id;
+        const deletedSessionIds: Array<string> = [];
+        server = createBridgeServer(createFakeClient(session, {
+            async resumeSession(requestedSessionId: string): Promise<AdaptedCopilotSession> {
+                assert.equal(requestedSessionId, corruptedSessionId);
+                throw new Error(
+                    "Session file is corrupted (line 16: SyntaxError: Unterminated string in JSON at position 79 (line 1 column 80))"
+                );
+            },
+            async deleteSession(sessionId: string): Promise<void> {
+                deletedSessionIds.push(sessionId);
+            },
+        }));
+        await server.start();
+
+        const token = generatePairingToken();
+        const client = await createWSClient(testPort);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.resume", { sessionId: corruptedSessionId }));
+            const errorMessage = await client.waitForMessage("error");
+            assert.equal(errorMessage.type, "error");
+            assert.equal(errorMessage.payload.code, "SESSION_NOT_FOUND");
+            assert.equal(errorMessage.payload.retry, false);
+            assert.match(errorMessage.payload.message, /corrupted/i);
+            assert.deepEqual(deletedSessionIds, [corruptedSessionId]);
+        } finally {
+            await client.close();
         }
     });
 

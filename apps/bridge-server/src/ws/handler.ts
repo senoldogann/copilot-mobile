@@ -75,6 +75,7 @@ export function createMessageHandler(
         transportMode: null,
     };
     let tokenRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+    let cleanedUp = false;
 
     function makeBase() {
         return {
@@ -377,6 +378,15 @@ export function createMessageHandler(
 
             const message = result.data as ClientMessage;
 
+            if (message.protocolVersion !== PROTOCOL_VERSION) {
+                sendError(
+                    "PROTOCOL_MISMATCH",
+                    `Unsupported protocol version ${message.protocolVersion}; expected ${PROTOCOL_VERSION}`,
+                    false
+                );
+                return;
+            }
+
             if (!checkReplayProtection(message.id)) {
                 sendError("REPLAY_ATTACK", "Duplicate message ID rejected", false);
                 return;
@@ -435,6 +445,9 @@ export function createMessageHandler(
 
                 case "session.history.request":
                     return sessionManager.requestSessionHistory(message.payload.sessionId);
+
+                case "session.history.compact.request":
+                    return sessionManager.compactSessionHistory(message.payload.sessionId);
 
                 case "session.list":
                     return sessionManager.listSessions();
@@ -511,6 +524,9 @@ export function createMessageHandler(
 
                 case "skills.list.request":
                     return sessionManager.listSkills();
+
+                case "commands.list.request":
+                    return sessionManager.listCommands();
 
                 case "capabilities.request":
                     sessionManager.emitCapabilitiesState();
@@ -645,6 +661,11 @@ export function createMessageHandler(
         },
 
         cleanup(): void {
+            if (cleanedUp) {
+                return;
+            }
+
+            cleanedUp = true;
             clearTokenRefreshTimer();
             sessionManager.cleanupOnDisconnect();
         },

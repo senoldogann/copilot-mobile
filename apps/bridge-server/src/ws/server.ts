@@ -477,6 +477,7 @@ export function createBridgeServer(
         ws.on("close", (code: number, reason: Buffer) => {
             console.log(`[ws] Connection closed: ${code} ${reason.toString("utf-8")}`);
             clearAuthTimeout();
+            handler.cleanup();
             if (handler.deviceId !== null) {
                 deviceRegistry.markDisconnected(handler.deviceId, connectionId);
             }
@@ -488,6 +489,7 @@ export function createBridgeServer(
         ws.on("error", (err: Error) => {
             console.error("[ws] WebSocket error:", err.message);
             clearAuthTimeout();
+            handler.cleanup();
             if (handler.deviceId !== null) {
                 deviceRegistry.markDisconnected(handler.deviceId, connectionId);
             }

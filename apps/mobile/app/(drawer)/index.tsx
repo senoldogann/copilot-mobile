@@ -57,6 +57,7 @@ import { useAppTheme, type AppTheme } from "../../src/theme/theme-context";
 import type { SessionConfig } from "@copilot-mobile/shared";
 import {
     sendMessage,
+    sendQueuedMessage,
     abortMessage,
     createSessionWithInitialMessage,
     respondPermission,
@@ -65,7 +66,7 @@ import {
     listSessions,
     requestCapabilities,
     requestWorkspaceGitSummary,
-    requestSkillsList,
+    requestHistoryCompaction,
     disconnect,
     commitWorkspace,
     pullWorkspace,
@@ -79,6 +80,7 @@ import {
     deriveSubagentRunsFromItems,
     getActiveAgentItems,
 } from "../../src/utils/tool-introspection";
+import { resolveSendFlowDecision } from "../../src/utils/send-flow";
 import {
     createBlobAttachments,
     createPendingUploadAttachments,
@@ -91,6 +93,10 @@ function basename(path: string): string {
     const normalized = path.replace(/\\/g, "/").replace(/\/+$/, "");
     const segments = normalized.split("/").filter(Boolean);
     return segments[segments.length - 1] ?? path;
+}
+
+function isSlashCommandMessage(content: string, images: ReadonlyArray<ImageAttachment>): boolean {
+    return images.length === 0 && content.trim().startsWith("/");
 }
 
 function isTaskCompleteTool(toolName: string): boolean {
@@ -695,6 +701,45 @@ const STREAMING_PERSIST_DELAY_MS = 15_000;
 const TYPING_PERSIST_DELAY_MS = 2_200;
 const IDLE_PERSIST_DELAY_MS = 1_200;
 
+function createQueuedDraft(
+    sessionId: string | null,
+    content: string,
+    images: ReadonlyArray<ImageAttachment>,
+    nextIndex: number
+): QueuedDraft {
+    return {
+        id: `queued-${Date.now()}-${nextIndex}`,
+        sessionId,
+        content,
+        images: [...images],
+    };
+}
+
+function formatUsageMetric(value: number | undefined): string {
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+        return "—";
+    }
+
+    return new Intl.NumberFormat("en-US").format(value);
+}
+
+function buildUsageSummary(
+    usage: ReturnType<typeof useSessionStore.getState>["sessionUsage"][string] | undefined
+): string {
+    if (usage === undefined) {
+        return "Usage is not available for this session yet.";
+    }
+
+    return [
+        "Current session usage:",
+        `Messages: ${formatUsageMetric(usage.messagesLength)}`,
+        `Current tokens: ${formatUsageMetric(usage.currentTokens)}`,
+        `System tokens: ${formatUsageMetric(usage.systemTokens)}`,
+        `Conversation tokens: ${formatUsageMetric(usage.conversationTokens)}`,
+        `Tool definitions: ${formatUsageMetric(usage.toolDefinitionsTokens)}`,
+    ].join("\n");
+}
+
 export default function ChatScreen() {
     const theme = useAppTheme();
     const styles = useMemo(() => createStyles(theme), [theme]);
@@ -736,6 +781,7 @@ export default function ChatScreen() {
     const reasoningEffort = useSessionStore((s) => s.reasoningEffort);
     const agentMode = useSessionStore((s) => s.agentMode);
     const permissionLevel = useSessionStore((s) => s.permissionLevel);
+    const sessionUsageBySession = useSessionStore((s) => s.sessionUsage);
     const permissionPrompt = useSessionStore((s) => s.permissionPrompt);
     const userInputPrompt = useSessionStore((s) => s.userInputPrompt);
     const planExitPrompt = useSessionStore((s) => s.planExitPrompt);
@@ -765,7 +811,7 @@ export default function ChatScreen() {
         ? "Your first message is free"
         : isSubscriptionLocked
             ? "Subscribe to continue chatting"
-            : "Message, #files, @participants, /commands";
+            : "Message, #files, @participants, /shortcuts";
     const isActiveSessionBusy = activeSessionId !== null && busySessions[activeSessionId] === true;
     const isActiveTurnSource = isTyping || isActiveSessionBusy || isAbortPending;
     const visibleQueuedDrafts = queuedDrafts.filter((draft) => draft.sessionId === activeSessionId);
@@ -846,7 +892,6 @@ export default function ChatScreen() {
             listSessions();
             listModels();
             requestCapabilities();
-            requestSkillsList();
         }
     }, [isConnected]);
 
@@ -1001,6 +1046,7 @@ export default function ChatScreen() {
     const performSend = useCallback(
         async (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode): Promise<boolean> => {
             enableAutoFollow();
+            const isSlashCommand = isSlashCommandMessage(content, images);
 
             if (!hasActiveEntitlement && hasUsedFreeMessageTrial) {
                 try {
@@ -1018,33 +1064,6 @@ export default function ChatScreen() {
                 }
             }
 
-            // "steer" mode sends inline without interrupting assistant
-            if (mode === "steer" && activeSessionId !== null) {
-                try {
-                    await sendMessage(activeSessionId, content, images);
-                    if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
-                        await saveFreeMessageTrialUsed(true);
-                        setHasUsedFreeMessageTrial(true);
-                    }
-                } catch {
-                    return false;
-                }
-                return true;
-            }
-
-            if (mode === "queue") {
-                setQueuedDrafts((prev) => [
-                    ...prev,
-                    {
-                        id: `queued-${Date.now()}-${prev.length + 1}`,
-                        sessionId: activeSessionId,
-                        content,
-                        images: [...images],
-                    },
-                ]);
-                return true;
-            }
-
             const hasBlockingTurn = activeSessionId !== null && (
                 isActiveSessionBusy
                 || isTyping
@@ -1053,22 +1072,38 @@ export default function ChatScreen() {
                 || planExitPrompt !== null
             );
 
-            if (mode === "send" && hasBlockingTurn && activeSessionId !== null) {
-                setQueuedDrafts((prev) => [
-                    ...prev,
-                    {
-                        id: `queued-${Date.now()}-${prev.length + 1}`,
-                        sessionId: activeSessionId,
+            const sendFlowDecision = resolveSendFlowDecision({
+                mode,
+                hasActiveSession: activeSessionId !== null,
+                hasBlockingTurn,
+                isAbortPending,
+            });
+
+            if (sendFlowDecision.kind === "queue" || sendFlowDecision.kind === "preempt") {
+                setQueuedDrafts((prev) => {
+                    const nextDraft = createQueuedDraft(
+                        activeSessionId,
                         content,
-                        images: [...images],
-                    },
-                ]);
-                if (!isAbortPending) {
+                        images,
+                        prev.length + 1
+                    );
+
+                    return sendFlowDecision.priority === "front"
+                        ? [nextDraft, ...prev]
+                        : [...prev, nextDraft];
+                });
+
+                if (
+                    sendFlowDecision.kind === "preempt"
+                    && sendFlowDecision.shouldAbort
+                    && activeSessionId !== null
+                ) {
                     setAbortRequested(true);
                     void abortMessage(activeSessionId).catch(() => {
                         useSessionStore.getState().setAbortRequested(false);
                     });
                 }
+
                 return true;
             }
 
@@ -1091,7 +1126,7 @@ export default function ChatScreen() {
                 previousActiveConversationId === null ||
                 (conversation !== undefined && conversation.title === "New Chat");
 
-            if (shouldUpdateConversation) {
+            if (shouldUpdateConversation && !isSlashCommand) {
                 const title =
                     content.length > 40
                         ? content.slice(0, 40) + "..."
@@ -1108,12 +1143,14 @@ export default function ChatScreen() {
                 const draftWorkspaceRoot = historyStore.conversations.find(
                     (conversationItem) => conversationItem.id === activeConversationId
                 )?.workspaceRoot ?? null;
-                const localItemId = store.addUserMessage(
-                    content,
-                    supportsAttachmentUploads
-                        ? createPendingUploadAttachments(images)
-                        : createBlobAttachments(images)
-                );
+                const localItemId = isSlashCommand
+                    ? null
+                    : store.addUserMessage(
+                        content,
+                        supportsAttachmentUploads
+                            ? createPendingUploadAttachments(images)
+                            : createBlobAttachments(images)
+                    );
                 store.setSessionLoading(true);
                 store.setAssistantTyping(true);
                 const config: SessionConfig = {
@@ -1135,13 +1172,17 @@ export default function ChatScreen() {
                         content,
                         images
                     );
-                    store.updateUserMessageDeliveryState(localItemId, "sent");
+                    if (localItemId !== null) {
+                        store.updateUserMessageDeliveryState(localItemId, "sent");
+                    }
                     if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
                         await saveFreeMessageTrialUsed(true);
                         setHasUsedFreeMessageTrial(true);
                     }
                 } catch {
-                    store.updateUserMessageDeliveryState(localItemId, "failed");
+                    if (localItemId !== null) {
+                        store.updateUserMessageDeliveryState(localItemId, "failed");
+                    }
                     store.setAssistantTyping(false);
                     return false;
                 }
@@ -1149,7 +1190,11 @@ export default function ChatScreen() {
             }
 
             try {
-                await sendMessage(activeSessionId, content, images);
+                if (isSlashCommand) {
+                    await sendQueuedMessage(activeSessionId, content, images);
+                } else {
+                    await sendMessage(activeSessionId, content, images);
+                }
                 if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
                     await saveFreeMessageTrialUsed(true);
                     setHasUsedFreeMessageTrial(true);
@@ -1190,6 +1235,41 @@ export default function ChatScreen() {
         },
         [performSend]
     );
+
+    const handleRunUsage = useCallback(() => {
+        const usage = activeSessionId !== null ? sessionUsageBySession[activeSessionId] : undefined;
+        useSessionStore.getState().finalizeAssistantMessage(buildUsageSummary(usage));
+    }, [activeSessionId, sessionUsageBySession]);
+
+    const handleRunCompact = useCallback(() => {
+        if (
+            activeSessionId === null
+            || inputDisabled
+            || isActiveTurnSource
+            || isAbortPending
+            || permissionPrompt !== null
+            || userInputPrompt !== null
+            || planExitPrompt !== null
+        ) {
+            return;
+        }
+
+        void requestHistoryCompaction(activeSessionId).catch((error) => {
+            const store = useSessionStore.getState();
+            store.setAssistantTyping(false);
+            store.finalizeAssistantMessage(
+                `Could not compact conversation: ${error instanceof Error ? error.message : String(error)}`
+            );
+        });
+    }, [activeSessionId, inputDisabled, isAbortPending, isActiveTurnSource, permissionPrompt, planExitPrompt, userInputPrompt]);
+
+    const handleStartNewChatShortcut = useCallback(() => {
+        startDraftConversation(workspaceSessionId !== null && workspaceSessionId === activeSessionId ? workspaceRoot : null);
+    }, [activeSessionId, workspaceRoot, workspaceSessionId]);
+
+    const handleOpenSettingsShortcut = useCallback(() => {
+        router.push("/settings");
+    }, [router]);
 
     // Abort message
     const handleAbort = useCallback(() => {
@@ -1431,6 +1511,10 @@ export default function ChatScreen() {
 
                 <ChatInput
                     onSend={handleSend}
+                    onRunUsage={handleRunUsage}
+                    onRunCompact={handleRunCompact}
+                    onStartNewChat={handleStartNewChatShortcut}
+                    onOpenSettings={handleOpenSettingsShortcut}
                     onAbort={handleAbort}
                     onLockedPress={handleSubscriptionLockedPress}
                     isTyping={isActiveTurnSource}

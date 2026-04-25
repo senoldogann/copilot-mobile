@@ -793,6 +793,28 @@ export async function requestSkillsList(): Promise<void> {
     }
 }
 
+export async function requestCommandsList(): Promise<void> {
+    const c = getClient();
+    try {
+        await c.sendMessage("commands.list.request", {});
+    } catch (error) {
+        console.warn("[Bridge] commands.list.request failed", { error });
+    }
+}
+
+export async function requestHistoryCompaction(sessionId: string): Promise<void> {
+    const c = getClient();
+    const sessionStore = getBridgeSessionState();
+    sessionStore.setAssistantTyping(true);
+    try {
+        await c.sendMessage("session.history.compact.request", { sessionId });
+    } catch (error) {
+        sessionStore.setAssistantTyping(false);
+        console.warn("[Bridge] session.history.compact.request failed", { sessionId, error });
+        throw error;
+    }
+}
+
 // Workspace tree — requests a repository subtree for the active session
 export async function requestWorkspaceTree(
     sessionId: string,

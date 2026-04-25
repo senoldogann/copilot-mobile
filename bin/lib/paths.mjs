@@ -70,7 +70,7 @@ export function getLegacyLaunchAgentLabel() {
 }
 
 export function getDaemonEntryPoint() {
-    return path.join(getPackageRootDirectory(), "dist", "desktop", "bridge-daemon.cjs");
+    return path.join(getPackageRootDirectory(), "dist", "desktop", "bridge-daemon.mjs");
 }
 
 export function getDaemonStdoutPath() {

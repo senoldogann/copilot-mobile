@@ -13,11 +13,13 @@ import { prepareNotificationPermissions } from "../src/services/notifications";
 import { syncRemoteNotificationRegistration } from "../src/services/bridge";
 import { POLICY_URL } from "../src/services/legal";
 import { readAppVersion } from "../src/services/app-version";
+import { openFeedbackEmail } from "../src/services/feedback";
 import {
     initializeRevenueCat,
     openSubscriptionManagement,
     restoreRevenueCatPurchases,
 } from "../src/services/revenuecat";
+import { useSessionStore } from "../src/stores/session-store";
 import { useSubscriptionStore } from "../src/stores/subscription-store";
 import {
     PaletteIcon,
@@ -36,6 +38,7 @@ import {
     PaintbrushIcon,
     TypeIcon,
     SparklesIcon,
+    HelpCircleIcon,
     ShieldCheckIcon,
     RefreshIcon,
 } from "../src/components/ProviderIcon";
@@ -395,6 +398,7 @@ export default function SettingsScreen() {
     const styles = useThemedStyles(createStyles);
     const insets = useSafeAreaInsets();
     const appVersion = readAppVersion();
+    const activeSessionId = useSessionStore((state) => state.activeSessionId);
     const router = useRouter();
 
     async function handleEnableNotifications(): Promise<void> {
@@ -452,12 +456,19 @@ export default function SettingsScreen() {
 
                 <SettingsGroup
                     title="App Settings"
-                    footer="Enable notifications to receive background completion alerts. Use /feedback in chat to send bug reports or issues by email."
+                    footer="Enable notifications to receive background completion alerts. Use Report App Issue here or /app-feedback in chat for app-specific bug reports. /feedback now belongs to Copilot CLI."
                 >
                     <SettingsRow
                         icon={BookOpenIcon}
                         label="Setup Guide"
                         onPress={() => router.push("/onboarding")}
+                    />
+                    <SettingsRow
+                        icon={HelpCircleIcon}
+                        label="Report App Issue"
+                        onPress={() => {
+                            void openFeedbackEmail("", activeSessionId);
+                        }}
                     />
                     <SettingsRow
                         icon={BellIcon}

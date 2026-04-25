@@ -501,6 +501,10 @@ export function createContextStyles(theme: AppTheme) {
             fontSize: theme.fontSize.base,
             fontWeight: "600",
         },
+        summaryMeta: {
+            color: theme.colors.textSecondary,
+            fontSize: theme.fontSize.sm,
+        },
         summaryPercent: {
             color: theme.colors.textSecondary,
             fontSize: theme.fontSize.sm,
@@ -528,6 +532,30 @@ export function createContextStyles(theme: AppTheme) {
             color: theme.colors.textSecondary,
             fontSize: theme.fontSize.xs,
         },
+        statGrid: {
+            flexDirection: "row",
+            gap: theme.spacing.sm,
+        },
+        statCard: {
+            flex: 1,
+            gap: 4,
+            paddingVertical: theme.spacing.sm,
+            paddingHorizontal: theme.spacing.sm,
+            borderRadius: theme.borderRadius.md,
+            backgroundColor: theme.colors.bgSecondary,
+        },
+        statLabel: {
+            color: theme.colors.textTertiary,
+            fontSize: theme.fontSize.xs,
+            fontWeight: "600",
+            textTransform: "uppercase",
+            letterSpacing: 0.4,
+        },
+        statValue: {
+            color: theme.colors.textPrimary,
+            fontSize: theme.fontSize.base,
+            fontWeight: "700",
+        },
         sectionCard: {
             gap: 6,
             paddingVertical: theme.spacing.sm,
@@ -554,16 +582,32 @@ export function createContextStyles(theme: AppTheme) {
             fontSize: theme.fontSize.sm,
             fontWeight: "600",
         },
-        compactButton: {
+        actionRow: {
+            flexDirection: "row",
+            gap: theme.spacing.sm,
+            paddingBottom: theme.spacing.xs,
+        },
+        actionButton: {
+            flex: 1,
             borderRadius: theme.borderRadius.md,
-            backgroundColor: theme.colors.bgSecondary,
             paddingVertical: 9,
             alignItems: "center",
         },
-        compactButtonText: {
+        secondaryActionButton: {
+            backgroundColor: theme.colors.bgSecondary,
+        },
+        secondaryActionButtonText: {
             color: theme.colors.textPrimary,
             fontSize: theme.fontSize.sm,
             fontWeight: "600",
+        },
+        primaryActionButton: {
+            backgroundColor: theme.colors.accent,
+        },
+        primaryActionButtonText: {
+            color: theme.colors.textOnAccent,
+            fontSize: theme.fontSize.sm,
+            fontWeight: "700",
         },
     });
 }
@@ -578,7 +622,7 @@ export function createAutocompleteStyles(theme: AppTheme) {
             borderRadius: theme.borderRadius.md,
             marginBottom: 6,
             overflow: "hidden",
-            maxHeight: 220,
+            maxHeight: 320,
         },
         list: {
             flexShrink: 1,
