@@ -1,6 +1,5 @@
 // Kök layout — Stack navigator (çekmece grubu + modal ekranlar)
 
-import "expo-dev-client";
 import "../src/services/notification-background-task";
 import { Stack, usePathname, useRouter } from "expo-router";
 import { StatusBar } from "expo-status-bar";
@@ -13,6 +12,10 @@ import { useThemeStore } from "../src/theme/theme-store";
 import { ThemeProvider, useAppTheme } from "../src/theme/theme-context";
 import { AnimatedSplash } from "../src/components/AnimatedSplash";
 import { BootSplash } from "../src/components/BootSplash";
+
+if (__DEV__) {
+    require("expo-dev-client");
+}
 
 export default function RootLayout() {
     const [themeReady, setThemeReady] = useState(false);

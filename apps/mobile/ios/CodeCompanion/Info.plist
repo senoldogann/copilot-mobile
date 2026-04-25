@@ -19,7 +19,7 @@
     <key>CFBundlePackageType</key>
     <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.1.5</string>
+    <string>1.0.0</string>
     <key>CFBundleSignature</key>
     <string>????</string>
     <key>CFBundleURLTypes</key>
@@ -57,11 +57,11 @@
     <key>NSCameraUsageDescription</key>
     <string>Camera access is required to scan the QR code shown by your Mac companion</string>
     <key>NSFaceIDUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your Face ID biometric data.</string>
+    <string>Face ID can be used to protect secure credentials stored by Code Companion.</string>
     <key>NSLocalNetworkUsageDescription</key>
     <string>Local network access helps your iPhone discover and connect to your Mac companion during setup</string>
     <key>NSMicrophoneUsageDescription</key>
-    <string>Allow $(PRODUCT_NAME) to access your microphone</string>
+    <string>Microphone access is required to dictate prompts in chat.</string>
     <key>NSPhotoLibraryUsageDescription</key>
     <string>Photo library access is required to attach images to your chat</string>
     <key>NSSpeechRecognitionUsageDescription</key>

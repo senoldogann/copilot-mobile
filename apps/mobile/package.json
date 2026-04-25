@@ -1,6 +1,6 @@
 {
   "name": "@copilot-mobile/mobile",
-  "version": "0.1.5",
+  "version": "1.0.0",
   "private": true,
   "main": "expo-router/entry",
   "scripts": {

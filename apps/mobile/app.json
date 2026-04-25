@@ -3,7 +3,7 @@
     "name": "Code Companion",
     "owner": "senoldogan33",
     "slug": "code-companion",
-    "version": "0.1.5",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -49,7 +49,7 @@
       "url": "https://u.expo.dev/33e68d9a-4ae3-47b2-b130-04b0c57ed91e",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "0.1.5",
+    "runtimeVersion": "1.0.0",
     "plugins": [
       "expo-router",
       "expo-updates",
