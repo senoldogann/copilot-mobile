@@ -64,6 +64,8 @@ export function createPushProvider() {
         sessionId: string;
         title: string;
         body: string;
+        requestId?: string;
+        eventType?: SessionPushEventType;
     }): Promise<PushSendResult> {
         if (!isExpoPushToken(input.pushToken)) {
             return {
@@ -96,6 +98,8 @@ export function createPushProvider() {
                         data: {
                             sessionId: input.sessionId,
                             kind: "session-event",
+                            ...(input.eventType !== undefined ? { eventType: input.eventType } : {}),
+                            ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
                         },
                     }),
                     signal: AbortSignal.timeout(PUSH_REQUEST_TIMEOUT_MS),
@@ -186,6 +190,7 @@ export function createPushProvider() {
         pushToken: string;
         sessionId: string;
         eventType: SessionPushEventType;
+        requestId?: string;
     }): Promise<PushSendResult> {
         if (!isExpoPushToken(input.pushToken)) {
             return {
@@ -216,6 +221,7 @@ export function createPushProvider() {
                             sessionId: input.sessionId,
                             kind: "session-sync",
                             eventType: input.eventType,
+                            ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
                         },
                     }),
                     signal: AbortSignal.timeout(PUSH_REQUEST_TIMEOUT_MS),

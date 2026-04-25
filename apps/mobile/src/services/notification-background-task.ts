@@ -13,6 +13,7 @@ type SessionSyncPayload = {
     sessionId: string;
     kind: "session-sync";
     eventType: SessionSyncEventType;
+    requestId?: string;
 };
 
 let lastBackgroundSyncSignature: string | null = null;
@@ -50,6 +51,7 @@ function readBackgroundNotificationPayload(
     const sessionId = decodedData?.["sessionId"] ?? dataRecord["sessionId"];
     const kind = decodedData?.["kind"] ?? dataRecord["kind"];
     const eventType = decodedData?.["eventType"] ?? dataRecord["eventType"];
+    const requestId = decodedData?.["requestId"] ?? dataRecord["requestId"];
 
     if (
         typeof sessionId !== "string"
@@ -64,6 +66,9 @@ function readBackgroundNotificationPayload(
         sessionId: sessionId.trim(),
         kind,
         eventType,
+        ...(typeof requestId === "string" && requestId.trim().length > 0
+            ? { requestId: requestId.trim() }
+            : {}),
     };
 }
 
@@ -101,7 +106,9 @@ if (!TaskManager.isTaskDefined(BACKGROUND_NOTIFICATION_TASK)) {
                 return;
             }
 
-            const syncSignature = `${payload.sessionId}:${payload.eventType}`;
+            const syncSignature = payload.requestId !== undefined
+                ? `${payload.sessionId}:${payload.eventType}:${payload.requestId}`
+                : `${payload.sessionId}:${payload.eventType}`;
             const now = Date.now();
             if (shouldSkipBackgroundSync(syncSignature, now)) {
                 return;
@@ -109,7 +116,7 @@ if (!TaskManager.isTaskDefined(BACKGROUND_NOTIFICATION_TASK)) {
 
             lastBackgroundSyncSignature = syncSignature;
             lastBackgroundSyncAt = now;
-            markRemoteNotificationReceived(payload.sessionId, payload.eventType);
+            markRemoteNotificationReceived(payload.sessionId, payload.eventType, payload.requestId);
 
             try {
                 await performBackgroundSessionSync(payload.sessionId);

@@ -193,9 +193,19 @@ function pruneExpiredNotificationKeys(
     }
 }
 
-function createSessionNotificationEventKey(sessionId: string, eventType: SessionNotificationEventType): string {
-    return `${sessionId}:${eventType}`;
+function createSessionNotificationEventKey(
+    sessionId: string,
+    eventType: SessionNotificationEventType,
+    notificationId?: string
+): string {
+    return notificationId !== undefined && notificationId.length > 0
+        ? `${sessionId}:${eventType}:${notificationId}`
+        : `${sessionId}:${eventType}`;
 }
+
+export const notificationTestUtils = {
+    createSessionNotificationEventKey,
+};
 
 function rememberLocalSessionNotification(key: string, now: number): boolean {
     pruneExpiredNotificationKeys(recentLocalNotificationKeys, now);
@@ -214,10 +224,17 @@ function hasRecentRemoteSessionNotification(key: string, now: number): boolean {
     return existing !== undefined && now - existing < LOCAL_NOTIFICATION_DEDUP_WINDOW_MS;
 }
 
-export function markRemoteNotificationReceived(sessionId: string, eventType: SessionNotificationEventType): void {
+export function markRemoteNotificationReceived(
+    sessionId: string,
+    eventType: SessionNotificationEventType,
+    notificationId?: string
+): void {
     const now = Date.now();
     pruneExpiredNotificationKeys(recentRemoteNotificationKeys, now);
-    recentRemoteNotificationKeys.set(createSessionNotificationEventKey(sessionId, eventType), now);
+    recentRemoteNotificationKeys.set(
+        createSessionNotificationEventKey(sessionId, eventType, notificationId),
+        now
+    );
 }
 
 export async function initializeNotifications(): Promise<void> {
@@ -434,6 +451,7 @@ export async function notifySessionActionRequired(input: {
         body: input.body,
         kind: "session-event",
         eventType: input.eventType,
+        notificationId: input.requestId,
     });
 }
 
@@ -458,9 +476,14 @@ async function scheduleSessionNotification(input: {
     body: string;
     kind: "session-complete" | "session-event";
     eventType: SessionNotificationEventType;
+    notificationId?: string;
 }): Promise<void> {
     const now = Date.now();
-    const notificationKey = createSessionNotificationEventKey(input.sessionId, input.eventType);
+    const notificationKey = createSessionNotificationEventKey(
+        input.sessionId,
+        input.eventType,
+        input.notificationId
+    );
     if (hasRecentRemoteSessionNotification(notificationKey, now)) {
         return;
     }
@@ -486,7 +509,12 @@ async function scheduleSessionNotification(input: {
                 body: input.body,
                 sound: true,
                 ...(Platform.OS === "android" ? { channelId: SESSION_EVENTS_CHANNEL_ID } : {}),
-                data: { sessionId: input.sessionId, kind: input.kind },
+                data: {
+                    sessionId: input.sessionId,
+                    kind: input.kind,
+                    eventType: input.eventType,
+                    ...(input.notificationId !== undefined ? { requestId: input.notificationId } : {}),
+                },
             },
             trigger: null,
         });

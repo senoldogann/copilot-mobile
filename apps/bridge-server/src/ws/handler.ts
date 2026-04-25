@@ -433,6 +433,9 @@ export function createMessageHandler(
                 case "session.resume":
                     return sessionManager.resumeSession(message.payload.sessionId, requireDeviceId());
 
+                case "session.history.request":
+                    return sessionManager.requestSessionHistory(message.payload.sessionId);
+
                 case "session.list":
                     return sessionManager.listSessions();
 

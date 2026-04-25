@@ -692,6 +692,23 @@ export async function resumeSession(sessionId: string): Promise<void> {
     }
 }
 
+export async function requestSessionHistory(sessionId: string): Promise<void> {
+    const c = client;
+    if (c === null || c.getState() !== "authenticated") {
+        return;
+    }
+
+    try {
+        await c.sendMessage("session.history.request", { sessionId });
+    } catch (error) {
+        console.warn("[Bridge] session.history.request failed", {
+            sessionId,
+            error,
+        });
+        throw error;
+    }
+}
+
 export async function prefetchSessionState(
     sessionId: string,
     hydrateActiveSession: boolean

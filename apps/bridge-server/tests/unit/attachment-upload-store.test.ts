@@ -32,4 +32,15 @@ describe("attachment upload store", () => {
             },
         ]);
     });
+
+    it("rejects upload ids with path traversal characters", async () => {
+        const store = createAttachmentUploadStore();
+
+        await assert.rejects(
+            () => store.startUpload("device-1", "../../etc/passwd", {
+                mimeType: "image/jpeg",
+            }),
+            /Invalid uploadId/
+        );
+    });
 });

@@ -753,6 +753,11 @@ export type SessionResumeMessage = BaseBridgeMessage & {
     payload: { sessionId: string };
 };
 
+export type SessionHistoryRequestMessage = BaseBridgeMessage & {
+    type: "session.history.request";
+    payload: { sessionId: string };
+};
+
 export type SessionListRequestMessage = BaseBridgeMessage & {
     type: "session.list";
     payload: Record<string, never>;
@@ -880,6 +885,7 @@ export type ClientMessage =
     | AuthResumeMessage
     | SessionCreateMessage
     | SessionResumeMessage
+    | SessionHistoryRequestMessage
     | SessionListRequestMessage
     | SessionDeleteMessage
     | AttachmentUploadStartMessage

@@ -104,6 +104,7 @@ export function createCompletionNotifier(deps: {
         pushToken: string;
         sessionId: string;
         eventType: SessionPushEventType;
+        requestId?: string;
     }): Promise<void> {
         try {
             await notifyForBackgroundSync(input);
@@ -208,6 +209,7 @@ export function createCompletionNotifier(deps: {
             pushToken: registration.pushToken,
             sessionId: input.sessionId,
             eventType: input.eventType,
+            ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
         });
 
         const result = await deps.pushProvider.sendSessionPush({
@@ -215,6 +217,8 @@ export function createCompletionNotifier(deps: {
             sessionId: input.sessionId,
             title: input.title,
             body: sanitizeNotificationText(input.body),
+            ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
+            eventType: input.eventType,
         });
 
         if (result.ok) {
@@ -241,11 +245,13 @@ export function createCompletionNotifier(deps: {
         pushToken: string;
         sessionId: string;
         eventType: SessionPushEventType;
+        requestId?: string;
     }): Promise<void> {
         const result = await deps.pushProvider.sendBackgroundSyncPush({
             pushToken: input.pushToken,
             sessionId: input.sessionId,
             eventType: input.eventType,
+            ...(input.requestId !== undefined ? { requestId: input.requestId } : {}),
         });
 
         if (result.ok) {

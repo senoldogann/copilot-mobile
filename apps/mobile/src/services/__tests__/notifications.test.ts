@@ -41,4 +41,21 @@ describe("notifications", () => {
 
         expect(completionNotificationIds).toEqual(["complete-1"]);
     });
+
+    it("uses request-specific keys for prompt notification dedupe", () => {
+        const { notificationTestUtils } = require("../notifications") as typeof import("../notifications");
+
+        const firstKey = notificationTestUtils.createSessionNotificationEventKey(
+            "session-1",
+            "permission_prompt",
+            "request-1"
+        );
+        const secondKey = notificationTestUtils.createSessionNotificationEventKey(
+            "session-1",
+            "permission_prompt",
+            "request-2"
+        );
+
+        expect(firstKey).not.toBe(secondKey);
+    });
 });

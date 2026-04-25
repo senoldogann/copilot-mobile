@@ -27,6 +27,8 @@ let runtimeInitialized = false;
 let runtimeBootstrapId = 0;
 let mobileStateHydrated = false;
 let foregroundResumeTask: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
+let activeSessionListPollTimer: ReturnType<typeof setInterval> | null = null;
+const ACTIVE_SESSION_LIST_POLL_INTERVAL_MS = 4_000;
 
 function createRuntimeBootstrapId(): number {
     runtimeBootstrapId += 1;
@@ -44,6 +46,33 @@ function clearForegroundResumeTask(): void {
 
     foregroundResumeTask.cancel();
     foregroundResumeTask = null;
+}
+
+function stopActiveSessionListPolling(): void {
+    if (activeSessionListPollTimer === null) {
+        return;
+    }
+
+    clearInterval(activeSessionListPollTimer);
+    activeSessionListPollTimer = null;
+}
+
+function startActiveSessionListPolling(): void {
+    if (activeSessionListPollTimer !== null) {
+        return;
+    }
+
+    activeSessionListPollTimer = setInterval(() => {
+        if (currentAppState !== "active") {
+            return;
+        }
+
+        if (useConnectionStore.getState().state !== "authenticated") {
+            return;
+        }
+
+        void listSessions();
+    }, ACTIVE_SESSION_LIST_POLL_INTERVAL_MS);
 }
 
 function scheduleForegroundSessionResume(sessionId: string, immediate: boolean): void {
@@ -211,6 +240,7 @@ function handleAppStateChange(nextAppState: AppStateStatus): void {
     if (nextAppState !== "active") {
         createRuntimeBootstrapId();
         clearForegroundResumeTask();
+        stopActiveSessionListPolling();
         const sessionStore = useSessionStore.getState();
         if (sessionStore.activeSessionId !== null && sessionStore.isAssistantTyping) {
             armBackgroundCompletion(sessionStore.activeSessionId);
@@ -223,6 +253,7 @@ function handleAppStateChange(nextAppState: AppStateStatus): void {
     }
 
     clearBackgroundCompletion();
+    startActiveSessionListPolling();
     syncOnForeground();
 }
 
@@ -246,6 +277,7 @@ export function initializeAppRuntime(): () => void {
             allowPrompt: false,
             force: false,
         });
+        startActiveSessionListPolling();
     }
     startRuntimeBootstrap({ rehydrate: true });
     const subscription = AppState.addEventListener("change", handleAppStateChange);
@@ -253,6 +285,7 @@ export function initializeAppRuntime(): () => void {
     return () => {
         createRuntimeBootstrapId();
         clearForegroundResumeTask();
+        stopActiveSessionListPolling();
         subscription.remove();
         runtimeInitialized = false;
         mobileStateHydrated = false;

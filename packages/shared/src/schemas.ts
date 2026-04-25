@@ -6,6 +6,11 @@ import { z } from "zod";
 // --- Base Schemas ---
 
 const CERT_FINGERPRINT_PATTERN = /^[a-fA-F0-9]{64}$/;
+const ATTACHMENT_UPLOAD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
+const attachmentUploadIdSchema = z.string().regex(
+    ATTACHMENT_UPLOAD_ID_PATTERN,
+    "uploadId must use only letters, numbers, underscores, or hyphens"
+);
 
 const baseBridgeMessageSchema = z.object({
     id: z.string().uuid(),
@@ -107,7 +112,7 @@ const sessionMessageAttachmentSchema = z.discriminatedUnion("type", [
     }),
     z.object({
         type: z.literal("upload_ref"),
-        uploadId: z.string().min(1),
+        uploadId: attachmentUploadIdSchema,
         mimeType: z.string().min(1),
         displayName: z.string().min(1).optional(),
     }),
@@ -684,6 +689,11 @@ const sessionResumeSchema = baseBridgeMessageSchema.extend({
     payload: z.object({ sessionId: z.string().min(1) }),
 });
 
+const sessionHistoryRequestSchema = baseBridgeMessageSchema.extend({
+    type: z.literal("session.history.request"),
+    payload: z.object({ sessionId: z.string().min(1) }),
+});
+
 const sessionListRequestSchema = baseBridgeMessageSchema.extend({
     type: z.literal("session.list"),
     payload: z.object({}).strict(),
@@ -711,7 +721,7 @@ const messageAbortSchema = baseBridgeMessageSchema.extend({
 const attachmentUploadStartSchema = baseBridgeMessageSchema.extend({
     type: z.literal("attachment.upload.start"),
     payload: z.object({
-        uploadId: z.string().min(1),
+        uploadId: attachmentUploadIdSchema,
         mimeType: z.string().min(1),
         displayName: z.string().min(1).optional(),
     }),
@@ -720,7 +730,7 @@ const attachmentUploadStartSchema = baseBridgeMessageSchema.extend({
 const attachmentUploadChunkSchema = baseBridgeMessageSchema.extend({
     type: z.literal("attachment.upload.chunk"),
     payload: z.object({
-        uploadId: z.string().min(1),
+        uploadId: attachmentUploadIdSchema,
         data: z.string().min(1),
     }),
 });
@@ -728,7 +738,7 @@ const attachmentUploadChunkSchema = baseBridgeMessageSchema.extend({
 const attachmentUploadCompleteSchema = baseBridgeMessageSchema.extend({
     type: z.literal("attachment.upload.complete"),
     payload: z.object({
-        uploadId: z.string().min(1),
+        uploadId: attachmentUploadIdSchema,
     }),
 });
 
@@ -903,6 +913,7 @@ export const clientMessageSchema = z.discriminatedUnion("type", [
     authResumeSchema,
     sessionCreateSchema,
     sessionResumeSchema,
+    sessionHistoryRequestSchema,
     sessionListRequestSchema,
     sessionDeleteSchema,
     attachmentUploadStartSchema,

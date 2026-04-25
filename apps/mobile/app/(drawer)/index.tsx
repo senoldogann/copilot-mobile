@@ -998,157 +998,28 @@ export default function ChatScreen() {
     }, []);
 
     // Send message
-    const handleSend = useCallback(
-        (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => {
-            void (async () => {
-                enableAutoFollow();
+    const performSend = useCallback(
+        async (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode): Promise<boolean> => {
+            enableAutoFollow();
 
-                if (!hasActiveEntitlement && hasUsedFreeMessageTrial) {
-                    try {
-                        await refreshRevenueCatState();
-                        if (!useSubscriptionStore.getState().hasActiveEntitlement) {
-                            setIsSubscriptionPaywallVisible(true);
-                            return;
-                        }
-                    } catch (error) {
-                        Alert.alert(
-                            "Subscription required",
-                            error instanceof Error ? error.message : "Subscribe to send another message."
-                        );
-                        return;
+            if (!hasActiveEntitlement && hasUsedFreeMessageTrial) {
+                try {
+                    await refreshRevenueCatState();
+                    if (!useSubscriptionStore.getState().hasActiveEntitlement) {
+                        setIsSubscriptionPaywallVisible(true);
+                        return false;
                     }
-                }
-
-                // "steer" mode sends inline without interrupting assistant
-                if (mode === "steer" && activeSessionId !== null) {
-                    try {
-                        await sendMessage(activeSessionId, content, images);
-                        if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
-                            await saveFreeMessageTrialUsed(true);
-                            setHasUsedFreeMessageTrial(true);
-                        }
-                    } catch {
-                        return;
-                    }
-                    return;
-                }
-
-                if (mode === "queue") {
-                    setQueuedDrafts((prev) => [
-                        ...prev,
-                        {
-                            id: `queued-${Date.now()}-${prev.length + 1}`,
-                            sessionId: activeSessionId,
-                            content,
-                            images: [...images],
-                        },
-                    ]);
-                    return;
-                }
-
-                const hasBlockingTurn = activeSessionId !== null && (
-                    isActiveSessionBusy
-                    || isTyping
-                    || permissionPrompt !== null
-                    || userInputPrompt !== null
-                    || planExitPrompt !== null
-                );
-
-                if (mode === "send" && hasBlockingTurn && activeSessionId !== null) {
-                    setQueuedDrafts((prev) => [
-                        ...prev,
-                        {
-                            id: `queued-${Date.now()}-${prev.length + 1}`,
-                            sessionId: activeSessionId,
-                            content,
-                            images: [...images],
-                        },
-                    ]);
-                    if (!isAbortPending) {
-                        setAbortRequested(true);
-                        void abortMessage(activeSessionId).catch(() => {
-                            useSessionStore.getState().setAbortRequested(false);
-                        });
-                    }
-                    return;
-                }
-
-                const historyStore = useChatHistoryStore.getState();
-                const previousActiveConversationId = historyStore.activeConversationId;
-                const activeSession = sessions.find((session) => session.id === activeSessionId);
-                const workspaceRootForConversation =
-                    activeSessionId !== null && workspaceSessionId === activeSessionId
-                        ? workspaceRoot
-                        : activeSession?.context?.workspaceRoot ?? null;
-                const activeConversationId =
-                    previousActiveConversationId
-                    ?? historyStore.createConversation(activeSessionId, workspaceRootForConversation);
-                const conversation = previousActiveConversationId === null
-                    ? undefined
-                    : historyStore.conversations.find(
-                        (item) => item.id === previousActiveConversationId
+                } catch (error) {
+                    Alert.alert(
+                        "Subscription required",
+                        error instanceof Error ? error.message : "Subscribe to send another message."
                     );
-                const shouldUpdateConversation =
-                    previousActiveConversationId === null ||
-                    (conversation !== undefined && conversation.title === "New Chat");
-
-                if (shouldUpdateConversation) {
-                    const title =
-                        content.length > 40
-                            ? content.slice(0, 40) + "..."
-                            : content;
-                    historyStore.updateConversation(activeConversationId, title, content);
+                    return false;
                 }
+            }
 
-                if (activeSessionId === null) {
-                    const store = useSessionStore.getState();
-                    const requestedModelId = models.some((model) => model.id === selectedModel)
-                        ? selectedModel
-                        : models[0]?.id ?? selectedModel;
-                    const requestedModel = models.find((m) => m.id === requestedModelId);
-                    const draftWorkspaceRoot = historyStore.conversations.find(
-                        (conversationItem) => conversationItem.id === activeConversationId
-                    )?.workspaceRoot ?? null;
-                    const localItemId = store.addUserMessage(
-                        content,
-                        supportsAttachmentUploads
-                            ? createPendingUploadAttachments(images)
-                            : createBlobAttachments(images)
-                    );
-                    store.setSessionLoading(true);
-                    store.setAssistantTyping(true);
-                    const config: SessionConfig = {
-                        model: requestedModelId,
-                        streaming: true,
-                        agentMode,
-                        permissionLevel,
-                        ...(draftWorkspaceRoot !== null ? { workspaceRoot: draftWorkspaceRoot } : {}),
-                    };
-                    if (
-                        requestedModel?.supportsReasoningEffort === true &&
-                        reasoningEffort !== null
-                    ) {
-                        config.reasoningEffort = reasoningEffort;
-                    }
-                    void createSessionWithInitialMessage(
-                        config,
-                        content,
-                        images
-                    )
-                        .then(async () => {
-                            store.updateUserMessageDeliveryState(localItemId, "sent");
-                            if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
-                                await saveFreeMessageTrialUsed(true);
-                                setHasUsedFreeMessageTrial(true);
-                            }
-                        })
-                        .catch(() => {
-                            store.updateUserMessageDeliveryState(localItemId, "failed");
-                            store.setAssistantTyping(false);
-                        });
-                    return;
-                }
-
+            // "steer" mode sends inline without interrupting assistant
+            if (mode === "steer" && activeSessionId !== null) {
                 try {
                     await sendMessage(activeSessionId, content, images);
                     if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
@@ -1156,9 +1027,138 @@ export default function ChatScreen() {
                         setHasUsedFreeMessageTrial(true);
                     }
                 } catch {
-                    return;
+                    return false;
                 }
-            })();
+                return true;
+            }
+
+            if (mode === "queue") {
+                setQueuedDrafts((prev) => [
+                    ...prev,
+                    {
+                        id: `queued-${Date.now()}-${prev.length + 1}`,
+                        sessionId: activeSessionId,
+                        content,
+                        images: [...images],
+                    },
+                ]);
+                return true;
+            }
+
+            const hasBlockingTurn = activeSessionId !== null && (
+                isActiveSessionBusy
+                || isTyping
+                || permissionPrompt !== null
+                || userInputPrompt !== null
+                || planExitPrompt !== null
+            );
+
+            if (mode === "send" && hasBlockingTurn && activeSessionId !== null) {
+                setQueuedDrafts((prev) => [
+                    ...prev,
+                    {
+                        id: `queued-${Date.now()}-${prev.length + 1}`,
+                        sessionId: activeSessionId,
+                        content,
+                        images: [...images],
+                    },
+                ]);
+                if (!isAbortPending) {
+                    setAbortRequested(true);
+                    void abortMessage(activeSessionId).catch(() => {
+                        useSessionStore.getState().setAbortRequested(false);
+                    });
+                }
+                return true;
+            }
+
+            const historyStore = useChatHistoryStore.getState();
+            const previousActiveConversationId = historyStore.activeConversationId;
+            const activeSession = sessions.find((session) => session.id === activeSessionId);
+            const workspaceRootForConversation =
+                activeSessionId !== null && workspaceSessionId === activeSessionId
+                    ? workspaceRoot
+                    : activeSession?.context?.workspaceRoot ?? null;
+            const activeConversationId =
+                previousActiveConversationId
+                ?? historyStore.createConversation(activeSessionId, workspaceRootForConversation);
+            const conversation = previousActiveConversationId === null
+                ? undefined
+                : historyStore.conversations.find(
+                    (item) => item.id === previousActiveConversationId
+                );
+            const shouldUpdateConversation =
+                previousActiveConversationId === null ||
+                (conversation !== undefined && conversation.title === "New Chat");
+
+            if (shouldUpdateConversation) {
+                const title =
+                    content.length > 40
+                        ? content.slice(0, 40) + "..."
+                        : content;
+                historyStore.updateConversation(activeConversationId, title, content);
+            }
+
+            if (activeSessionId === null) {
+                const store = useSessionStore.getState();
+                const requestedModelId = models.some((model) => model.id === selectedModel)
+                    ? selectedModel
+                    : models[0]?.id ?? selectedModel;
+                const requestedModel = models.find((m) => m.id === requestedModelId);
+                const draftWorkspaceRoot = historyStore.conversations.find(
+                    (conversationItem) => conversationItem.id === activeConversationId
+                )?.workspaceRoot ?? null;
+                const localItemId = store.addUserMessage(
+                    content,
+                    supportsAttachmentUploads
+                        ? createPendingUploadAttachments(images)
+                        : createBlobAttachments(images)
+                );
+                store.setSessionLoading(true);
+                store.setAssistantTyping(true);
+                const config: SessionConfig = {
+                    model: requestedModelId,
+                    streaming: true,
+                    agentMode,
+                    permissionLevel,
+                    ...(draftWorkspaceRoot !== null ? { workspaceRoot: draftWorkspaceRoot } : {}),
+                };
+                if (
+                    requestedModel?.supportsReasoningEffort === true &&
+                    reasoningEffort !== null
+                ) {
+                    config.reasoningEffort = reasoningEffort;
+                }
+                try {
+                    await createSessionWithInitialMessage(
+                        config,
+                        content,
+                        images
+                    );
+                    store.updateUserMessageDeliveryState(localItemId, "sent");
+                    if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
+                        await saveFreeMessageTrialUsed(true);
+                        setHasUsedFreeMessageTrial(true);
+                    }
+                } catch {
+                    store.updateUserMessageDeliveryState(localItemId, "failed");
+                    store.setAssistantTyping(false);
+                    return false;
+                }
+                return true;
+            }
+
+            try {
+                await sendMessage(activeSessionId, content, images);
+                if (!hasActiveEntitlement && !hasUsedFreeMessageTrial) {
+                    await saveFreeMessageTrialUsed(true);
+                    setHasUsedFreeMessageTrial(true);
+                }
+            } catch {
+                return false;
+            }
+
+            return true;
         },
         [
             activeSessionId,
@@ -1182,6 +1182,13 @@ export default function ChatScreen() {
             workspaceRoot,
             workspaceSessionId,
         ]
+    );
+
+    const handleSend = useCallback(
+        (content: string, images: ReadonlyArray<ImageAttachment>, mode: SendMode) => {
+            void performSend(content, images, mode);
+        },
+        [performSend]
     );
 
     // Abort message
@@ -1212,9 +1219,13 @@ export default function ChatScreen() {
             return;
         }
 
-        handleSend(draft.content, draft.images, "steer");
-        setQueuedDrafts((prev) => prev.filter((item) => item.id !== draftId));
-    }, [activeSessionId, handleSend, inputDisabled, queuedDrafts]);
+        void performSend(draft.content, draft.images, "steer").then((sent) => {
+            if (!sent) {
+                return;
+            }
+            setQueuedDrafts((prev) => prev.filter((item) => item.id !== draftId));
+        });
+    }, [activeSessionId, inputDisabled, performSend, queuedDrafts]);
 
     const handleEditingDraftConsumed = useCallback(() => {
         setEditingDraft(null);
@@ -1245,15 +1256,20 @@ export default function ChatScreen() {
         }
 
         autoSentQueuedDraftIdRef.current = nextDraft.id;
-        handleSend(nextDraft.content, nextDraft.images, "send");
-        setQueuedDrafts((prev) => prev.filter((draft) => draft.id !== nextDraft.id));
+        void performSend(nextDraft.content, nextDraft.images, "send").then((sent) => {
+            if (sent) {
+                setQueuedDrafts((prev) => prev.filter((draft) => draft.id !== nextDraft.id));
+                return;
+            }
+            autoSentQueuedDraftIdRef.current = null;
+        });
     }, [
         activeSessionId,
-        handleSend,
         isActiveSessionBusy,
         inputDisabled,
         isAbortPending,
         isTyping,
+        performSend,
         permissionPrompt,
         planExitPrompt,
         queuedDrafts,
@@ -1322,6 +1338,7 @@ export default function ChatScreen() {
                                     renderItem={renderItem}
                                     keyExtractor={keyExtractor}
                                     getItemType={getChatItemType}
+                                    maintainVisibleContentPosition={{ disabled: true }}
                                     style={styles.messageList}
                                     contentContainerStyle={styles.messageListContent}
                                     onScroll={handleScroll}

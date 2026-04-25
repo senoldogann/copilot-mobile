@@ -67,6 +67,7 @@ export function createWSClient(config: WSClientConfig) {
     let state: ConnectionState = "disconnected";
     let deviceCredential: string | null = null;
     let sessionToken: string | null = null;
+    let sessionTokenExpiresAt: number | null = null;
     let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
     const pendingMessages: Array<PendingMessage> = [];
     let reconnectAttempt = 0;
@@ -253,6 +254,7 @@ export function createWSClient(config: WSClientConfig) {
     function disconnectWithError(errorMessage: string): void {
         deviceCredential = null;
         sessionToken = null;
+        sessionTokenExpiresAt = null;
         serverUrl = null;
         expectedFingerprint = null;
         transportMode = null;
@@ -301,9 +303,17 @@ export function createWSClient(config: WSClientConfig) {
         reconnectOnClose = options.reconnectOnFailure;
         reportConnectionErrors = options.reportErrors;
         pendingPairMessage = null;
+        const canReuseSessionToken =
+            sessionToken !== null
+            && sessionTokenExpiresAt !== null
+            && sessionTokenExpiresAt > Date.now();
+        if (!canReuseSessionToken) {
+            sessionToken = null;
+            sessionTokenExpiresAt = null;
+        }
         pendingResumeMessage = buildMessage("auth.resume", {
             deviceCredential,
-            ...(sessionToken !== null ? { sessionToken } : {}),
+            ...(canReuseSessionToken ? { sessionToken } : {}),
             lastSeenSeq: lastServerSeq,
             transportMode,
         });
@@ -369,6 +379,7 @@ export function createWSClient(config: WSClientConfig) {
 
             deviceCredential = message.payload.deviceCredential;
             sessionToken = message.payload.sessionToken;
+            sessionTokenExpiresAt = message.payload.sessionTokenExpiresAt;
             transportMode = message.payload.transportMode;
             if (message.payload.relayAccessToken !== undefined) {
                 relayAccessToken = message.payload.relayAccessToken;
@@ -382,6 +393,7 @@ export function createWSClient(config: WSClientConfig) {
 
         if (message.type === "auth.session_token") {
             sessionToken = message.payload.sessionToken;
+            sessionTokenExpiresAt = message.payload.sessionTokenExpiresAt;
         }
 
         config.onMessage(message);
@@ -413,7 +425,7 @@ export function createWSClient(config: WSClientConfig) {
 
         ws.onopen = () => {
             setState("connected");
-            if (transportMode === "relay" && relayAccessToken !== null && ws !== null) {
+        if (transportMode === "relay" && relayAccessToken !== null && ws !== null) {
                 ws.send(JSON.stringify({
                     type: "relay.connect",
                     role: "mobile",
@@ -488,6 +500,8 @@ export function createWSClient(config: WSClientConfig) {
         expectedFingerprint = qrPayload.certFingerprint;
         transportMode = qrPayload.transportMode;
         relayAccessToken = qrPayload.relayAccessToken ?? null;
+        sessionToken = null;
+        sessionTokenExpiresAt = null;
         lastServerSeq = 0;
         reconnectOnClose = false;
         reportConnectionErrors = true;
@@ -517,6 +531,8 @@ export function createWSClient(config: WSClientConfig) {
             expectedFingerprint = params.certFingerprint;
             transportMode = params.transportMode;
             relayAccessToken = params.relayAccessToken;
+            sessionToken = null;
+            sessionTokenExpiresAt = null;
             lastServerSeq = 0;
             reconnectAttempt = 0;
         },
@@ -543,6 +559,7 @@ export function createWSClient(config: WSClientConfig) {
         disconnect(): void {
             deviceCredential = null;
             sessionToken = null;
+            sessionTokenExpiresAt = null;
             serverUrl = null;
             expectedFingerprint = null;
             transportMode = null;

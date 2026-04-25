@@ -73,6 +73,8 @@ type IndexedMergeCandidates = {
 
 const assistantSystemNotificationState = new Map<string, AssistantSystemNotificationBuffer>();
 const emittedSystemNotificationKeys = new Map<string, Set<string>>();
+const historySyncVersions = new Map<string, number>();
+const pendingHistoryRefreshRequests = new Set<string>();
 
 function normalizeSystemNotification(content: string): string {
     return content
@@ -870,9 +872,7 @@ function restoreCachedConversationForMissingSession(missingSessionId: string): b
     sessionStore.setSessionBusy(missingSessionId, false);
     sessionStore.setAgentTodos([]);
     sessionStore.clearSubagentRuns();
-    sessionStore.clearPermissionPrompts();
-    sessionStore.setUserInputPrompt(null);
-    sessionStore.setPlanExitPrompt(null);
+    sessionStore.clearSessionPrompts(missingSessionId);
     chatHistoryStore.setActiveConversation(linkedConversation.id);
     const restoredItems = chatHistoryStore.getConversationItems(linkedConversation.id);
     sessionStore.replaceChatItems(restoredItems);
@@ -880,6 +880,57 @@ function restoreCachedConversationForMissingSession(missingSessionId: string): b
     sessionStore.removeSession(missingSessionId);
     connectionStore.setError(null);
     return true;
+}
+
+function clearPendingHistoryRefresh(sessionId: string): void {
+    pendingHistoryRefreshRequests.delete(sessionId);
+}
+
+function markSessionHistorySynced(sessionId: string): void {
+    clearPendingHistoryRefresh(sessionId);
+    const remoteSession = useSessionStore.getState().sessions.find((item) => item.id === sessionId);
+    historySyncVersions.set(sessionId, remoteSession?.lastActiveAt ?? Date.now());
+}
+
+function requestActiveSessionHistoryRefresh(sessionId: string): void {
+    if (pendingHistoryRefreshRequests.has(sessionId)) {
+        return;
+    }
+
+    pendingHistoryRefreshRequests.add(sessionId);
+    void import("./bridge")
+        .then(({ requestSessionHistory }) => requestSessionHistory(sessionId))
+        .catch(() => {
+            clearPendingHistoryRefresh(sessionId);
+        });
+}
+
+function refreshActiveSessionHistoryIfStale(): void {
+    if (!isAppActive()) {
+        return;
+    }
+
+    const sessionStore = useSessionStore.getState();
+    const activeSessionId = sessionStore.activeSessionId;
+    if (activeSessionId === null) {
+        return;
+    }
+
+    if (sessionStore.busySessions[activeSessionId] === true || sessionStore.isAssistantTyping) {
+        return;
+    }
+
+    const remoteSession = sessionStore.sessions.find((item) => item.id === activeSessionId);
+    if (remoteSession === undefined) {
+        return;
+    }
+
+    const lastKnownHistoryVersion = historySyncVersions.get(activeSessionId) ?? 0;
+    if (remoteSession.lastActiveAt <= lastKnownHistoryVersion) {
+        return;
+    }
+
+    requestActiveSessionHistoryRefresh(activeSessionId);
 }
 
 export function handleServerMessage(message: ServerMessage): void {
@@ -920,6 +971,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.created": {
+            clearPendingHistoryRefresh(message.payload.session.id);
             sessionStore.setSessionLoading(false);
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.setAbortRequested(false);
@@ -953,6 +1005,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.resumed": {
+            pendingHistoryRefreshRequests.add(message.payload.session.id);
             if (consumeSessionPrefetchResume(message.payload.session.id)) {
                 sessionStore.upsertSession(message.payload.session);
                 rememberWorkspaceDirectory(message.payload.session.context?.workspaceRoot);
@@ -1022,6 +1075,7 @@ export function handleServerMessage(message: ServerMessage): void {
             for (const session of message.payload.sessions) {
                 rememberWorkspaceDirectory(session.context?.workspaceRoot);
             }
+            refreshActiveSessionHistoryIfStale();
             break;
         }
 
@@ -1039,11 +1093,13 @@ export function handleServerMessage(message: ServerMessage): void {
                     );
                     chatHistoryStore.markConversationSynced(linkedConversation.id, Date.now());
                 }
+                markSessionHistorySynced(message.payload.sessionId);
                 break;
             }
 
             const { activeSessionId } = useSessionStore.getState();
             if (activeSessionId === null || activeSessionId !== message.payload.sessionId) {
+                clearPendingHistoryRefresh(message.payload.sessionId);
                 console.warn("[MessageHandler] Ignoring session.history for an inactive session");
                 break;
             }
@@ -1054,6 +1110,13 @@ export function handleServerMessage(message: ServerMessage): void {
                 sessionStore.setSubagentRuns(
                     deriveSubagentRunsFromItems(mergedItems, sessionStore.isAssistantTyping)
                 );
+                const linkedConversation = useChatHistoryStore.getState().conversations.find(
+                    (conversation) => conversation.sessionId === message.payload.sessionId
+                );
+                if (linkedConversation !== undefined) {
+                    useChatHistoryStore.getState().setConversationItems(linkedConversation.id, mergedItems);
+                }
+                markSessionHistorySynced(message.payload.sessionId);
                 break;
             }
             const historyItems = message.payload.items.map(mapHistoryItemToChatItem);
@@ -1062,6 +1125,13 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setSubagentRuns(
                 deriveSubagentRunsFromItems(historyItems, sessionStore.isAssistantTyping)
             );
+            const linkedConversation = useChatHistoryStore.getState().conversations.find(
+                (conversation) => conversation.sessionId === message.payload.sessionId
+            );
+            if (linkedConversation !== undefined) {
+                useChatHistoryStore.getState().setConversationItems(linkedConversation.id, historyItems);
+            }
+            markSessionHistorySynced(message.payload.sessionId);
             break;
         }
 
@@ -1370,6 +1440,7 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.error": {
+            clearPendingHistoryRefresh(message.payload.sessionId);
             clearSessionPrefetch(message.payload.sessionId);
             flushSessionStreamBuffers(message.payload.sessionId);
             sessionStore.setSessionBusy(message.payload.sessionId, false);
@@ -1388,9 +1459,6 @@ export function handleServerMessage(message: ServerMessage): void {
             sessionStore.setAbortRequested(false);
             sessionStore.setAgentTodos([]);
             sessionStore.clearSubagentRuns();
-            sessionStore.clearPermissionPrompts();
-            sessionStore.setUserInputPrompt(null);
-            sessionStore.setPlanExitPrompt(null);
             connectionStore.setError(
                 `[${message.payload.errorType}] ${message.payload.message}`
             );

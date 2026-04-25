@@ -967,6 +967,30 @@ export function createSessionManager(
             }
         },
 
+        async requestSessionHistory(sessionId: string): Promise<void> {
+            const session = activeSessions.get(sessionId);
+            if (session === undefined) {
+                return;
+            }
+
+            try {
+                const history = await session.getHistory();
+                send({
+                    ...makeBase(),
+                    type: "session.history",
+                    payload: {
+                        sessionId,
+                        items: history,
+                    },
+                });
+            } catch (error) {
+                console.warn("[session-manager] Failed to fetch session history on demand", {
+                    sessionId,
+                    error: error instanceof Error ? error.message : String(error),
+                });
+            }
+        },
+
         async listSessions(): Promise<void> {
             try {
                 const sessions = await copilotClient.listSessions();

@@ -1,11 +1,12 @@
 import { appendFile, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SessionMessageAttachment } from "@copilot-mobile/shared";
 
 const ATTACHMENT_UPLOAD_TTL_MS = 60 * 60 * 1000;
 const ATTACHMENT_UPLOAD_DIR = join(tmpdir(), "copilot-mobile-attachment-uploads");
+const ATTACHMENT_UPLOAD_ID_PATTERN = /^[A-Za-z0-9_-]{1,128}$/;
 
 type PendingAttachmentUpload = {
     deviceId: string;
@@ -19,6 +20,22 @@ type PendingAttachmentUpload = {
 
 async function safeDeleteFile(filePath: string): Promise<void> {
     await rm(filePath, { force: true }).catch(() => {});
+}
+
+function assertValidUploadId(uploadId: string): void {
+    if (!ATTACHMENT_UPLOAD_ID_PATTERN.test(uploadId)) {
+        throw new Error("Invalid uploadId");
+    }
+}
+
+function createUploadFilePath(uploadId: string): string {
+    assertValidUploadId(uploadId);
+    const attachmentUploadDir = resolve(ATTACHMENT_UPLOAD_DIR);
+    const filePath = resolve(attachmentUploadDir, `${uploadId}-${randomUUID()}.b64`);
+    if (filePath !== attachmentUploadDir && !filePath.startsWith(`${attachmentUploadDir}${sep}`)) {
+        throw new Error("Invalid upload file path");
+    }
+    return filePath;
 }
 
 export function createAttachmentUploadStore() {
@@ -65,7 +82,7 @@ export function createAttachmentUploadStore() {
             }
 
             await mkdir(ATTACHMENT_UPLOAD_DIR, { recursive: true });
-            const filePath = join(ATTACHMENT_UPLOAD_DIR, `${uploadId}-${randomUUID()}.b64`);
+            const filePath = createUploadFilePath(uploadId);
             const writeChain = writeFile(filePath, "", "utf8");
             uploads.set(uploadId, {
                 deviceId,
