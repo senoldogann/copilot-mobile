@@ -13,10 +13,22 @@ import {
     writeLaunchAgentPlist,
 } from "./lib/launch-agent.mjs";
 import {
+    getDesktopPlatformDescription,
+    getDesktopServiceLabel,
+    getSupportedDesktopPlatform,
+    requireSupportedDesktopPlatform,
+} from "./lib/runtime-platform.mjs";
+import {
+    getWindowsDaemonPidStatus,
+    startWindowsDaemon,
+    stopWindowsDaemon,
+} from "./lib/windows-daemon.mjs";
+import {
     ensureCompanionDirectories,
     getCompanionLogsDirectory,
     getCompanionConfigPath,
     getDaemonEntryPoint,
+    getDaemonPidPath,
     getLaunchAgentPath,
     getPackageRootDirectory,
 } from "./lib/paths.mjs";
@@ -29,12 +41,6 @@ const NODEJS_MAJOR_REQUIREMENT = 20;
 
 function printUsage() {
     console.log("Usage: code-companion <login|up|status|doctor|qr|logs|dashboard|down> [--json]");
-}
-
-function assertMacOS() {
-    if (process.platform !== "darwin") {
-        throw new Error("Code Companion desktop companion v1 currently supports macOS only.");
-    }
 }
 
 function sleep(milliseconds) {
@@ -171,7 +177,11 @@ function requiresDaemonRestart(statusPayload, config) {
     return false;
 }
 
-function stopManagedDaemon(statusPayload) {
+function stopManagedDaemon(statusPayload, platform) {
+    if (platform === "windows") {
+        return stopWindowsDaemon(statusPayload);
+    }
+
     const unloaded = bootoutLaunchAgent();
 
     if (typeof statusPayload?.status?.pid !== "number") {
@@ -184,6 +194,31 @@ function stopManagedDaemon(statusPayload) {
     } catch {
         return unloaded;
     }
+}
+
+function getServiceCheck(platform) {
+    if (platform === "macos") {
+        const launchAgentPath = getLaunchAgentPath();
+        const installed = existsSync(launchAgentPath);
+        return {
+            label: getDesktopServiceLabel(platform),
+            installed,
+            detail: installed
+                ? `LaunchAgent plist is present at ${launchAgentPath}.`
+                : `LaunchAgent plist is missing at ${launchAgentPath}.`,
+            nextAction: "Run `code-companion up` once so the LaunchAgent is installed for the current macOS user.",
+        };
+    }
+
+    const { pid, running } = getWindowsDaemonPidStatus();
+    return {
+        label: getDesktopServiceLabel(platform),
+        installed: running,
+        detail: running
+            ? `Background daemon is tracked in ${getDaemonPidPath()} with PID ${pid}.`
+            : `Background daemon is not running. Expected PID file location: ${getDaemonPidPath()}.`,
+        nextAction: "Run `code-companion up` once so the Windows background daemon starts and writes its PID file.",
+    };
 }
 
 function resolveCopilotBinary() {
@@ -358,17 +393,17 @@ function printDoctorReport(report) {
 async function buildDoctorReport() {
     const checks = [];
     const nextActions = [];
-    const onMacOS = process.platform === "darwin";
+    const platform = getSupportedDesktopPlatform();
     checks.push(createDoctorCheck(
         "platform",
         "Platform",
-        onMacOS ? "pass" : "fail",
-        onMacOS
-            ? "macOS detected. The desktop companion can use LaunchAgent lifecycle normally."
-            : `Detected platform: ${process.platform}. The desktop companion supports macOS only.`
+        platform !== null ? "pass" : "fail",
+        platform !== null
+            ? `${getDesktopPlatformDescription(platform)} detected. The desktop companion can use ${getDesktopServiceLabel(platform).toLowerCase()} lifecycle normally.`
+            : `Detected platform: ${process.platform}. The desktop companion supports macOS and Windows only.`
     ));
-    if (!onMacOS) {
-        nextActions.push("Run the desktop companion on a Mac, then pair the iPhone app with that Mac.");
+    if (platform === null) {
+        nextActions.push("Run the desktop companion on a supported macOS or Windows machine, then pair the iPhone app there.");
         return {
             ready: false,
             checks,
@@ -466,18 +501,15 @@ async function buildDoctorReport() {
         };
     }
 
-    const launchAgentPath = getLaunchAgentPath();
-    const launchAgentReady = existsSync(launchAgentPath);
+    const serviceCheck = getServiceCheck(platform);
     checks.push(createDoctorCheck(
-        "launch_agent",
-        "LaunchAgent",
-        launchAgentReady ? "pass" : "fail",
-        launchAgentReady
-            ? `LaunchAgent plist is present at ${launchAgentPath}.`
-            : `LaunchAgent plist is missing at ${launchAgentPath}.`
+        "service_manager",
+        serviceCheck.label,
+        serviceCheck.installed ? "pass" : "fail",
+        serviceCheck.detail
     ));
-    if (!launchAgentReady) {
-        nextActions.push("Run `code-companion up` once so the LaunchAgent is installed for the current macOS user.");
+    if (!serviceCheck.installed) {
+        nextActions.push(serviceCheck.nextAction);
     }
 
     let snapshot = null;
@@ -554,7 +586,7 @@ async function buildDoctorReport() {
 }
 
 async function handleUp() {
-    assertMacOS();
+    const platform = requireSupportedDesktopPlatform();
     ensureCompanionDirectories();
     const bundleRefreshed = maybeRefreshLocalCompanionBundle();
     const config = loadConfig();
@@ -567,7 +599,7 @@ async function handleUp() {
     try {
         const status = await fetchManagedStatus(config.managementPort);
         if (bundleRefreshed || requiresDaemonRestart(status, config)) {
-            stopManagedDaemon(status);
+            stopManagedDaemon(status, platform);
             await sleep(1_000);
         } else {
             const readyStatus = await waitForRelayReady(config.managementPort);
@@ -587,13 +619,17 @@ async function handleUp() {
         throw new Error("Desktop daemon bundle is missing. Run `pnpm build:desktop` first.");
     }
 
-    writeLaunchAgentPlist(config.workspaceRoot ?? null);
     truncateManagedDaemonLogs();
 
-    let agentBootstrapped = false;
+    let daemonStarted = false;
     try {
-        await bootstrapLaunchAgent();
-        agentBootstrapped = true;
+        if (platform === "macos") {
+            writeLaunchAgentPlist(config.workspaceRoot ?? null);
+            await bootstrapLaunchAgent();
+        } else {
+            startWindowsDaemon(config.workspaceRoot ?? null);
+        }
+        daemonStarted = true;
 
         await waitForStatus(config.managementPort);
         const status = await waitForRelayReady(config.managementPort);
@@ -608,8 +644,8 @@ async function handleUp() {
         printStatus(status);
         printQrCode(qrPayload);
     } catch (error) {
-        if (agentBootstrapped) {
-            bootoutLaunchAgent();
+        if (daemonStarted) {
+            stopManagedDaemon(null, platform);
         }
 
         const message = error instanceof Error ? error.message : String(error);
@@ -618,7 +654,7 @@ async function handleUp() {
 }
 
 async function handleStatus() {
-    assertMacOS();
+    requireSupportedDesktopPlatform();
     const config = loadConfig();
 
     try {
@@ -634,7 +670,7 @@ async function handleStatus() {
 }
 
 async function handleQr() {
-    assertMacOS();
+    requireSupportedDesktopPlatform();
     const config = loadConfig();
     await waitForRelayReady(config.managementPort);
     const payload = await requestJson("POST", config.managementPort, QR_PATH);
@@ -642,12 +678,18 @@ async function handleQr() {
 }
 
 function handleLogs() {
-    assertMacOS();
+    const platform = requireSupportedDesktopPlatform();
     ensureCompanionDirectories();
     const logPath = `${getCompanionLogsDirectory()}/daemon.stderr.log`;
-    const child = spawn("tail", ["-n", "100", "-f", logPath], {
-        stdio: "inherit",
-    });
+    const child = platform === "windows"
+        ? spawn(
+            "powershell.exe",
+            ["-NoLogo", "-NoProfile", "-Command", `Get-Content -Path '${logPath.replace(/'/g, "''")}' -Tail 100 -Wait`],
+            { stdio: "inherit" }
+        )
+        : spawn("tail", ["-n", "100", "-f", logPath], {
+            stdio: "inherit",
+        });
 
     child.on("exit", (code, signal) => {
         if (typeof signal === "string") {
@@ -660,7 +702,7 @@ function handleLogs() {
 }
 
 async function handleDashboard() {
-    assertMacOS();
+    requireSupportedDesktopPlatform();
     const config = loadConfig();
     const status = await fetchManagedStatus(config.managementPort);
     if (status.status.daemonState !== "running") {
@@ -670,18 +712,18 @@ async function handleDashboard() {
 }
 
 async function handleDown() {
-    assertMacOS();
+    const platform = requireSupportedDesktopPlatform();
     const config = loadConfig();
 
     try {
         const status = await requestJson("GET", config.managementPort, STATUS_PATH);
         if (isManagedStatusPayload(status)) {
-            stopManagedDaemon(status);
+            stopManagedDaemon(status, platform);
         } else if (typeof status?.status?.pid === "number") {
             process.kill(status.status.pid, "SIGTERM");
         }
     } catch {
-        bootoutLaunchAgent();
+        stopManagedDaemon(null, platform);
     }
 
     for (let attempt = 0; attempt < 20; attempt += 1) {

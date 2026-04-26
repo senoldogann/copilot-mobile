@@ -14,6 +14,7 @@ import {
     initializeNotifications,
     initializeNotificationRouting,
 } from "./notifications";
+import { initializeCompanionContextFromStoredCredentials } from "./companion-context";
 import { useConnectionStore } from "../stores/connection-store";
 import { useChatHistoryStore } from "../stores/chat-history-store";
 import { useSessionStore } from "../stores/session-store";
@@ -168,6 +169,11 @@ function syncOnForeground(): void {
 }
 
 async function hydrateMobileState(bootstrapId: number): Promise<void> {
+    await initializeCompanionContextFromStoredCredentials();
+    if (!isRuntimeBootstrapCurrent(bootstrapId)) {
+        return;
+    }
+
     const chatHistoryStore = useChatHistoryStore.getState();
     await chatHistoryStore.hydrate();
     if (!isRuntimeBootstrapCurrent(bootstrapId)) {

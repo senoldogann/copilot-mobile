@@ -81,6 +81,10 @@ export function getDaemonStderrPath() {
     return path.join(getCompanionLogsDirectory(), "daemon.stderr.log");
 }
 
+export function getDaemonPidPath() {
+    return path.join(getCompanionRootDirectory(), "daemon.pid");
+}
+
 export function ensureCompanionDirectories() {
     mkdirSync(getCompanionRootDirectory(), { recursive: true });
     mkdirSync(getCompanionLogsDirectory(), { recursive: true });

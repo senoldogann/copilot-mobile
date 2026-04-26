@@ -4,6 +4,7 @@ import * as SecureStore from "expo-secure-store";
 import type { TransportMode } from "@copilot-mobile/shared";
 
 import { deleteLocalStateValue, readLocalStateValue, writeLocalStateValue } from "./local-state-storage";
+import { getCurrentCompanionScopeKey, getScopedStorageKey } from "./companion-scope";
 
 type SecureStoreKeyPair = {
     primary: string;
@@ -38,6 +39,10 @@ const KEY_ACTIVE_SESSION_ID = "code_companion_active_session_id";
 const KEY_SESSION_PREFERENCES = "code_companion_session_preferences";
 const KEY_ONBOARDING_COMPLETED = "code_companion_onboarding_completed";
 const KEY_FREE_MESSAGE_TRIAL = "code_companion_free_message_trial";
+
+function getActiveSessionStorageKey(): string {
+    return getScopedStorageKey(KEY_ACTIVE_SESSION_ID, getCurrentCompanionScopeKey());
+}
 
 export type StoredCredentials = {
     deviceCredential: string;
@@ -269,20 +274,21 @@ export async function clearCredentials(): Promise<void> {
     await removeItem(KEY_DEVICE_ID);
     await removeItem(KEY_TRANSPORT_MODE);
     await removeItem(KEY_RELAY_ACCESS_TOKEN);
-    await deleteLocalStateValue(KEY_ACTIVE_SESSION_ID);
+    await deleteLocalStateValue(getActiveSessionStorageKey());
 }
 
 export async function saveActiveSessionId(sessionId: string | null): Promise<void> {
+    const storageKey = getActiveSessionStorageKey();
     if (sessionId === null) {
-        await deleteLocalStateValue(KEY_ACTIVE_SESSION_ID);
+        await deleteLocalStateValue(storageKey);
         return;
     }
 
-    await writeLocalStateValue(KEY_ACTIVE_SESSION_ID, sessionId);
+    await writeLocalStateValue(storageKey, sessionId);
 }
 
 export async function loadActiveSessionId(): Promise<string | null> {
-    return readLocalStateValue(KEY_ACTIVE_SESSION_ID);
+    return readLocalStateValue(getActiveSessionStorageKey());
 }
 
 export async function saveSessionPreferences(

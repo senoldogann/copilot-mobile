@@ -1,16 +1,16 @@
 jest.mock("../../services/chat-history-storage", () => ({
-    writeChatHistorySnapshot: jest.fn<Promise<void>, [string]>(() => Promise.resolve()),
-    readChatHistorySnapshot: jest.fn<Promise<string | null>, []>(() => Promise.resolve(null)),
+    writeChatHistorySnapshot: jest.fn<Promise<void>, [string, string?]>(() => Promise.resolve()),
+    readChatHistorySnapshot: jest.fn<Promise<string | null>, [string?]>(() => Promise.resolve(null)),
     readLegacySecureStoreChatHistory: jest.fn<Promise<string | null>, []>(() => Promise.resolve(null)),
     clearLegacySecureStoreChatHistory: jest.fn<Promise<void>, []>(() => Promise.resolve()),
-    deleteChatHistorySnapshot: jest.fn<Promise<void>, []>(() => Promise.resolve()),
+    deleteChatHistorySnapshot: jest.fn<Promise<void>, [string?]>(() => Promise.resolve()),
 }));
 
 import { useChatHistoryStore } from "../chat-history-store";
 
 const mockChatHistoryStorage = jest.requireMock("../../services/chat-history-storage") as {
-    writeChatHistorySnapshot: jest.Mock<Promise<void>, [string]>;
-    readChatHistorySnapshot: jest.Mock<Promise<string | null>, []>;
+    writeChatHistorySnapshot: jest.Mock<Promise<void>, [string, string?]>;
+    readChatHistorySnapshot: jest.Mock<Promise<string | null>, [string?]>;
     readLegacySecureStoreChatHistory: jest.Mock<Promise<string | null>, []>;
 };
 
@@ -37,6 +37,7 @@ describe("chat history store", () => {
         mockChatHistoryStorage.readChatHistorySnapshot.mockResolvedValue(null);
         mockChatHistoryStorage.readLegacySecureStoreChatHistory.mockResolvedValue(null);
         useChatHistoryStore.setState({
+            scopeKey: "default",
             conversations: [],
             activeConversationId: null,
             conversationItems: {},

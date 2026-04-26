@@ -16,6 +16,7 @@ import {
     replaceBackgroundCompletionPreview,
 } from "./background-completion";
 import { isAppActive } from "./app-visibility";
+import { switchToAuthenticatedCompanion } from "./companion-context";
 import { notifySessionActionRequired } from "./notifications";
 import {
     dispatchWorkspaceDiffResponse,
@@ -965,6 +966,9 @@ export function handleServerMessage(message: ServerMessage): void {
 
     switch (message.type) {
         case "auth.authenticated": {
+            if (connectionStore.deviceId !== message.payload.deviceId) {
+                void switchToAuthenticatedCompanion(message.payload.deviceId);
+            }
             connectionStore.setDeviceId(message.payload.deviceId);
             connectionStore.setState("authenticated");
             break;

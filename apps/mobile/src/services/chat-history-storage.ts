@@ -8,8 +8,16 @@ function getStorageDirectoryUri(directoryName: string): string {
     return new Directory(Paths.document, directoryName).uri;
 }
 
-function getChatHistoryFileUri(directoryName: string): string {
-    return new File(getStorageDirectoryUri(directoryName), CHAT_HISTORY_FILE_NAME).uri;
+function getScopedChatHistoryFileName(scopeKey?: string): string {
+    if (scopeKey === undefined || scopeKey === "default") {
+        return CHAT_HISTORY_FILE_NAME;
+    }
+
+    return `chat-history.${scopeKey}.json`;
+}
+
+function getChatHistoryFileUri(directoryName: string, scopeKey?: string): string {
+    return new File(getStorageDirectoryUri(directoryName), getScopedChatHistoryFileName(scopeKey)).uri;
 }
 
 async function ensureStorageDirectory(directoryName: string): Promise<void> {
@@ -21,12 +29,12 @@ async function ensureStorageDirectory(directoryName: string): Promise<void> {
     await directory.create({ intermediates: true, idempotent: true });
 }
 
-export async function writeChatHistorySnapshot(serialized: string): Promise<void> {
+export async function writeChatHistorySnapshot(serialized: string, scopeKey?: string): Promise<void> {
     const directoryNames = [STORAGE_DIRECTORY_NAME, LEGACY_STORAGE_DIRECTORY_NAME] as const;
 
     for (const directoryName of directoryNames) {
         await ensureStorageDirectory(directoryName);
-        const file = new File(getChatHistoryFileUri(directoryName));
+        const file = new File(getChatHistoryFileUri(directoryName, scopeKey));
         if (!file.exists) {
             await file.create({ intermediates: true, overwrite: true });
         }
@@ -34,27 +42,27 @@ export async function writeChatHistorySnapshot(serialized: string): Promise<void
     }
 }
 
-export async function readChatHistorySnapshot(): Promise<string | null> {
-    const primaryFile = new File(getChatHistoryFileUri(STORAGE_DIRECTORY_NAME));
+export async function readChatHistorySnapshot(scopeKey?: string): Promise<string | null> {
+    const primaryFile = new File(getChatHistoryFileUri(STORAGE_DIRECTORY_NAME, scopeKey));
     if (primaryFile.exists) {
         return await primaryFile.text();
     }
 
-    const legacyFile = new File(getChatHistoryFileUri(LEGACY_STORAGE_DIRECTORY_NAME));
+    const legacyFile = new File(getChatHistoryFileUri(LEGACY_STORAGE_DIRECTORY_NAME, scopeKey));
     if (!legacyFile.exists) {
         return null;
     }
 
     const legacySnapshot = await legacyFile.text();
-    await writeChatHistorySnapshot(legacySnapshot);
+    await writeChatHistorySnapshot(legacySnapshot, scopeKey);
     return legacySnapshot;
 }
 
-export async function deleteChatHistorySnapshot(): Promise<void> {
+export async function deleteChatHistorySnapshot(scopeKey?: string): Promise<void> {
     const directoryNames = [STORAGE_DIRECTORY_NAME, LEGACY_STORAGE_DIRECTORY_NAME] as const;
 
     for (const directoryName of directoryNames) {
-        const file = new File(getChatHistoryFileUri(directoryName));
+        const file = new File(getChatHistoryFileUri(directoryName, scopeKey));
         if (!file.exists) {
             continue;
         }

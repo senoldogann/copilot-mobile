@@ -9,6 +9,7 @@ import {
     readLegacySecureStoreChatHistory,
     writeChatHistorySnapshot,
 } from "../services/chat-history-storage";
+import { getDefaultCompanionScopeKey } from "../services/companion-scope";
 
 const MAX_CONVERSATIONS = 50;
 const MAX_PERSISTED_TEXT_LENGTH = 64_000;
@@ -26,6 +27,7 @@ export type Conversation = {
 };
 
 export type ChatHistoryStore = {
+    scopeKey: string;
     conversations: ReadonlyArray<Conversation>;
     activeConversationId: string | null;
     conversationItems: Readonly<Record<string, ReadonlyArray<ChatItem>>>;
@@ -47,6 +49,7 @@ export type ChatHistoryStore = {
     finalizeStreamingForSession: (sessionId: string) => void;
     removeBySessionId: (sessionId: string) => void;
     hydrate: () => Promise<void>;
+    switchScope: (scopeKey: string) => Promise<void>;
 };
 
 let convCounter = 0;
@@ -55,6 +58,11 @@ type PersistedChatHistory = {
     conversations: ReadonlyArray<Conversation>;
     activeConversationId: string | null;
     conversationItems: Readonly<Record<string, ReadonlyArray<ChatItem>>>;
+};
+
+type ScopedPersistedChatHistory = {
+    scopeKey: string;
+    snapshot: PersistedChatHistory;
 };
 
 function limitPersistedText(value: string): string {
@@ -95,14 +103,17 @@ function compactChatItemForPersistence(item: ChatItem): ChatItem {
     };
 }
 
-let pendingSnapshot: PersistedChatHistory | null = null;
+let pendingSnapshot: ScopedPersistedChatHistory | null = null;
 let persistInFlight = false;
 
-function toPersistedSnapshot(state: Pick<ChatHistoryStore, "conversations" | "activeConversationId" | "conversationItems">): PersistedChatHistory {
+function toPersistedSnapshot(state: Pick<ChatHistoryStore, "scopeKey" | "conversations" | "activeConversationId" | "conversationItems">): ScopedPersistedChatHistory {
     return {
-        conversations: state.conversations,
-        activeConversationId: state.activeConversationId,
-        conversationItems: state.conversationItems,
+        scopeKey: state.scopeKey,
+        snapshot: {
+            conversations: state.conversations,
+            activeConversationId: state.activeConversationId,
+            conversationItems: state.conversationItems,
+        },
     };
 }
 
@@ -137,7 +148,7 @@ async function flushPersistQueue(): Promise<void> {
     }
 }
 
-function schedulePersist(state: Pick<ChatHistoryStore, "conversations" | "activeConversationId" | "conversationItems">): void {
+function schedulePersist(state: Pick<ChatHistoryStore, "scopeKey" | "conversations" | "activeConversationId" | "conversationItems">): void {
     pendingSnapshot = toPersistedSnapshot(state);
     void flushPersistQueue();
 }
@@ -320,7 +331,8 @@ function sanitizeConversation(input: unknown): Conversation | null {
     };
 }
 
-async function persistChatHistory(snapshot: PersistedChatHistory): Promise<void> {
+async function persistChatHistory(scopedSnapshot: ScopedPersistedChatHistory): Promise<void> {
+    const snapshot = scopedSnapshot.snapshot;
     const conversations = snapshot.conversations.slice(0, MAX_CONVERSATIONS);
     const conversationItems = pruneConversationItemsToTrackedConversations(
         snapshot.conversationItems,
@@ -336,12 +348,15 @@ async function persistChatHistory(snapshot: PersistedChatHistory): Promise<void>
             ])
         ),
     });
-    await writeChatHistorySnapshot(serialized);
+    await writeChatHistorySnapshot(serialized, scopedSnapshot.scopeKey);
 }
 
-async function loadPersistedChatHistory(): Promise<PersistedChatHistory | null> {
-    const persistedRaw = await readChatHistorySnapshot();
-    const legacyRaw = persistedRaw === null ? await readLegacySecureStoreChatHistory() : null;
+async function loadPersistedChatHistory(scopeKey: string): Promise<PersistedChatHistory | null> {
+    const persistedRaw = await readChatHistorySnapshot(scopeKey);
+    const legacyRaw =
+        persistedRaw === null && scopeKey === getDefaultCompanionScopeKey()
+            ? await readLegacySecureStoreChatHistory()
+            : null;
     const raw = persistedRaw ?? legacyRaw;
     if (raw === null) {
         return null;
@@ -381,7 +396,7 @@ async function loadPersistedChatHistory(): Promise<PersistedChatHistory | null> 
     };
 
     if (persistedRaw === null && legacyRaw !== null) {
-        await persistChatHistory(snapshot);
+        await persistChatHistory({ scopeKey, snapshot });
         await clearLegacySecureStoreChatHistory();
     }
 
@@ -389,6 +404,7 @@ async function loadPersistedChatHistory(): Promise<PersistedChatHistory | null> 
 }
 
 export const useChatHistoryStore = create<ChatHistoryStore>((set, get) => ({
+    scopeKey: getDefaultCompanionScopeKey(),
     conversations: [],
     activeConversationId: null,
     conversationItems: {},
@@ -582,7 +598,7 @@ export const useChatHistoryStore = create<ChatHistoryStore>((set, get) => ({
 
     hydrate: async () => {
         try {
-            const persisted = await loadPersistedChatHistory();
+            const persisted = await loadPersistedChatHistory(get().scopeKey);
             if (persisted === null) {
                 return;
             }
@@ -594,8 +610,34 @@ export const useChatHistoryStore = create<ChatHistoryStore>((set, get) => ({
             });
         } catch (error) {
             console.warn("[ChatHistory] Failed to hydrate persisted conversations", { error });
-            await deleteChatHistorySnapshot();
+            await deleteChatHistorySnapshot(get().scopeKey);
             await clearLegacySecureStoreChatHistory();
+        }
+    },
+
+    switchScope: async (scopeKey) => {
+        set({
+            scopeKey,
+            conversations: [],
+            activeConversationId: null,
+            conversationItems: {},
+        });
+
+        try {
+            const persisted = await loadPersistedChatHistory(scopeKey);
+            if (persisted === null) {
+                return;
+            }
+
+            set({
+                scopeKey,
+                conversations: persisted.conversations,
+                activeConversationId: persisted.activeConversationId,
+                conversationItems: persisted.conversationItems,
+            });
+        } catch (error) {
+            console.warn("[ChatHistory] Failed to switch companion scope", { scopeKey, error });
+            await deleteChatHistorySnapshot(scopeKey);
         }
     },
 }));

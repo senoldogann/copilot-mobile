@@ -1,6 +1,6 @@
-# Mac Companion
+# Desktop Companion
 
-This is the current macOS-first desktop companion flow for Code Companion.
+This is the current desktop companion flow for Code Companion across supported desktop platforms.
 
 ## Goal
 
@@ -12,13 +12,15 @@ The desktop side should feel like:
 4. Run `code-companion up`.
 5. Scan the QR from the local dashboard.
 
-The daemon is installed as a user `LaunchAgent` at `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`.
+On macOS the daemon is installed as a user `LaunchAgent` at `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`.
+On Windows the daemon runs as a detached background process tracked in `~/.code-companion/daemon.pid`.
 
 ## Runtime Files
 
 - Config: `~/.code-companion/config.json`
 - Logs: `~/.code-companion/logs/`
-- LaunchAgent: `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`
+- macOS LaunchAgent: `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`
+- Windows daemon PID: `~/.code-companion/daemon.pid`
 
 ## Stable Commands
 
@@ -78,9 +80,10 @@ What is ready now:
 - Publish-style CLI packaging via `prepack`
 - Bundled desktop daemon runtime
 - macOS LaunchAgent lifecycle
+- Windows detached background-daemon lifecycle
 - Hosted relay/control-plane endpoints in `apps/relay-server`
 - Dashboard QR refresh / open logs / stop service actions
-- `code-companion doctor` readiness check for auth, LaunchAgent, daemon health, and relay link state
+- `code-companion doctor` readiness check for auth, service manager state, daemon health, and relay link state
 
 What still needs product hardening before App Store-grade rollout:
 

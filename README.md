@@ -1,6 +1,6 @@
 # Code Companion
 
-Code Companion lets you control a coding session running on your own Mac from your phone.
+Code Companion lets you control a coding session running on your own desktop from your phone.
 
 ## How It Works
 
@@ -11,35 +11,35 @@ Code Companion lets you control a coding session running on your own Mac from yo
 └──────────────┘                  └────────────────┘                └─────────────┘
 ```
 
-1. The desktop companion runs as a macOS `LaunchAgent` and talks to Copilot CLI through `@github/copilot-sdk`.
+1. The desktop companion runs as a local background service and talks to Copilot CLI through `@github/copilot-sdk`.
 2. `code-companion up` starts the service and prints a pairing QR code.
 3. The mobile app scans the QR code and connects through the hosted relay/control plane or a self-hosted relay.
-4. You send messages from your phone while the coding session runs on your Mac.
+4. You send messages from your phone while the coding session runs on your desktop.
 
 ## Continue On Desktop
 
 - Sessions started from the phone are stored in the local Copilot CLI session store.
 - New sessions are opened from the repository root, so monorepos stay visible as one project instead of being pinned to a nested package.
-- You can continue a phone-started session from a VS Code terminal on the same Mac with `copilot /resume`.
+- You can continue a phone-started session from a VS Code terminal on the same desktop machine with `copilot /resume`.
 - When the mobile app returns to the foreground or the chat drawer opens, it refreshes the session list so desktop-started sessions can appear on the phone.
 
 ## Requirements
 
-- A Mac running macOS
+- A Mac or Windows PC
 - Node.js >= 20
 - pnpm >= 9
-- A GitHub Copilot account with Copilot CLI signed in on the Mac
+- A GitHub Copilot account with Copilot CLI signed in on the desktop companion machine
 - An iOS or Android device
 - A public relay/control-plane deployment for access outside the local network
 
 For end users, the desktop setup is:
 
-1. Install the companion on the Mac with `npm install -g @senoldogann/code-companion`
+1. Install the companion on the desktop companion machine with `npm install -g @senoldogann/code-companion`
 2. Sign in once with `code-companion login`
 3. Start the service with `code-companion up`
 4. Scan the QR code from the phone
 
-After pairing, the service keeps running in the background through LaunchAgent as long as the Mac is awake, the user session is active, and the companion remains healthy. The phone does not need to be on the same network when the hosted relay is used.
+After pairing, the service keeps running in the background through the local service manager as long as the desktop machine is awake, the user session is active, and the companion remains healthy. The phone does not need to be on the same network when the hosted relay is used.
 
 ## Installation
 
@@ -60,7 +60,7 @@ code-companion up
 code-companion doctor
 ```
 
-`code-companion login` starts the official Copilot CLI `copilot login` flow. `code-companion up` installs or refreshes the macOS LaunchAgent at `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`, starts the daemon in the background, and prints the pairing QR code in the terminal. `code-companion doctor` checks Copilot authentication, LaunchAgent state, daemon bundle health, relay connectivity, and the localhost management endpoint in one place.
+`code-companion login` starts the official Copilot CLI `copilot login` flow. `code-companion up` starts the daemon in the background and prints the pairing QR code in the terminal. On macOS it installs or refreshes the LaunchAgent at `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`; on Windows it starts a detached background daemon tracked under `~/.code-companion/daemon.pid`. `code-companion doctor` checks Copilot authentication, service-manager state, daemon bundle health, relay connectivity, and the localhost management endpoint in one place.
 
 When working from the repository, you can run the same commands with `node ./bin/copilot-mobile.mjs <command>` or `pnpm code-companion <command>`.
 
@@ -145,13 +145,13 @@ copilot-mobile/
 | Command | Description |
 | ------- | ----------- |
 | `code-companion login` | Start the official Copilot CLI login flow |
-| `code-companion up` | Install or refresh the LaunchAgent, start the daemon, and print the pairing QR |
+| `code-companion up` | Start the managed daemon and print the pairing QR |
 | `code-companion status` | Show daemon, Copilot auth, relay, and last-error state |
 | `code-companion doctor` | Verify readiness for production pairing and reconnect |
 | `code-companion qr` | Request a fresh pairing QR from the running daemon |
 | `code-companion logs` | Tail daemon stderr logs |
 | `code-companion dashboard` | Print the local dashboard URL |
-| `code-companion down` | Unload the LaunchAgent and stop the daemon |
+| `code-companion down` | Stop the managed daemon |
 | `pnpm dev:companion:macos` | Open the native macOS companion shell |
 | `pnpm dev:relay:cloudflare` | Start the Cloudflare Worker relay in local dev mode |
 | `pnpm deploy:relay:cloudflare` | Deploy the Cloudflare Worker relay |
@@ -174,12 +174,13 @@ copilot-mobile/
 
 ## Runtime Notes
 
-- macOS companion config is stored at `~/.code-companion/config.json`. Legacy `~/.copilot-mobile/config.json` is migrated on first read.
-- The default background service is a user `LaunchAgent` loaded with `launchctl bootstrap gui/<uid>`.
+- Companion config is stored at `~/.code-companion/config.json`. Legacy `~/.copilot-mobile/config.json` is migrated on first read.
+- On macOS the default background service is a user `LaunchAgent` loaded with `launchctl bootstrap gui/<uid>`.
+- On Windows the managed daemon is started as a detached background process and tracked in `~/.code-companion/daemon.pid`.
 - Hosted relay public API and relay base URLs can be overridden with `CODE_COMPANION_HOSTED_API_BASE_URL` and `CODE_COMPANION_HOSTED_RELAY_BASE_URL`.
 - Local smoke tests can run with `pnpm dev:relay` and `CODE_COMPANION_SELF_HOSTED_RELAY_SECRET`.
 - `status` and `qr` talk to localhost management endpoints inside the daemon; those endpoints are not exposed to the public network.
-- `doctor` checks the localhost health endpoint, LaunchAgent file, daemon bundle, and Copilot CLI authentication together. Use `code-companion doctor --json` for CI or support flows.
+- `doctor` checks the localhost health endpoint, service-manager state, daemon bundle, and Copilot CLI authentication together. Use `code-companion doctor --json` for CI or support flows.
 - The browser dashboard uses the same management endpoints for QR refresh, log access, and service shutdown actions.
 - `dev:companion:macos` wraps the same management endpoints in a native macOS shell for bridge lifecycle, QR, and dashboard views.
 - Relay-backed companion QR codes advertise `transportMode: "relay"`. Legacy direct mode is kept only for private-network debugging.
