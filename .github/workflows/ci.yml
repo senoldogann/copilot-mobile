@@ -203,7 +203,8 @@ jobs:
           if ($doctorExitCode -ne 0 -and $doctorExitCode -ne 1) {
             throw "Unexpected code-companion doctor exit code: $doctorExitCode"
           }
-
+          $global:LASTEXITCODE = 0
+ 
           $doctorReport = $doctorOutput | ConvertFrom-Json
           if ($doctorReport.checks.id -notcontains "platform") {
             throw "Doctor report is missing the platform check."
