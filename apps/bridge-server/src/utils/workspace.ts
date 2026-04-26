@@ -105,6 +105,10 @@ function mapGitPathToWorkspacePath(
     return toPosixRelativePath(workspaceRoot, absolutePath);
 }
 
+function getGitNullPath(): string {
+    return process.platform === "win32" ? "NUL" : "/dev/null";
+}
+
 function isWithinRoot(rootPath: string, candidatePath: string): boolean {
     const rel = relative(resolve(rootPath), resolve(candidatePath));
     return rel.length === 0 || (!rel.startsWith("..") && !isAbsolute(rel));
@@ -791,7 +795,7 @@ async function readUntrackedFileNumstat(
     gitRoot: string,
     path: string
 ): Promise<{ additions: number; deletions: number } | null> {
-    const diffResult = await runGit(gitRoot, ["diff", "--no-index", "--numstat", "/dev/null", path]);
+    const diffResult = await runGit(gitRoot, ["diff", "--no-index", "--numstat", getGitNullPath(), path]);
     const canReadDiffOutput = diffResult.success || diffResult.exitCode === 1;
     if (!canReadDiffOutput) {
         return null;
@@ -1184,7 +1188,7 @@ export async function readWorkspaceDiff(
         "--no-color",
         "--no-index",
         "--",
-        "/dev/null",
+        getGitNullPath(),
         relPath,
     ]);
     // `diff --no-index` fark bulduğunda exit code 1 verir; bu hata değil.

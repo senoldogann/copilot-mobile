@@ -1416,7 +1416,7 @@ describe("workspace explorer integration", () => {
     });
 
     it("uses the repository root for tree, file, and diff requests when cwd is a subdirectory", async () => {
-        const nestedFilePath = join("apps", "bridge-server", "src", "copilot", "session-manager.ts");
+        const nestedFilePath = "apps/bridge-server/src/copilot/session-manager.ts";
         await mkdir(join(workspaceRoot, "apps", "bridge-server", "src", "copilot"), { recursive: true });
         await writeFile(join(workspaceRoot, nestedFilePath), "export const nested = true;\n");
         await runGit(workspaceRoot, ["add", nestedFilePath]);
@@ -1507,7 +1507,7 @@ describe("workspace explorer integration", () => {
 
     it("scopes recent commits to the active workspace root", async () => {
         const nestedWorkspaceRoot = join(workspaceRoot, "apps", "bridge-server");
-        const nestedFilePath = join("src", "nested.ts");
+        const nestedFilePath = "src/nested.ts";
         await mkdir(join(nestedWorkspaceRoot, "src"), { recursive: true });
         await writeFile(join(nestedWorkspaceRoot, nestedFilePath), "export const nested = true;\n");
         await runGit(workspaceRoot, ["add", "."]);
