@@ -67,7 +67,7 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
                 <ConnectingSpinner />
                 <Text style={styles.title}>Connecting...</Text>
                 <Text style={styles.subtitle}>
-                    Connecting to your Mac companion
+                    Connecting to your desktop companion
                 </Text>
             </View>
         );
@@ -79,9 +79,9 @@ export function EmptyChat({ isConnected, isConnecting, onSuggestionPress }: Prop
                 <View style={styles.disconnectIcon}>
                     <WifiOffIcon size={24} color={theme.colors.textTertiary} />
                 </View>
-                <Text style={styles.title}>Connect to your Mac companion</Text>
+                <Text style={styles.title}>Connect to your desktop companion</Text>
                 <Text style={styles.subtitle}>
-                    Finish setup on your Mac, then scan the pairing QR code here.
+                    Install the global `code-companion` command on your computer, run `code-companion up`, then scan the QR code here.
                 </Text>
                 <Pressable
                     style={({ pressed }) => [

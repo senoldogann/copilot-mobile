@@ -43,24 +43,25 @@ const slides: ReadonlyArray<OnboardingSlide> = [
     {
         id: "how-it-works",
         stepLabel: "Step 1",
-        title: "Your Mac runs the coding session",
-        description: "This iPhone app is the remote companion. The real session stays on your Mac.",
+        title: "Your computer runs the real session",
+        description: "This iPhone app is the remote control. The real GitHub Copilot session stays on your Mac or Windows PC.",
         points: [
-            "Keep your Mac powered on, signed in, and online.",
+            "Keep your computer powered on, signed in, and online.",
             "Your phone mirrors activity and sends actions back.",
         ],
-        note: "You only need to pair this iPhone once.",
+        note: "You only need to scan a QR code to pair.",
         icon: "desktop",
     },
     {
         id: "install",
         stepLabel: "Step 2",
-        title: "Install the Mac companion",
-        description: "Run these commands on the Mac you want to control from your phone.",
+        title: "Install the desktop companion",
+        description: "Run these commands on the Mac or Windows computer you want to control from your phone.",
         points: [
+            "Install it globally so you can run the `code-companion` command from any terminal.",
             "The last command starts the companion and shows the pairing QR code.",
         ],
-        note: "Use the same Mac later when you want to resume sessions.",
+        note: "Use the same computer later when you want to resume sessions.",
         icon: "terminal",
         commands: [
             "npm install -g @senoldogann/code-companion",
@@ -72,12 +73,12 @@ const slides: ReadonlyArray<OnboardingSlide> = [
         id: "pair-and-alerts",
         stepLabel: "Step 3",
         title: "Scan once and optionally enable alerts",
-        description: "Scan the QR code from your Mac, then allow alerts if you want approval and completion updates in the background.",
+        description: "Scan the QR code from your computer, then allow alerts if you want approval and completion updates in the background.",
         points: [
             "Use the QR code shown by `code-companion up`.",
             "Notifications are optional and can also be enabled later in Settings.",
         ],
-        note: "After pairing, reconnect works as long as your Mac companion is available.",
+        note: "After pairing, reconnect works as long as your desktop companion is available.",
         icon: "scan",
     },
 ];
