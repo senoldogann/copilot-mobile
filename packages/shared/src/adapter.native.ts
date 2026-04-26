@@ -101,5 +101,6 @@ export type AdaptedCopilotClient = {
     setSessionMode?(sessionId: string, mode: AgentMode): Promise<void>;
     getModels?(): Promise<ReadonlyArray<ModelInfo>>;
     getCapabilities?(): Promise<HostSessionCapabilities>;
+    getAvailabilityStatus?(): Promise<{ available: boolean; detail: string }>;
     onSessionLifecycle?(handler: (event: AdaptedSessionLifecycleEvent) => void): () => void;
 };

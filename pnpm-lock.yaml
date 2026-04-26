@@ -11,25 +11,6 @@ overrides:
 importers:
 
   .:
-    dependencies:
-      '@github/copilot':
-        specifier: ^1.0.35
-        version: 1.0.35
-      '@github/copilot-sdk':
-        specifier: 0.2.2
-        version: 0.2.2
-      jsonwebtoken:
-        specifier: 9.0.2
-        version: 9.0.2
-      qrcode:
-        specifier: 1.5.4
-        version: 1.5.4
-      ws:
-        specifier: 8.18.2
-        version: 8.18.2
-      zod:
-        specifier: 3.24.4
-        version: 3.24.4
     devDependencies:
       esbuild:
         specifier: ^0.25.11

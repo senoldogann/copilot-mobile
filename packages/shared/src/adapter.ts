@@ -149,6 +149,7 @@ export type AdaptedCopilotClient = {
     deleteSession(sessionId: string): Promise<void>;
     listModels(): Promise<ReadonlyArray<ModelInfo>>;
     isAvailable(): Promise<boolean>;
+    getAvailabilityStatus(): Promise<{ available: boolean; detail: string }>;
     onSessionLifecycle(handler: (event: AdaptedSessionLifecycleEvent) => void): () => void;
     shutdown(): Promise<void>;
 };

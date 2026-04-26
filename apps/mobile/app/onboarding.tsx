@@ -59,12 +59,14 @@ const slides: ReadonlyArray<OnboardingSlide> = [
         description: "Run these commands on the Mac or Windows computer you want to control from your phone.",
         points: [
             "Install it globally so you can run the `code-companion` command from any terminal.",
-            "You normally do not need to install GitHub Copilot CLI separately; `code-companion login` starts that flow for you.",
+            "Install the official GitHub Copilot CLI separately so `copilot` is available in PATH.",
+            "On Windows, install PowerShell 7 before pairing so agent commands can run.",
             "The last command starts the companion and shows the pairing QR code.",
         ],
         note: "Use the same computer later when you want to resume sessions.",
         icon: "terminal",
         commands: [
+            "npm install -g @github/copilot",
             "npm install -g @senoldogann/code-companion",
             "code-companion login",
             "code-companion up",

@@ -1,6 +1,21 @@
 import type { SessionHistoryItem } from "@copilot-mobile/shared";
 import type { ChatItem } from "../../stores/session-store-types";
+import { useSessionStore } from "../../stores/session-store";
 import { __testables } from "../message-handler";
+
+afterEach(() => {
+    jest.clearAllMocks();
+    useSessionStore.setState({
+        activeSessionId: null,
+        sessions: [],
+        agentMode: "agent",
+        permissionLevel: "default",
+        runtimeMode: "interactive",
+        chatItems: [],
+        busySessions: {},
+        isAssistantTyping: false,
+    });
+});
 
 describe("message handler history merge", () => {
     it("preserves an active streaming assistant item when history catches up", () => {
@@ -119,6 +134,28 @@ describe("message handler history merge", () => {
                 mimeType: "image/jpeg",
                 displayName: "screen.jpg",
             }],
+        });
+    });
+});
+
+describe("message handler session preference restore", () => {
+    it("keeps a behavior snapshot stable if remote resume state arrives with defaults", () => {
+        useSessionStore.setState({
+            agentMode: "agent",
+            permissionLevel: "autopilot",
+        });
+
+        const snapshot = __testables.readSessionBehaviorPreferences();
+
+        useSessionStore.getState().syncRemoteSessionState({
+            agentMode: "agent",
+            permissionLevel: "default",
+            runtimeMode: "interactive",
+        });
+
+        expect(snapshot).toEqual({
+            agentMode: "agent",
+            permissionLevel: "autopilot",
         });
     });
 });

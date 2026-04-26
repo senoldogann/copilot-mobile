@@ -1,5 +1,6 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
 import process from "node:process";
 import {
     ensureCompanionDirectories,
@@ -19,6 +20,16 @@ const COMMON_COPILOT_CLI_PATHS = [
     "/opt/homebrew/bin/copilot",
     "/usr/local/bin/copilot",
 ];
+
+function normalizeManagedCopilotCliPath(resolvedPath) {
+    if (path.basename(resolvedPath).toLowerCase() !== "npm-loader.js") {
+        return resolvedPath;
+    }
+
+    const candidatePath = path.join(path.dirname(resolvedPath), "index.js");
+    const stats = statSync(candidatePath, { throwIfNoEntry: false });
+    return stats?.isFile() ? candidatePath : resolvedPath;
+}
 
 function getLaunchctlDomain() {
     const uid = process.getuid?.();
@@ -54,7 +65,7 @@ function sleep(milliseconds) {
 export function resolvePreferredCopilotCliPath() {
     const configuredPath = process.env.COPILOT_CLI_PATH;
     if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
-        const resolvedPath = configuredPath.trim();
+        const resolvedPath = normalizeManagedCopilotCliPath(configuredPath.trim());
         const stats = statSync(resolvedPath, { throwIfNoEntry: false });
         if (stats?.isFile()) {
             return resolvedPath;

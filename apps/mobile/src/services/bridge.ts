@@ -64,6 +64,11 @@ export type WorkspaceDirectorySearchMatch = {
     name: string;
 };
 
+type SessionBehaviorPreferences = {
+    agentMode: AgentMode;
+    permissionLevel: PermissionLevel;
+};
+
 let client: ReturnType<typeof createWSClient> | null = null;
 const STALE_DIRECT_CREDENTIAL_GRACE_MS = 3_000;
 const NOTIFICATION_UNREGISTER_TIMEOUT_MS = 1_500;
@@ -551,18 +556,25 @@ export async function sendQueuedMessage(
     await sendMessageWithoutLocalEcho(sessionId, content, images);
 }
 
-export async function syncSessionPreferences(sessionId: string): Promise<void> {
+export async function syncSessionPreferences(
+    sessionId: string,
+    preferences?: SessionBehaviorPreferences
+): Promise<void> {
     const c = getClient();
     const sessionStore = getBridgeSessionState();
+    const behavior = preferences ?? {
+        agentMode: sessionStore.agentMode,
+        permissionLevel: sessionStore.permissionLevel,
+    };
 
     try {
         await c.sendMessage("session.mode.update", {
             sessionId,
-            agentMode: sessionStore.agentMode,
+            agentMode: behavior.agentMode,
         });
         await c.sendMessage("permission.level.update", {
             sessionId,
-            permissionLevel: sessionStore.permissionLevel,
+            permissionLevel: behavior.permissionLevel,
         });
     } catch (error) {
         setBridgeConnectionError(

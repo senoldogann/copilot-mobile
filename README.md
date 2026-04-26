@@ -17,6 +17,8 @@ It works like this:
 - A **Mac or Windows** computer
 - **Node.js 20+**
 - A **GitHub Copilot** account
+- The official **GitHub Copilot CLI** (`copilot`) available in PATH
+- On Windows: **PowerShell 7** (`pwsh.exe`) available in PATH
 - The **Code Companion** mobile app
 
 ### Install it globally
@@ -25,7 +27,17 @@ It works like this:
 npm install -g @senoldogann/code-companion
 ```
 
-You normally do **not** need to install GitHub Copilot CLI separately. `code-companion login` uses the bundled Copilot CLI login flow.
+Install the official GitHub Copilot CLI separately:
+
+```bash
+npm install -g @github/copilot
+```
+
+On Windows, also install PowerShell 7 before pairing:
+
+```powershell
+winget install --id Microsoft.PowerShell --source winget
+```
 
 After that, you can use the global command:
 
@@ -115,16 +127,16 @@ code-companion login
 
 This means Code Companion could not start the Copilot CLI binary.
 
-First try:
-
-```bash
-npm install -g @senoldogann/code-companion@latest
-```
-
-If it still fails, install GitHub Copilot CLI manually:
+Install the official GitHub Copilot CLI:
 
 ```bash
 npm install -g @github/copilot
+```
+
+Then open a new terminal and check:
+
+```bash
+code-companion doctor
 ```
 
 ### The phone cannot connect

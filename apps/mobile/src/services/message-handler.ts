@@ -1,6 +1,6 @@
 // Bridge message dispatcher — routes ServerMessages to Zustand stores
 
-import type { ServerMessage, SessionHistoryItem } from "@copilot-mobile/shared";
+import type { AgentMode, PermissionLevel, ServerMessage, SessionHistoryItem } from "@copilot-mobile/shared";
 import { useConnectionStore } from "../stores/connection-store";
 import { useSessionStore } from "../stores/session-store";
 import type { AgentTodo, ChatItem, TodoItemStatus } from "../stores/session-store-types";
@@ -70,6 +70,11 @@ type IndexedMergeCandidates = {
     toolByRequestId: Map<string, MergeCandidateBucket>;
     streamingAssistantIndexes: number[];
     streamingThinkingIndexes: number[];
+};
+
+type SessionBehaviorPreferences = {
+    agentMode: AgentMode;
+    permissionLevel: PermissionLevel;
 };
 
 const assistantSystemNotificationState = new Map<string, AssistantSystemNotificationBuffer>();
@@ -838,7 +843,13 @@ function mergeHistoryIntoExistingItems(
 
 export const __testables = {
     mergeHistoryIntoExistingItems,
+    readSessionBehaviorPreferences,
 };
+
+function readSessionBehaviorPreferences(): SessionBehaviorPreferences {
+    const { agentMode, permissionLevel } = useSessionStore.getState();
+    return { agentMode, permissionLevel };
+}
 
 function formatToolArguments(
     args: Record<string, unknown> | undefined
@@ -1016,13 +1027,14 @@ export function handleServerMessage(message: ServerMessage): void {
                 break;
             }
 
+            const sessionBehaviorPreferences = readSessionBehaviorPreferences();
             sessionStore.setActiveSession(message.payload.session.id);
             sessionStore.setAbortRequested(false);
             sessionStore.upsertSession(message.payload.session);
             clearBackgroundCompletion(message.payload.session.id);
             clearSystemNotificationStreamState(message.payload.session.id);
             void import("./bridge").then(({ syncSessionPreferences }) =>
-                syncSessionPreferences(message.payload.session.id)
+                syncSessionPreferences(message.payload.session.id, sessionBehaviorPreferences)
             );
 
             const chatHistoryStore = useChatHistoryStore.getState();
@@ -1307,19 +1319,22 @@ export function handleServerMessage(message: ServerMessage): void {
         case "error": {
             if (
                 message.payload.code === "SESSION_NOT_FOUND"
-                && sessionStore.activeSessionId !== null
-                && restoreCachedConversationForMissingSession(sessionStore.activeSessionId)
             ) {
-                break;
-            }
+                if (
+                    sessionStore.activeSessionId !== null
+                    && restoreCachedConversationForMissingSession(sessionStore.activeSessionId)
+                ) {
+                    break;
+                }
 
-            if (
-                message.payload.code === "SESSION_NOT_FOUND"
-                && sessionStore.activeSessionId === null
-            ) {
+                if (sessionStore.activeSessionId !== null) {
+                    sessionStore.removeSession(sessionStore.activeSessionId);
+                }
+
                 clearBackgroundCompletion();
                 sessionStore.setSessionLoading(false);
                 sessionStore.setAssistantTyping(false);
+                sessionStore.setAbortRequested(false);
                 sessionStore.setAgentTodos([]);
                 sessionStore.clearSubagentRuns();
                 sessionStore.clearPermissionPrompts();

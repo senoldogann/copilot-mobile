@@ -22,6 +22,7 @@ import type {
     ServerMessage,
     ModelInfo,
     HostSessionCapabilities,
+    PermissionLevel,
     SessionMessageInput,
 } from "@copilot-mobile/shared";
 import type { SessionContext } from "@copilot-mobile/shared";
@@ -204,6 +205,7 @@ class FakeSession implements AdaptedCopilotSession {
     private handlers: HandlerMap = {};
     private historyItems: ReadonlyArray<SessionHistoryItem> = [];
     private historyResolver: (() => Promise<ReadonlyArray<SessionHistoryItem>>) | null = null;
+    private stateResolver: ((permissionLevel: PermissionLevel) => Promise<AdaptedSessionState>) | null = null;
     private state: AdaptedSessionState = {
         agentMode: "agent",
         permissionLevel: "default",
@@ -307,6 +309,10 @@ class FakeSession implements AdaptedCopilotSession {
         this.historyResolver = resolver;
     }
 
+    setStateResolver(resolver: ((permissionLevel: PermissionLevel) => Promise<AdaptedSessionState>) | null): void {
+        this.stateResolver = resolver;
+    }
+
     unsubscribeAll(): void {
         this.unsubscribeAllCallCount += 1;
         this.handlers = {};
@@ -337,6 +343,10 @@ class FakeSession implements AdaptedCopilotSession {
     }
 
     async getState(permissionLevel: "default" | "bypass" | "autopilot"): Promise<AdaptedSessionState> {
+        if (this.stateResolver !== null) {
+            return this.stateResolver(permissionLevel);
+        }
+
         this.state = {
             ...this.state,
             permissionLevel,
@@ -793,6 +803,54 @@ describe("bridge reconnect and auth integration", () => {
         }
     });
 
+    it("approves an already-pending permission request after switching the session to autopilot", async () => {
+        const token = generatePairingToken();
+        const client = await createWSClient(testPort);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await client.waitForMessage("session.created");
+
+            const pendingDecision = session.requestPermission({
+                id: "perm-autopilot-upgrade",
+                kind: "shell",
+                metadata: { intention: "run command after switching to autopilot" },
+            });
+            const permissionPrompt = await client.waitForMessage("permission.request");
+            assert.equal(permissionPrompt.type, "permission.request");
+
+            client.send(makeClientMessage("permission.level.update", {
+                sessionId: session.id,
+                permissionLevel: "autopilot",
+            }));
+
+            assert.equal(await pendingDecision, true);
+            await wait(10);
+
+            const latestSessionState = [...client.messages]
+                .reverse()
+                .find((message) => message.type === "session.state");
+            assert.notEqual(latestSessionState, undefined);
+            assert.equal(latestSessionState.type, "session.state");
+            assert.equal(latestSessionState.payload.permissionLevel, "autopilot");
+        } finally {
+            await client.close();
+        }
+    });
+
     it("does not replay stale error messages after reconnect", async () => {
         const token = generatePairingToken();
         const clientA = await createWSClient(testPort);
@@ -918,6 +976,137 @@ describe("bridge reconnect and auth integration", () => {
             }
             session.setHistory([]);
             session.setHistoryResolver(async () => []);
+        }
+    });
+
+    it("reports SESSION_NOT_FOUND when resume history fetch reveals a stale session", async () => {
+        const token = generatePairingToken();
+        const clientA = await createWSClient(testPort);
+
+        try {
+            clientA.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            const pairingMessage = await clientA.waitForMessage("auth.authenticated");
+            assert.equal(pairingMessage.type, "auth.authenticated");
+
+            clientA.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await clientA.waitForMessage("session.created");
+            await clientA.close();
+
+            session.setHistoryResolver(async () => {
+                throw new Error(`Request session.getMessages failed with message: Session not found: ${session.id}`);
+            });
+
+            const clientB = await createWSClient(testPort);
+            try {
+                clientB.send(makeClientMessage("auth.resume", {
+                    deviceCredential: pairingMessage.payload.deviceCredential,
+                    sessionToken: pairingMessage.payload.sessionToken,
+                    lastSeenSeq: pairingMessage.seq,
+                    transportMode: "direct",
+                }));
+                await clientB.waitForMessage("auth.authenticated");
+                clientB.send(makeClientMessage("session.resume", { sessionId: session.id }));
+
+                const resumed = await clientB.waitForMessage("session.resumed");
+                assert.equal(resumed.type, "session.resumed");
+
+                const errorMessage = await clientB.waitForMessage("error");
+                assert.equal(errorMessage.type, "error");
+                assert.equal(errorMessage.payload.code, "SESSION_NOT_FOUND");
+                assert.match(errorMessage.payload.message, /session not found/i);
+            } finally {
+                await clientB.close();
+            }
+        } finally {
+            if (clientA.ws.readyState !== WebSocket.CLOSED) {
+                await clientA.close();
+            }
+            session.setHistory([]);
+            session.setHistoryResolver(async () => []);
+        }
+    });
+
+    it("removes resumed session artifacts when state refresh reports a stale session", async () => {
+        await server.shutdown();
+        const resumeOptionsSeen: Array<{ forceRefresh?: boolean } | undefined> = [];
+        server = createBridgeServer(createFakeClient(session, {
+            async resumeSession(
+                _sessionId: string,
+                options?: { forceRefresh?: boolean }
+            ): Promise<AdaptedCopilotSession> {
+                resumeOptionsSeen.push(options);
+                return session;
+            },
+        }));
+        await server.start();
+
+        const token = generatePairingToken();
+        const clientA = await createWSClient(testPort);
+
+        try {
+            clientA.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            const pairingMessage = await clientA.waitForMessage("auth.authenticated");
+            assert.equal(pairingMessage.type, "auth.authenticated");
+
+            clientA.send(makeClientMessage("session.create", {
+                config: {
+                    model: "gpt-4.1",
+                    streaming: true,
+                    agentMode: "agent",
+                    permissionLevel: "default",
+                },
+            }));
+            await clientA.waitForMessage("session.created");
+            await clientA.close();
+            const closeCountBeforeResume = session.closeCallCount;
+
+            session.setStateResolver(async () => {
+                throw new Error(`Request session.getState failed with message: Session not found: ${session.id}`);
+            });
+
+            const clientB = await createWSClient(testPort);
+            try {
+                clientB.send(makeClientMessage("auth.resume", {
+                    deviceCredential: pairingMessage.payload.deviceCredential,
+                    sessionToken: pairingMessage.payload.sessionToken,
+                    lastSeenSeq: pairingMessage.seq,
+                    transportMode: "direct",
+                }));
+                await clientB.waitForMessage("auth.authenticated");
+                clientB.send(makeClientMessage("session.resume", { sessionId: session.id }));
+
+                const errorMessage = await clientB.waitForMessage("error");
+                assert.equal(errorMessage.type, "error");
+                assert.equal(errorMessage.payload.code, "SESSION_NOT_FOUND");
+                assert.match(errorMessage.payload.message, /session not found/i);
+                assert.ok(session.closeCallCount > closeCountBeforeResume);
+
+                session.setStateResolver(null);
+                clientB.send(makeClientMessage("session.resume", { sessionId: session.id }));
+                const resumed = await clientB.waitForMessage("session.resumed");
+                assert.equal(resumed.type, "session.resumed");
+                assert.equal(resumeOptionsSeen.at(-1)?.forceRefresh, false);
+            } finally {
+                await clientB.close();
+            }
+        } finally {
+            if (clientA.ws.readyState !== WebSocket.CLOSED) {
+                await clientA.close();
+            }
+            session.setStateResolver(null);
         }
     });
 

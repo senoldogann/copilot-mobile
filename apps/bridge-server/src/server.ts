@@ -5,6 +5,7 @@ import { createBridgeServer } from "./ws/server.js";
 import { printPairingQRCode } from "./auth/qr.js";
 import { getOrCreateCompanionId } from "./auth/companion-id.js";
 import { createRelayProxy } from "./relay/proxy.js";
+import { startManagedCopilotServer } from "./copilot/server-process.js";
 import { createRelayAccessToken, getRequiredRelaySecret } from "./auth/relay-token.js";
 import { DEFAULT_WS_PORT } from "@copilot-mobile/shared";
 
@@ -204,13 +205,30 @@ async function main(): Promise<void> {
         ? null
         : getRequiredPublicCertFingerprint(publicWebSocketUrl);
 
+    const managedCopilotServer = await startManagedCopilotServer({
+        onStderr: (chunk) => {
+            process.stderr.write(chunk);
+        },
+        onUnexpectedExit: (error) => {
+            console.error(error.message);
+        },
+    });
+
+    if (managedCopilotServer !== null) {
+        console.log(`[copilot] Managed Windows CLI server ready at ${managedCopilotServer.cliUrl} (${managedCopilotServer.displayPath})`);
+    }
+
     // Create Copilot SDK adapter
-    const copilotClient = createCopilotAdapter();
+    const copilotClient = createCopilotAdapter(
+        managedCopilotServer !== null
+            ? { cliUrl: managedCopilotServer.cliUrl }
+            : undefined
+    );
 
     // Check SDK availability
-    const available = await copilotClient.isAvailable();
-    if (!available) {
-        console.warn("[copilot] Copilot CLI not reachable. Make sure you are signed in with your GitHub account.");
+    const availability = await copilotClient.getAvailabilityStatus();
+    if (!availability.available) {
+        console.warn(`[copilot] Copilot CLI not reachable: ${availability.detail}`);
         console.warn("[copilot] Starting bridge server anyway (connection attempts will continue)...\n");
     } else {
         console.log("[copilot] Copilot CLI connection successful\n");
@@ -260,6 +278,7 @@ async function main(): Promise<void> {
             relayProxy?.shutdown();
             await wsServer.shutdown();
             await copilotClient.shutdown();
+            await managedCopilotServer?.shutdown();
             process.exit(0);
         } catch (error) {
             console.error("Failed during shutdown:", error);

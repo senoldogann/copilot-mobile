@@ -7,10 +7,12 @@ This is the current desktop companion flow for Code Companion across supported d
 The desktop side should feel like:
 
 1. Install the iPhone app.
-2. Install the desktop CLI with `npm install -g @senoldogann/code-companion`.
-3. Run `code-companion login` once.
-4. Run `code-companion up`.
-5. Scan the QR from the local dashboard.
+2. Install the official GitHub Copilot CLI with `npm install -g @github/copilot`.
+3. Install the desktop CLI with `npm install -g @senoldogann/code-companion`.
+4. On Windows, install PowerShell 7 so `pwsh.exe` is available in PATH.
+5. Run `code-companion login` once.
+6. Run `code-companion up`.
+7. Scan the QR from the local dashboard.
 
 On macOS the daemon is installed as a user `LaunchAgent` at `~/Library/LaunchAgents/dev.senoldogan.codecompanion.bridge.plist`.
 On Windows the daemon runs as a detached background process tracked in `~/.code-companion/daemon.pid`.

@@ -23,15 +23,14 @@ await build({
     },
     sourcemap: true,
     legalComments: "none",
-    external: [
-        "@github/copilot-sdk",
-        "jsonwebtoken",
-        "qrcode",
-        "uuid",
-        "ws",
-        "zod",
-    ],
+    external: [],
     banner: {
-        js: "#!/usr/bin/env node",
+        js: `#!/usr/bin/env node
+import { dirname as __copilotMobileDirname } from "node:path";
+import { createRequire as __copilotMobileCreateRequire } from "node:module";
+import { fileURLToPath as __copilotMobileFileURLToPath } from "node:url";
+const __filename = __copilotMobileFileURLToPath(import.meta.url);
+const __dirname = __copilotMobileDirname(__filename);
+const require = __copilotMobileCreateRequire(import.meta.url);`,
     },
 });

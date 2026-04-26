@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { createCopilotAdapter } from "./copilot/client.js";
+import { startManagedCopilotServer } from "./copilot/server-process.js";
 import { createBridgeServer } from "./ws/server.js";
 import { createRelayProxy } from "./relay/proxy.js";
 import type { RelayProxy } from "./relay/proxy.js";
@@ -59,6 +60,7 @@ const RELAY_SECRET_ENV_NAMES = [
 ] as const;
 const REFRESH_SKEW_MS = 5 * 60 * 1000;
 const RETRY_REFRESH_DELAY_MS = 60 * 1000;
+const INITIAL_SESSION_RETRY_DELAYS_MS = [1_000, 2_000, 5_000] as const;
 
 function readEnv(names: ReadonlyArray<string>): string | undefined {
     for (const name of names) {
@@ -69,6 +71,16 @@ function readEnv(names: ReadonlyArray<string>): string | undefined {
     }
 
     return undefined;
+}
+
+function getErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function sleep(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => {
+        setTimeout(resolve, milliseconds);
+    });
 }
 
 function getConfigPath(): string {
@@ -159,6 +171,7 @@ async function requestJson(
     pathname: string,
     body: Record<string, unknown> | null
 ): Promise<unknown> {
+    const requestUrl = `${baseUrl.replace(/\/$/, "")}${pathname}`;
     const requestInit: RequestInit = {
         method,
         headers: {
@@ -171,11 +184,16 @@ async function requestJson(
         requestInit.body = JSON.stringify(body);
     }
 
-    const response = await fetch(`${baseUrl.replace(/\/$/, "")}${pathname}`, requestInit);
+    let response: Response;
+    try {
+        response = await fetch(requestUrl, requestInit);
+    } catch (error) {
+        throw new Error(`${method} ${pathname} to ${requestUrl} failed: ${getErrorMessage(error)}`);
+    }
 
     if (!response.ok) {
         const text = await response.text();
-        throw new Error(`${method} ${pathname} failed (${response.status}): ${text}`);
+        throw new Error(`${method} ${pathname} to ${requestUrl} failed (${response.status}): ${text}`);
     }
 
     return response.json();
@@ -313,14 +331,34 @@ async function main(): Promise<void> {
     let refreshTimer: ReturnType<typeof setTimeout> | null = null;
     let shuttingDown = false;
     let wsServer: ReturnType<typeof createBridgeServer> | null = null;
+    let managedCopilotServer = await startManagedCopilotServer({
+        platform: process.platform,
+        ...(config.workspaceRoot !== undefined ? { cwd: config.workspaceRoot } : {}),
+        onStderr: (chunk) => {
+            process.stderr.write(chunk);
+        },
+        onUnexpectedExit: (error) => {
+            runtimeState.daemonState = "error";
+            runtimeState.lastError = error.message;
+            console.error(error.message);
+        },
+    });
 
-    const copilotClient = createCopilotAdapter();
-    const available = await copilotClient.isAvailable();
-    runtimeState.copilotAuthenticated = available;
+    if (managedCopilotServer !== null) {
+        console.log(`[copilot] Managed Windows CLI server ready at ${managedCopilotServer.cliUrl} (${managedCopilotServer.displayPath})`);
+    }
 
-    if (!available) {
+    const copilotClient = createCopilotAdapter(
+        managedCopilotServer !== null
+            ? { platform: process.platform, cliUrl: managedCopilotServer.cliUrl }
+            : { platform: process.platform }
+    );
+    const availability = await copilotClient.getAvailabilityStatus();
+    runtimeState.copilotAuthenticated = availability.available;
+
+    if (!availability.available) {
         runtimeState.daemonState = "error";
-        runtimeState.lastError = "GitHub Copilot CLI is not authenticated. Run `code-companion login` first.";
+        runtimeState.lastError = availability.detail;
         throw new Error(runtimeState.lastError);
     }
 
@@ -352,6 +390,31 @@ async function main(): Promise<void> {
             saveDesktopConfig(configPath, config);
             return createHostedSession(config, false);
         }
+    };
+
+    const loadInitialRelaySession = async (): Promise<HostedSessionResponse> => {
+        let lastError: unknown = null;
+
+        for (let attempt = 0; attempt <= INITIAL_SESSION_RETRY_DELAYS_MS.length; attempt += 1) {
+            try {
+                return await loadRelaySession(false);
+            } catch (error) {
+                lastError = error;
+
+                if (attempt === INITIAL_SESSION_RETRY_DELAYS_MS.length) {
+                    break;
+                }
+
+                const retryDelay = INITIAL_SESSION_RETRY_DELAYS_MS[attempt];
+                if (retryDelay === undefined) {
+                    break;
+                }
+
+                await sleep(retryDelay);
+            }
+        }
+
+        throw lastError instanceof Error ? lastError : new Error(String(lastError));
     };
 
     const stopRelayProxy = (): void => {
@@ -411,7 +474,7 @@ async function main(): Promise<void> {
         }
     };
 
-    const firstSession = await loadRelaySession(false);
+    const firstSession = await loadInitialRelaySession();
     startRelayProxy(firstSession);
     scheduleSessionRefresh();
 
@@ -431,6 +494,7 @@ async function main(): Promise<void> {
             await wsServer.shutdown();
         }
         await copilotClient.shutdown();
+        await managedCopilotServer?.shutdown();
         process.exit(0);
     };
 
@@ -461,6 +525,7 @@ async function main(): Promise<void> {
         runtimeState.lastError = error instanceof Error ? error.message : String(error);
         stopRelayProxy();
         await copilotClient.shutdown();
+        await managedCopilotServer?.shutdown();
         throw error;
     }
 
