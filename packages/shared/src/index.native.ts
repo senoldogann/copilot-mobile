@@ -125,6 +125,8 @@ export type {
     AdaptedPlanExitRequest,
     AdaptedCopilotSession,
     AdaptedCopilotClient,
+    AdaptedSessionLifecycleEventType,
+    AdaptedSessionLifecycleEvent,
 } from "./adapter.native";
 
 export {

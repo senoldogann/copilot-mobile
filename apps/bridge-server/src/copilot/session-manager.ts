@@ -154,6 +154,7 @@ export function createSessionManager(
     const sessionStates = new Map<string, SessionBehaviorState>();
     const abortedSessionIds = new Set<string>();
     const busyWatchdogTimers = new Map<string, ReturnType<typeof setTimeout>>();
+    let sessionListRefreshTimer: ReturnType<typeof setTimeout> | null = null;
     let autoApproveReads = false;
     // Latest observed host session capabilities — merged per session.
     // Currently holds the value for the single active session model.
@@ -200,6 +201,17 @@ export function createSessionManager(
             type: "capabilities.state",
             payload: buildCapabilitiesPayload(),
         });
+    }
+
+    function scheduleSessionListRefresh(): void {
+        if (sessionListRefreshTimer !== null) {
+            return;
+        }
+
+        sessionListRefreshTimer = setTimeout(() => {
+            sessionListRefreshTimer = null;
+            void api.listSessions();
+        }, 150);
     }
 
     function getSessionState(sessionId: string): SessionBehaviorState | undefined {
@@ -815,7 +827,17 @@ export function createSessionManager(
         });
     }
 
-    return {
+    const unsubscribeLifecycleEvents = copilotClient.onSessionLifecycle((event) => {
+        if (
+            event.type === "session.created"
+            || event.type === "session.updated"
+            || event.type === "session.deleted"
+        ) {
+            scheduleSessionListRefresh();
+        }
+    });
+
+    const api = {
         async startAttachmentUpload(
             deviceId: string,
             uploadId: string,
@@ -973,7 +995,9 @@ export function createSessionManager(
         async resumeSession(sessionId: string, deviceId: string): Promise<void> {
             try {
                 const previousSession = activeSessions.get(sessionId);
-                const session = await copilotClient.resumeSession(sessionId);
+                const session = await copilotClient.resumeSession(sessionId, {
+                    forceRefresh: previousSession !== undefined,
+                });
                 activeSessions.set(session.id, session);
                 completionNotifier.bindSessionToDevice(session.id, deviceId);
                 const resumedTitle = session.getInfo().title;
@@ -1066,12 +1090,27 @@ export function createSessionManager(
         },
 
         async requestSessionHistory(sessionId: string): Promise<void> {
-            const session = activeSessions.get(sessionId);
-            if (session === undefined) {
+            const previousSession = activeSessions.get(sessionId);
+            if (previousSession === undefined) {
                 return;
             }
 
             try {
+                const session = await copilotClient.resumeSession(sessionId, { forceRefresh: true });
+                activeSessions.set(session.id, session);
+                if (previousSession !== session) {
+                    previousSession.unsubscribeAll();
+                }
+
+                session.unsubscribeAll();
+                wireSessionEvents(session);
+                const refreshedState = await session.getState(
+                    sessionStates.get(session.id)?.permissionLevel ?? "default"
+                );
+                sessionStates.set(session.id, adaptSessionState(refreshedState, session.id));
+                emitSessionState(session.id);
+                syncExternalSession(session.id);
+
                 const history = await session.getHistory();
                 send({
                     ...makeBase(),
@@ -1860,6 +1899,11 @@ export function createSessionManager(
         },
 
         async shutdown(): Promise<void> {
+            if (sessionListRefreshTimer !== null) {
+                clearTimeout(sessionListRefreshTimer);
+                sessionListRefreshTimer = null;
+            }
+            unsubscribeLifecycleEvents();
             for (const pending of pendingPermissions.values()) {
                 clearTimeout(pending.timer);
                 pending.resolve(false);
@@ -1878,4 +1922,5 @@ export function createSessionManager(
             await copilotClient.shutdown();
         },
     };
+    return api;
 }

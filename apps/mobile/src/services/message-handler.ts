@@ -1071,6 +1071,12 @@ export function handleServerMessage(message: ServerMessage): void {
         }
 
         case "session.list": {
+            const nextSessionIds = new Set(message.payload.sessions.map((session) => session.id));
+            for (const existingSession of sessionStore.sessions) {
+                if (!nextSessionIds.has(existingSession.id)) {
+                    sessionStore.removeSession(existingSession.id);
+                }
+            }
             sessionStore.setSessions(message.payload.sessions);
             for (const session of message.payload.sessions) {
                 rememberWorkspaceDirectory(session.context?.workspaceRoot);

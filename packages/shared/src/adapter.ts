@@ -121,13 +121,34 @@ export type AdaptedCopilotSession = {
     getState(permissionLevel: PermissionLevel): Promise<AdaptedSessionState>;
 };
 
+export type AdaptedSessionLifecycleEventType =
+    | "session.created"
+    | "session.deleted"
+    | "session.updated"
+    | "session.foreground"
+    | "session.background";
+
+export type AdaptedSessionLifecycleEvent = {
+    type: AdaptedSessionLifecycleEventType;
+    sessionId: string;
+    metadata?: {
+        startTime: string;
+        modifiedTime: string;
+        summary?: string;
+    };
+};
+
 // Client — main interface managing the Copilot CLI connection
 export type AdaptedCopilotClient = {
     createSession(config: SessionConfig): Promise<AdaptedCopilotSession>;
-    resumeSession(sessionId: string): Promise<AdaptedCopilotSession>;
+    resumeSession(
+        sessionId: string,
+        options?: { forceRefresh?: boolean }
+    ): Promise<AdaptedCopilotSession>;
     listSessions(): Promise<ReadonlyArray<SessionInfo>>;
     deleteSession(sessionId: string): Promise<void>;
     listModels(): Promise<ReadonlyArray<ModelInfo>>;
     isAvailable(): Promise<boolean>;
+    onSessionLifecycle(handler: (event: AdaptedSessionLifecycleEvent) => void): () => void;
     shutdown(): Promise<void>;
 };

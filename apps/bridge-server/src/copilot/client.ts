@@ -25,6 +25,7 @@ import type {
     AdaptedCopilotSession,
     AdaptedPermissionRequest,
     AdaptedPlanExitRequest,
+    AdaptedSessionLifecycleEvent,
     AdaptedSessionState,
     AdaptedToolCompletionDetails,
     AdaptedToolStartDetails,
@@ -851,7 +852,18 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
         ...(cliPath !== undefined ? { cliPath } : {}),
     });
     const sessions = new Map<string, SessionRecord>();
+    const lifecycleHandlers = new Set<(event: AdaptedSessionLifecycleEvent) => void>();
     let startPromise: Promise<void> | null = null;
+    const unsubscribeLifecycleNotifications = client.on((event) => {
+        const adaptedEvent: AdaptedSessionLifecycleEvent = {
+            type: event.type,
+            sessionId: event.sessionId,
+            ...(event.metadata !== undefined ? { metadata: event.metadata } : {}),
+        };
+        for (const handler of lifecycleHandlers) {
+            handler(adaptedEvent);
+        }
+    });
 
     // Permission/input handlers for each session can be set externally
     // using the proxy pattern
@@ -1268,11 +1280,18 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             return session;
         },
 
-        async resumeSession(sessionId: string): Promise<AdaptedCopilotSession> {
+        async resumeSession(
+            sessionId: string,
+            options?: { forceRefresh?: boolean }
+        ): Promise<AdaptedCopilotSession> {
             const existing = sessions.get(sessionId);
-            if (existing !== undefined) {
+            if (existing !== undefined && options?.forceRefresh !== true) {
                 existing.info.lastActiveAt = Date.now();
                 return existing.session;
+            }
+
+            if (existing !== undefined) {
+                existing.session.close();
             }
 
             await ensureConnected();
@@ -1361,7 +1380,15 @@ export function createCopilotAdapter(): AdaptedCopilotClient {
             }
         },
 
+        onSessionLifecycle(handler: (event: AdaptedSessionLifecycleEvent) => void): () => void {
+            lifecycleHandlers.add(handler);
+            return () => {
+                lifecycleHandlers.delete(handler);
+            };
+        },
+
         async shutdown(): Promise<void> {
+            unsubscribeLifecycleNotifications();
             for (const [, record] of sessions) {
                 record.session.close();
             }

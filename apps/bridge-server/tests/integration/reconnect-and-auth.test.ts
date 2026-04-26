@@ -13,6 +13,7 @@ import type {
     AdaptedCopilotClient,
     AdaptedCopilotSession,
     AdaptedPermissionRequest,
+    AdaptedSessionLifecycleEvent,
     AdaptedSessionState,
     AdaptedUserInputRequest,
     SessionConfig,
@@ -369,18 +370,25 @@ class FakeSession implements AdaptedCopilotSession {
 function createFakeClient(
     session: FakeSession,
     options: {
-        resumeSession?: (sessionId: string) => Promise<AdaptedCopilotSession>;
+        resumeSession?: (
+            sessionId: string,
+            options?: { forceRefresh?: boolean }
+        ) => Promise<AdaptedCopilotSession>;
         listSessions?: () => Promise<ReadonlyArray<SessionInfo>>;
         deleteSession?: (sessionId: string) => Promise<void>;
+        onSessionLifecycle?: (handler: (event: AdaptedSessionLifecycleEvent) => void) => void;
     } = {}
 ): AdaptedCopilotClient {
     return {
         async createSession(_config: SessionConfig): Promise<AdaptedCopilotSession> {
             return session;
         },
-        async resumeSession(sessionId: string): Promise<AdaptedCopilotSession> {
+        async resumeSession(
+            sessionId: string,
+            resumeOptions?: { forceRefresh?: boolean }
+        ): Promise<AdaptedCopilotSession> {
             if (options.resumeSession !== undefined) {
-                return options.resumeSession(sessionId);
+                return options.resumeSession(sessionId, resumeOptions);
             }
             return session;
         },
@@ -401,6 +409,10 @@ function createFakeClient(
         },
         async isAvailable(): Promise<boolean> {
             return true;
+        },
+        onSessionLifecycle(handler: (event: AdaptedSessionLifecycleEvent) => void): () => void {
+            options.onSessionLifecycle?.(handler);
+            return () => undefined;
         },
         async shutdown(): Promise<void> {
             return Promise.resolve();
@@ -603,7 +615,10 @@ describe("bridge reconnect and auth integration", () => {
 
         let resumeCallCount = 0;
         server = createBridgeServer(createFakeClient(session, {
-            async resumeSession(): Promise<AdaptedCopilotSession> {
+            async resumeSession(
+                _sessionId: string,
+                _options?: { forceRefresh?: boolean }
+            ): Promise<AdaptedCopilotSession> {
                 resumeCallCount += 1;
                 return session;
             },
@@ -912,7 +927,10 @@ describe("bridge reconnect and auth integration", () => {
         const corruptedSessionId = session.id;
         const deletedSessionIds: Array<string> = [];
         server = createBridgeServer(createFakeClient(session, {
-            async resumeSession(requestedSessionId: string): Promise<AdaptedCopilotSession> {
+            async resumeSession(
+                requestedSessionId: string,
+                _options?: { forceRefresh?: boolean }
+            ): Promise<AdaptedCopilotSession> {
                 assert.equal(requestedSessionId, corruptedSessionId);
                 throw new Error(
                     "Session file is corrupted (line 16: SyntaxError: Unterminated string in JSON at position 79 (line 1 column 80))"
@@ -998,6 +1016,134 @@ describe("bridge reconnect and auth integration", () => {
                 relevantTypes,
                 ["session.resumed", "assistant.message", "session.history"]
             );
+        } finally {
+            await client.close();
+        }
+    });
+
+    it("refreshes active session history from a fresh resume when the session changed externally", async () => {
+        await server.shutdown();
+
+        const staleSession = new FakeSession();
+        staleSession.setHistory([
+            {
+                id: "history-assistant-stale",
+                type: "assistant",
+                content: "stale bridge history",
+                timestamp: Date.now() - 1_000,
+            },
+        ]);
+
+        const refreshedSession = new FakeSession();
+        refreshedSession.setHistory([
+            {
+                id: "history-assistant-fresh",
+                type: "assistant",
+                content: "fresh desktop history",
+                timestamp: Date.now(),
+            },
+        ]);
+
+        const resumeCalls: Array<{ sessionId: string; forceRefresh: boolean }> = [];
+
+        server = createBridgeServer(createFakeClient(staleSession, {
+            async resumeSession(
+                requestedSessionId: string,
+                options?: { forceRefresh?: boolean }
+            ): Promise<AdaptedCopilotSession> {
+                resumeCalls.push({
+                    sessionId: requestedSessionId,
+                    forceRefresh: options?.forceRefresh === true,
+                });
+                return options?.forceRefresh === true ? refreshedSession : staleSession;
+            },
+        }));
+        await server.start();
+
+        const token = generatePairingToken();
+        const client = await createWSClient(testPort);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.resume", { sessionId: staleSession.id }));
+            await client.waitForMessage("session.resumed");
+            await client.waitForMessage("session.history");
+
+            client.send(makeClientMessage("session.history.request", { sessionId: staleSession.id }));
+            await wait(25);
+            const historyMessage = [...client.messages]
+                .reverse()
+                .find((message) => message.type === "session.history");
+
+            assert.ok(historyMessage);
+            assert.equal(historyMessage.type, "session.history");
+            assert.equal(historyMessage.payload.sessionId, staleSession.id);
+            assert.equal(historyMessage.payload.items.at(-1)?.content, "fresh desktop history");
+            assert.deepEqual(resumeCalls, [
+                { sessionId: staleSession.id, forceRefresh: false },
+                { sessionId: staleSession.id, forceRefresh: true },
+            ]);
+        } finally {
+            await client.close();
+        }
+    });
+
+    it("pushes a fresh session list when the SDK reports an external session update", async () => {
+        await server.shutdown();
+
+        let lifecycleHandler: ((event: AdaptedSessionLifecycleEvent) => void) | null = null;
+        let listedSessions: ReadonlyArray<SessionInfo> = [session.getInfo()];
+        server = createBridgeServer(createFakeClient(session, {
+            listSessions: async () => listedSessions,
+            onSessionLifecycle: (handler) => {
+                lifecycleHandler = handler;
+            },
+        }));
+        await server.start();
+
+        const token = generatePairingToken();
+        const client = await createWSClient(testPort);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.list", {}));
+            await client.waitForMessage("session.list");
+
+            listedSessions = [{
+                ...session.getInfo(),
+                lastActiveAt: Date.now() + 5_000,
+                title: "Updated by desktop",
+            }];
+
+            lifecycleHandler?.({
+                type: "session.updated",
+                sessionId: session.id,
+                metadata: {
+                    startTime: new Date(session.getInfo().createdAt).toISOString(),
+                    modifiedTime: new Date(listedSessions[0]?.lastActiveAt ?? Date.now()).toISOString(),
+                    summary: "Updated by desktop",
+                },
+            });
+
+            await wait(220);
+
+            const latestSessionList = [...client.messages]
+                .reverse()
+                .find((message) => message.type === "session.list");
+
+            assert.ok(latestSessionList);
+            assert.equal(latestSessionList.type, "session.list");
+            assert.equal(latestSessionList.payload.sessions[0]?.title, "Updated by desktop");
         } finally {
             await client.close();
         }

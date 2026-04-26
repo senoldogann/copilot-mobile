@@ -60,6 +60,23 @@ export type AdaptedCopilotSession = {
     updatedAt: string;
 };
 
+export type AdaptedSessionLifecycleEventType =
+    | "session.created"
+    | "session.deleted"
+    | "session.updated"
+    | "session.foreground"
+    | "session.background";
+
+export type AdaptedSessionLifecycleEvent = {
+    type: AdaptedSessionLifecycleEventType;
+    sessionId: string;
+    metadata?: {
+        startTime: string;
+        modifiedTime: string;
+        summary?: string;
+    };
+};
+
 export type AdaptedCopilotClient = {
     createSession(config?: SessionConfig): Promise<AdaptedCopilotSession>;
     listSessions(): Promise<ReadonlyArray<SessionInfo>>;
@@ -84,4 +101,5 @@ export type AdaptedCopilotClient = {
     setSessionMode?(sessionId: string, mode: AgentMode): Promise<void>;
     getModels?(): Promise<ReadonlyArray<ModelInfo>>;
     getCapabilities?(): Promise<HostSessionCapabilities>;
+    onSessionLifecycle?(handler: (event: AdaptedSessionLifecycleEvent) => void): () => void;
 };

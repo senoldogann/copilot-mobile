@@ -46,6 +46,7 @@ import {
     resolveRemotePushAvailability,
 } from "./notifications";
 import { clearSessionPrefetch, markSessionPrefetchRequest } from "./session-prefetch";
+import { shouldClearStoredCredentialsAfterSilentDirectResumeFailure } from "./reconnect-policy";
 import type { ImageAttachment } from "../components/chat-input-types";
 import {
     createBlobAttachments,
@@ -1030,6 +1031,7 @@ export async function tryResumeFromStoredCredentials(options: ResumeOptions): Pr
             if (
                 currentConnection.state === "disconnected"
                 && currentConnection.serverUrl === creds.serverUrl
+                && shouldClearStoredCredentialsAfterSilentDirectResumeFailure(currentConnection.error)
             ) {
                 void clearCredentials();
                 currentConnection.reset();
