@@ -69,3 +69,144 @@ jobs:
         env:
           SKIP_COPILOT_E2E: "1"
         run: pnpm test
+
+  windows-smoke:
+    name: Windows Smoke
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9
+
+      - name: Get pnpm store directory
+        shell: pwsh
+        run: |
+          "STORE_PATH=$(pnpm store path --silent)" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-store-${{ runner.os }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build shared package
+        run: pnpm build:shared
+
+      - name: Build bridge server
+        run: pnpm build:bridge
+
+      - name: Build desktop bundle
+        run: pnpm build:desktop
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Run tests
+        env:
+          SKIP_COPILOT_E2E: "1"
+        run: pnpm test
+
+      - name: Pack npm package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path .pack | Out-Null
+          npm pack --pack-destination .pack
+
+      - name: Install packed npm package globally
+        shell: pwsh
+        run: |
+          $package = Get-ChildItem .pack/*.tgz | Select-Object -First 1
+          if ($null -eq $package) {
+            throw "Packed npm tarball was not created."
+          }
+          & npm install -g -- $package.FullName
+
+      - name: Smoke login with Windows cmd shim
+        shell: pwsh
+        run: |
+          $shimPath = Join-Path $env:RUNNER_TEMP "fake-copilot.cmd"
+          @'
+          @echo off
+          setlocal
+          set "TARGET=%RUNNER_TEMP%\fake-copilot-cmd-args.txt"
+          > "%TARGET%" (
+            echo %*
+          )
+          exit /b 0
+          '@ | Set-Content -Path $shimPath -Encoding ASCII
+
+          $env:COPILOT_CLI_PATH = $shimPath
+          code-companion login
+
+          $capturedArgsPath = Join-Path $env:RUNNER_TEMP "fake-copilot-cmd-args.txt"
+          if (!(Test-Path $capturedArgsPath)) {
+            throw "The cmd shim was not executed by code-companion login."
+          }
+
+          $capturedArgs = Get-Content -Raw $capturedArgsPath
+          if ($capturedArgs -notmatch 'login') {
+            throw "The cmd shim did not receive the login argument."
+          }
+
+      - name: Smoke login with JS loader
+        shell: pwsh
+        run: |
+          $loaderPath = Join-Path $env:RUNNER_TEMP "fake-copilot-loader.mjs"
+          @'
+          import { writeFileSync } from "node:fs";
+          writeFileSync(process.env.FAKE_COPILOT_ARGS_PATH, process.argv.slice(2).join(" "), "utf8");
+          '@ | Set-Content -Path $loaderPath -Encoding UTF8
+
+          $argsPath = Join-Path $env:RUNNER_TEMP "fake-copilot-loader-args.txt"
+          $env:COPILOT_CLI_PATH = $loaderPath
+          $env:FAKE_COPILOT_ARGS_PATH = $argsPath
+          code-companion login
+
+          if (!(Test-Path $argsPath)) {
+            throw "The JS loader was not executed by code-companion login."
+          }
+
+          $capturedArgs = Get-Content -Raw $argsPath
+          if ($capturedArgs -notmatch 'login') {
+            throw "The JS loader did not receive the login argument."
+          }
+
+      - name: Smoke doctor and status
+        shell: pwsh
+        run: |
+          Remove-Item Env:COPILOT_CLI_PATH -ErrorAction SilentlyContinue
+          Remove-Item Env:FAKE_COPILOT_ARGS_PATH -ErrorAction SilentlyContinue
+
+          code-companion status
+
+          $doctorOutput = code-companion doctor --json
+          $doctorExitCode = $LASTEXITCODE
+          if ($doctorExitCode -ne 0 -and $doctorExitCode -ne 1) {
+            throw "Unexpected code-companion doctor exit code: $doctorExitCode"
+          }
+
+          $doctorReport = $doctorOutput | ConvertFrom-Json
+          if ($doctorReport.checks.id -notcontains "platform") {
+            throw "Doctor report is missing the platform check."
+          }
+          if ($doctorReport.checks.id -notcontains "copilot_cli") {
+            throw "Doctor report is missing the Copilot CLI check."
+          }

@@ -59,6 +59,7 @@ const slides: ReadonlyArray<OnboardingSlide> = [
         description: "Run these commands on the Mac or Windows computer you want to control from your phone.",
         points: [
             "Install it globally so you can run the `code-companion` command from any terminal.",
+            "You normally do not need to install GitHub Copilot CLI separately; `code-companion login` starts that flow for you.",
             "The last command starts the companion and shows the pairing QR code.",
         ],
         note: "Use the same computer later when you want to resume sessions.",

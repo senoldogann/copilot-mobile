@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { spawn, spawnSync } from "node:child_process";
 import path from "node:path";
@@ -9,7 +9,6 @@ import { loadConfig, resolveWorkspaceRoot, writeConfig } from "./lib/config.mjs"
 import {
     bootoutLaunchAgent,
     bootstrapLaunchAgent,
-    resolvePreferredCopilotCliPath,
     writeLaunchAgentPlist,
 } from "./lib/launch-agent.mjs";
 import {
@@ -224,8 +223,9 @@ function getServiceCheck(platform) {
 function resolveCopilotBinary() {
     try {
         const require = createRequire(import.meta.url);
-        const packageJsonPath = require.resolve("@github/copilot/package.json");
-        const packageJson = require(packageJsonPath);
+        const packageEntrypointPath = require.resolve("@github/copilot");
+        const packageJsonPath = path.join(path.dirname(packageEntrypointPath), "package.json");
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
         const binValue = typeof packageJson.bin === "string"
             ? packageJson.bin
             : packageJson.bin?.copilot;
@@ -239,11 +239,154 @@ function resolveCopilotBinary() {
     }
 }
 
-function runCopilotLogin() {
-    const copilotBinary = resolveCopilotBinary();
-    const child = spawn(copilotBinary, ["login"], {
+function resolveConfiguredCopilotRuntime() {
+    const configuredPath = process.env.COPILOT_CLI_PATH;
+    if (typeof configuredPath !== "string" || configuredPath.trim().length === 0) {
+        return null;
+    }
+
+    const resolvedPath = path.resolve(configuredPath.trim());
+    if (!existsSync(resolvedPath)) {
+        return null;
+    }
+
+    const extension = path.extname(resolvedPath).toLowerCase();
+    if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+        return {
+            command: process.execPath,
+            argsPrefix: [resolvedPath],
+            cliPath: process.execPath,
+            cliArgs: [resolvedPath],
+            displayPath: resolvedPath,
+            source: "configured",
+            useShell: false,
+        };
+    }
+
+    return {
+        command: resolvedPath,
+        argsPrefix: [],
+        cliPath: resolvedPath,
+        cliArgs: [],
+        displayPath: resolvedPath,
+        source: "configured",
+        useShell: process.platform === "win32" && (extension === ".cmd" || extension === ".bat"),
+    };
+}
+
+function resolveBundledCopilotRuntime() {
+    const bundledBinaryPath = resolveCopilotBinary();
+    if (bundledBinaryPath === "copilot") {
+        return null;
+    }
+
+    const extension = path.extname(bundledBinaryPath).toLowerCase();
+    if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+        return {
+            command: process.execPath,
+            argsPrefix: [bundledBinaryPath],
+            cliPath: process.execPath,
+            cliArgs: [bundledBinaryPath],
+            displayPath: bundledBinaryPath,
+            source: "bundled",
+            useShell: false,
+        };
+    }
+
+    return {
+        command: bundledBinaryPath,
+        argsPrefix: [],
+        cliPath: bundledBinaryPath,
+        cliArgs: [],
+        displayPath: bundledBinaryPath,
+        source: "bundled",
+        useShell: false,
+    };
+}
+
+function resolveCopilotRuntime() {
+    const configuredRuntime = resolveConfiguredCopilotRuntime();
+    if (configuredRuntime !== null) {
+        return configuredRuntime;
+    }
+
+    const bundledRuntime = resolveBundledCopilotRuntime();
+    if (bundledRuntime !== null) {
+        return bundledRuntime;
+    }
+
+    return null;
+}
+
+function resolveFallbackSystemCopilotRuntime() {
+    const systemCopilotCommand = process.platform === "win32" ? "copilot.cmd" : "copilot";
+    return {
+        command: systemCopilotCommand,
+        argsPrefix: [],
+        cliPath: systemCopilotCommand,
+        cliArgs: [],
+        displayPath: systemCopilotCommand,
+        source: "system",
+        useShell: process.platform === "win32",
+    };
+}
+
+function quoteShellArgument(argument) {
+    if (!/[\s"]/u.test(argument)) {
+        return argument;
+    }
+
+    return `"${argument.replace(/"/g, '\\"')}"`;
+}
+
+function spawnCopilotRuntime(runtime, commandArgs) {
+    if (process.platform === "win32" && runtime.useShell) {
+        const commandLine = [runtime.command, ...commandArgs].map(quoteShellArgument).join(" ");
+        return spawn(commandLine, {
+            stdio: "inherit",
+            env: process.env,
+            shell: true,
+        });
+    }
+
+    return spawn(runtime.command, commandArgs, {
         stdio: "inherit",
         env: process.env,
+    });
+}
+
+function runCopilotLogin() {
+    const copilotRuntime = resolveCopilotRuntime() ?? resolveFallbackSystemCopilotRuntime();
+    if (copilotRuntime === null) {
+        console.error("GitHub Copilot CLI could not be resolved.");
+        console.error("Reinstall Code Companion first:");
+        console.error("  npm install -g @senoldogann/code-companion@latest");
+        console.error("If it still fails, install GitHub Copilot CLI manually:");
+        console.error("  npm install -g @github/copilot");
+        process.exit(1);
+    }
+
+    const child = spawnCopilotRuntime(copilotRuntime, [...copilotRuntime.argsPrefix, "login"]);
+
+    child.on("error", (error) => {
+        const errorCode = typeof error === "object" && error !== null && "code" in error
+            ? error.code
+            : undefined;
+
+        if (errorCode === "ENOENT") {
+            console.error("GitHub Copilot CLI could not be started.");
+            console.error(`Resolved CLI target: ${copilotRuntime.displayPath}`);
+            console.error("Try reinstalling Code Companion first:");
+            console.error("  npm install -g @senoldogann/code-companion@latest");
+            console.error("If it still fails, install GitHub Copilot CLI manually:");
+            console.error("  npm install -g @github/copilot");
+            process.exit(1);
+            return;
+        }
+
+        console.error("Failed to launch GitHub Copilot CLI login.");
+        console.error(error instanceof Error ? error.message : String(error));
+        process.exit(1);
     });
 
     child.on("exit", (code, signal) => {
@@ -314,8 +457,8 @@ function getNodeVersionCheck() {
     };
 }
 
-async function getCopilotAuthSnapshot(copilotCliPath) {
-    if (typeof copilotCliPath !== "string" || copilotCliPath.length === 0) {
+async function getCopilotAuthSnapshot(copilotRuntime) {
+    if (copilotRuntime === null) {
         return {
             ok: false,
             detail: "GitHub Copilot CLI binary could not be resolved.",
@@ -325,7 +468,8 @@ async function getCopilotAuthSnapshot(copilotCliPath) {
     const { CopilotClient } = await import("@github/copilot-sdk");
     const client = new CopilotClient({
         autoStart: false,
-        cliPath: copilotCliPath,
+        cliPath: copilotRuntime.cliPath,
+        ...(copilotRuntime.cliArgs.length > 0 ? { cliArgs: copilotRuntime.cliArgs } : {}),
         logLevel: "error",
     });
 
@@ -437,23 +581,23 @@ async function buildDoctorReport() {
         nextActions.push("Reinstall the npm package or run `pnpm build:desktop` before starting the companion.");
     }
 
-    const copilotCliPath = resolvePreferredCopilotCliPath();
-    const copilotCliReady = typeof copilotCliPath === "string" && copilotCliPath.length > 0;
+    const copilotRuntime = resolveCopilotRuntime();
+    const copilotCliReady = copilotRuntime !== null;
     checks.push(createDoctorCheck(
         "copilot_cli",
         "GitHub Copilot CLI",
         copilotCliReady ? "pass" : "fail",
         copilotCliReady
-            ? `Resolved GitHub Copilot CLI at ${copilotCliPath}.`
-            : "GitHub Copilot CLI binary was not found in common locations or PATH."
+            ? `Resolved ${copilotRuntime.source} GitHub Copilot CLI at ${copilotRuntime.displayPath}.`
+            : "GitHub Copilot CLI could not be resolved from the package or system PATH."
     ));
     if (!copilotCliReady) {
-        nextActions.push("Install GitHub Copilot CLI and ensure the `copilot` binary is available in PATH.");
+        nextActions.push("Reinstall Code Companion first. If `copilot` is still missing, install GitHub Copilot CLI and ensure the `copilot` binary is available in PATH.");
     }
 
     if (copilotCliReady) {
         try {
-            const authSnapshot = await getCopilotAuthSnapshot(copilotCliPath);
+            const authSnapshot = await getCopilotAuthSnapshot(copilotRuntime);
             checks.push(createDoctorCheck(
                 "copilot_auth",
                 "Copilot authentication",
@@ -461,7 +605,7 @@ async function buildDoctorReport() {
                 authSnapshot.detail
             ));
             if (!authSnapshot.ok) {
-                nextActions.push("Run `code-companion login` on the Mac companion account.");
+                nextActions.push("Run `code-companion login` on the desktop companion account.");
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

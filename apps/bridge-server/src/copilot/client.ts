@@ -3,6 +3,7 @@
 // Only this file needs updating if the SDK changes
 
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { CopilotClient, CopilotSession } from "@github/copilot-sdk";
 import type {
     PermissionRequest as SDKPermissionRequest,
@@ -46,13 +47,8 @@ import type {
 import { MODEL_UNKNOWN } from "@copilot-mobile/shared";
 import type { SessionMetadata } from "@github/copilot-sdk";
 import { execFileSync } from "node:child_process";
-import { statSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import path from "node:path";
-
-const COMMON_COPILOT_CLI_PATHS: ReadonlyArray<string> = [
-    "/opt/homebrew/bin/copilot",
-    "/usr/local/bin/copilot",
-];
 
 function readEnv(names: ReadonlyArray<string>): string | undefined {
     for (const name of names) {
@@ -94,7 +90,14 @@ function resolveRequestedWorkspaceRoot(workspaceRoot: string | undefined): strin
     return candidatePath;
 }
 
-function resolveExplicitCopilotCliPath(): string | undefined {
+type CopilotClientLaunchOptions = {
+    cliPath: string;
+    cliArgs?: string[];
+    displayPath: string;
+    source: "configured" | "bundled";
+};
+
+function resolveExplicitCopilotCliOptions(): CopilotClientLaunchOptions | undefined {
     const configuredPath = process.env["COPILOT_CLI_PATH"];
     if (configuredPath === undefined || configuredPath.trim().length === 0) {
         return undefined;
@@ -106,44 +109,66 @@ function resolveExplicitCopilotCliPath(): string | undefined {
         throw new Error(`Configured Copilot CLI binary does not exist: ${resolvedPath}`);
     }
 
-    return resolvedPath;
-}
-
-function resolveSystemCopilotCliPath(): string | undefined {
-    for (const candidatePath of COMMON_COPILOT_CLI_PATHS) {
-        const stats = statSync(candidatePath, { throwIfNoEntry: false });
-        if (stats !== undefined && stats.isFile()) {
-            return candidatePath;
-        }
+    const extension = path.extname(resolvedPath).toLowerCase();
+    if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+        return {
+            cliPath: process.execPath,
+            cliArgs: [resolvedPath],
+            displayPath: resolvedPath,
+            source: "configured",
+        };
     }
 
+    return {
+        cliPath: resolvedPath,
+        displayPath: resolvedPath,
+        source: "configured",
+    };
+}
+
+function resolveBundledCopilotCliOptions(): CopilotClientLaunchOptions | undefined {
     try {
-        const resolvedPath = execFileSync("which", ["copilot"], {
-            encoding: "utf8",
-            stdio: ["ignore", "pipe", "ignore"],
-        }).trim();
-        if (resolvedPath.length === 0) {
+        const require = createRequire(import.meta.url);
+        const packageEntrypointPath = require.resolve("@github/copilot");
+        const packageJsonPath = path.join(path.dirname(packageEntrypointPath), "package.json");
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+            bin?: string | { copilot?: string };
+        };
+        const binValue = typeof packageJson.bin === "string"
+            ? packageJson.bin
+            : packageJson.bin?.copilot;
+        if (typeof binValue !== "string") {
             return undefined;
         }
 
-        const stats = statSync(resolvedPath, { throwIfNoEntry: false });
-        if (stats === undefined || !stats.isFile()) {
-            return undefined;
+        const resolvedPath = path.resolve(path.dirname(packageJsonPath), binValue);
+        const extension = path.extname(resolvedPath).toLowerCase();
+        if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+            return {
+                cliPath: process.execPath,
+                cliArgs: [resolvedPath],
+                displayPath: resolvedPath,
+                source: "bundled",
+            };
         }
 
-        return resolvedPath;
+        return {
+            cliPath: resolvedPath,
+            displayPath: resolvedPath,
+            source: "bundled",
+        };
     } catch {
         return undefined;
     }
 }
 
-function resolvePreferredCopilotCliPath(): string | undefined {
-    const explicitPath = resolveExplicitCopilotCliPath();
-    if (explicitPath !== undefined) {
-        return explicitPath;
+function resolveCopilotClientLaunchOptions(): CopilotClientLaunchOptions | undefined {
+    const explicitOptions = resolveExplicitCopilotCliOptions();
+    if (explicitOptions !== undefined) {
+        return explicitOptions;
     }
 
-    return resolveSystemCopilotCliPath();
+    return resolveBundledCopilotCliOptions();
 }
 
 type SessionRecord = {
@@ -841,15 +866,20 @@ function adaptPermissionRequest(req: SDKPermissionRequest): AdaptedPermissionReq
 }
 
 export function createCopilotAdapter(): AdaptedCopilotClient {
-    const cliPath = resolvePreferredCopilotCliPath();
-    if (cliPath !== undefined) {
-        console.log(`[copilot] Using CLI binary: ${cliPath}`);
+    const cliLaunchOptions = resolveCopilotClientLaunchOptions();
+    if (cliLaunchOptions !== undefined) {
+        console.log(`[copilot] Using ${cliLaunchOptions.source} CLI runtime: ${cliLaunchOptions.displayPath}`);
     } else {
-        console.warn("[copilot] No external Copilot CLI binary detected. Falling back to the bundled SDK CLI.");
+        console.warn("[copilot] No configured Copilot CLI override detected. Falling back to the SDK default bundled CLI.");
     }
     const client = new CopilotClient({
         cwd: WORKSPACE_ROOT,
-        ...(cliPath !== undefined ? { cliPath } : {}),
+        ...(cliLaunchOptions !== undefined
+            ? {
+                cliPath: cliLaunchOptions.cliPath,
+                ...(cliLaunchOptions.cliArgs !== undefined ? { cliArgs: cliLaunchOptions.cliArgs } : {}),
+            }
+            : {}),
     });
     const sessions = new Map<string, SessionRecord>();
     const lifecycleHandlers = new Set<(event: AdaptedSessionLifecycleEvent) => void>();

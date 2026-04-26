@@ -25,6 +25,8 @@ It works like this:
 npm install -g @senoldogann/code-companion
 ```
 
+You normally do **not** need to install GitHub Copilot CLI separately. `code-companion login` uses the bundled Copilot CLI login flow.
+
 After that, you can use the global command:
 
 ```bash
@@ -107,6 +109,22 @@ Run:
 
 ```bash
 code-companion login
+```
+
+### `spawn copilot ENOENT`
+
+This means Code Companion could not start the Copilot CLI binary.
+
+First try:
+
+```bash
+npm install -g @senoldogann/code-companion@latest
+```
+
+If it still fails, install GitHub Copilot CLI manually:
+
+```bash
+npm install -g @github/copilot
 ```
 
 ### The phone cannot connect

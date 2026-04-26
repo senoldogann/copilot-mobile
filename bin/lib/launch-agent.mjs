@@ -69,11 +69,13 @@ export function resolvePreferredCopilotCliPath() {
     }
 
     try {
-        const resolvedPath = execFileSync("which", ["copilot"], {
+        const lookupCommand = process.platform === "win32" ? "where.exe" : "which";
+        const resolvedOutput = execFileSync(lookupCommand, ["copilot"], {
             encoding: "utf8",
             stdio: ["ignore", "pipe", "ignore"],
         }).trim();
-        return resolvedPath.length > 0 ? resolvedPath : null;
+        const resolvedPath = resolvedOutput.split(/\r?\n/).map((line) => line.trim()).find((line) => line.length > 0);
+        return resolvedPath ?? null;
     } catch {
         return null;
     }
