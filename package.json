@@ -53,7 +53,7 @@
         "pnpm": ">=9.0.0"
     },
     "devDependencies": {
-        "esbuild": "^0.25.11",
+        "esbuild": "^0.28.0",
         "uuid": "14.0.0"
     },
     "pnpm": {
