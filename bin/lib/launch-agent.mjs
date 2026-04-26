@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import path from "node:path";
 import process from "node:process";
 import {
     ensureCompanionDirectories,
@@ -19,6 +21,39 @@ const COMMON_COPILOT_CLI_PATHS = [
     "/opt/homebrew/bin/copilot",
     "/usr/local/bin/copilot",
 ];
+
+function normalizeManagedCopilotCliPath(resolvedPath) {
+    if (path.basename(resolvedPath).toLowerCase() !== "npm-loader.js") {
+        return resolvedPath;
+    }
+
+    const candidatePath = path.join(path.dirname(resolvedPath), "index.js");
+    const stats = statSync(candidatePath, { throwIfNoEntry: false });
+    return stats?.isFile() ? candidatePath : resolvedPath;
+}
+
+function resolveBundledCopilotCliPath() {
+    try {
+        const require = createRequire(import.meta.url);
+        const packageEntrypointPath = require.resolve("@github/copilot");
+        const packageJsonPath = path.join(path.dirname(packageEntrypointPath), "package.json");
+        const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
+        const binValue = typeof packageJson.bin === "string"
+            ? packageJson.bin
+            : packageJson.bin?.copilot;
+        if (typeof binValue !== "string") {
+            return null;
+        }
+
+        const bundledPath = normalizeManagedCopilotCliPath(
+            path.resolve(path.dirname(packageJsonPath), binValue)
+        );
+        const stats = statSync(bundledPath, { throwIfNoEntry: false });
+        return stats?.isFile() ? bundledPath : null;
+    } catch {
+        return null;
+    }
+}
 
 function getLaunchctlDomain() {
     const uid = process.getuid?.();
@@ -54,11 +89,16 @@ function sleep(milliseconds) {
 export function resolvePreferredCopilotCliPath() {
     const configuredPath = process.env.COPILOT_CLI_PATH;
     if (typeof configuredPath === "string" && configuredPath.trim().length > 0) {
-        const resolvedPath = configuredPath.trim();
+        const resolvedPath = normalizeManagedCopilotCliPath(configuredPath.trim());
         const stats = statSync(resolvedPath, { throwIfNoEntry: false });
         if (stats?.isFile()) {
             return resolvedPath;
         }
+    }
+
+    const bundledPath = resolveBundledCopilotCliPath();
+    if (bundledPath !== null) {
+        return bundledPath;
     }
 
     for (const candidatePath of COMMON_COPILOT_CLI_PATHS) {

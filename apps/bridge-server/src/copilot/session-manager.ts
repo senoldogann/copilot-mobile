@@ -271,8 +271,10 @@ export function createSessionManager(
             session.close();
         }
         clearBusyWatchdog(sessionId);
+        discardPendingPrompts(sessionId);
         sessionStates.delete(sessionId);
         completionNotifier.forgetSession(sessionId);
+        scheduleSessionListRefresh();
 
         if (externalSessionStore !== undefined) {
             try {
@@ -297,6 +299,19 @@ export function createSessionManager(
                 error: error instanceof Error ? error.message : String(error),
             });
         }
+    }
+
+    async function reportMissingSession(sessionId: string, error: unknown): Promise<void> {
+        await removeSessionArtifacts(sessionId, { deleteRemote: false });
+        send({
+            ...makeBase(),
+            type: "error",
+            payload: {
+                code: "SESSION_NOT_FOUND",
+                message: error instanceof Error ? error.message : `Session ${sessionId} not found`,
+                retry: false,
+            },
+        });
     }
 
     function clearBusyWatchdog(sessionId: string): void {
@@ -431,6 +446,34 @@ export function createSessionManager(
             runtimeMode: nextState.runtimeMode,
             busy: existingBusy,
         };
+    }
+
+    function shouldAutoApprovePermission(
+        permissionLevel: PermissionLevel,
+        kind: AdaptedPermissionRequest["kind"]
+    ): boolean {
+        return permissionLevel === "bypass"
+            || permissionLevel === "autopilot"
+            || (autoApproveReads && kind === "read");
+    }
+
+    function resolvePendingPermissionsForSession(
+        sessionId: string,
+        permissionLevel: PermissionLevel
+    ): void {
+        for (const [requestId, pending] of pendingPermissions.entries()) {
+            if (pending.payload.payload.sessionId !== sessionId) {
+                continue;
+            }
+
+            if (!shouldAutoApprovePermission(permissionLevel, pending.payload.payload.kind)) {
+                continue;
+            }
+
+            clearTimeout(pending.timer);
+            pendingPermissions.delete(requestId);
+            pending.resolve(true);
+        }
     }
 
     function createPermissionTimeout(
@@ -672,9 +715,7 @@ export function createSessionManager(
             const state = resolveState();
 
             if (
-                state.permissionLevel === "bypass"
-                || state.permissionLevel === "autopilot"
-                || (autoApproveReads && request.kind === "read")
+                shouldAutoApprovePermission(state.permissionLevel, request.kind)
             ) {
                 return true;
             }
@@ -1038,7 +1079,11 @@ export function createSessionManager(
                             },
                         });
                     })
-                    .catch((error: unknown) => {
+                    .catch(async (error: unknown) => {
+                        if (isSessionNotFoundResumeError(error)) {
+                            await reportMissingSession(session.id, error);
+                            return;
+                        }
                         console.warn("[session-manager] Failed to fetch session history during resume", {
                             sessionId: session.id,
                             error: error instanceof Error ? error.message : String(error),
@@ -1121,6 +1166,10 @@ export function createSessionManager(
                     },
                 });
             } catch (error) {
+                if (isSessionNotFoundResumeError(error)) {
+                    await reportMissingSession(sessionId, error);
+                    return;
+                }
                 console.warn("[session-manager] Failed to fetch session history on demand", {
                     sessionId,
                     error: error instanceof Error ? error.message : String(error),
@@ -1855,6 +1904,7 @@ export function createSessionManager(
                     permissionLevel,
                 });
                 sessionStates.set(sessionId, adaptSessionState(nextState, sessionId));
+                resolvePendingPermissionsForSession(sessionId, permissionLevel);
                 emitSessionState(sessionId);
             } catch (error) {
                 sendWorkspaceError(
@@ -1867,6 +1917,11 @@ export function createSessionManager(
 
         updateSettings(nextSettings: { autoApproveReads: boolean }): void {
             autoApproveReads = nextSettings.autoApproveReads;
+            if (autoApproveReads) {
+                for (const [sessionId, state] of sessionStates.entries()) {
+                    resolvePendingPermissionsForSession(sessionId, state.permissionLevel);
+                }
+            }
             emitCapabilitiesState();
         },
 

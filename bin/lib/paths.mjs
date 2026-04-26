@@ -73,6 +73,10 @@ export function getDaemonEntryPoint() {
     return path.join(getPackageRootDirectory(), "dist", "desktop", "bridge-daemon.mjs");
 }
 
+export function getCopilotCliWrapperPath() {
+    return path.join(getPackageRootDirectory(), "bin", "lib", "copilot-cli-wrapper.mjs");
+}
+
 export function getDaemonStdoutPath() {
     return path.join(getCompanionLogsDirectory(), "daemon.stdout.log");
 }

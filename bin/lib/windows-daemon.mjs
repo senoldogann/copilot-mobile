@@ -11,6 +11,7 @@ import process from "node:process";
 import {
     ensureCompanionDirectories,
     getCompanionConfigPath,
+    getCopilotCliWrapperPath,
     getCompanionLogsDirectory,
     getCompanionRootDirectory,
     getDaemonEntryPoint,
@@ -18,6 +19,7 @@ import {
     getDaemonStderrPath,
     getDaemonStdoutPath,
 } from "./paths.mjs";
+import { resolvePreferredCopilotCliPath } from "./launch-agent.mjs";
 
 function parsePid(rawPid) {
     const parsedPid = Number.parseInt(rawPid, 10);
@@ -70,6 +72,7 @@ export function startWindowsDaemon(workspaceRoot) {
 
     const stdoutFd = openSync(getDaemonStdoutPath(), "a");
     const stderrFd = openSync(getDaemonStderrPath(), "a");
+    const copilotCliPath = resolvePreferredCopilotCliPath();
     const workingDirectory =
         typeof workspaceRoot === "string" && workspaceRoot.length > 0
             ? workspaceRoot
@@ -82,8 +85,13 @@ export function startWindowsDaemon(workspaceRoot) {
                 ...process.env,
                 CODE_COMPANION_CONFIG_PATH: getCompanionConfigPath(),
                 CODE_COMPANION_LOGS_DIR: getCompanionLogsDirectory(),
+                CODE_COMPANION_COPILOT_WRAPPER_PATH: getCopilotCliWrapperPath(),
+                COPILOT_DISABLE_TERMINAL_TITLE: "1",
                 COPILOT_MOBILE_CONFIG_PATH: getCompanionConfigPath(),
                 COPILOT_MOBILE_LOGS_DIR: getCompanionLogsDirectory(),
+                ...(typeof copilotCliPath === "string" && copilotCliPath.length > 0
+                    ? { COPILOT_CLI_PATH: copilotCliPath }
+                    : {}),
                 ...(typeof workspaceRoot === "string" && workspaceRoot.length > 0
                     ? {
                         CODE_COMPANION_WORKSPACE_ROOT: workspaceRoot,
@@ -114,7 +122,7 @@ export function stopWindowsDaemon(statusPayload) {
     }
 
     try {
-        process.kill(pid, "SIGTERM");
+        process.kill(pid);
         return true;
     } catch {
         unlinkWindowsDaemonPidFile();

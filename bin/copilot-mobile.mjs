@@ -26,6 +26,7 @@ import {
     ensureCompanionDirectories,
     getCompanionLogsDirectory,
     getCompanionConfigPath,
+    getCopilotCliWrapperPath,
     getDaemonEntryPoint,
     getDaemonPidPath,
     getLaunchAgentPath,
@@ -48,14 +49,51 @@ function sleep(milliseconds) {
     });
 }
 
+function getErrorMessage(error) {
+    return error instanceof Error ? error.message : String(error);
+}
+
+function readRecentDaemonStderrLines(limit = 20) {
+    const logPath = `${getCompanionLogsDirectory()}/daemon.stderr.log`;
+    if (!existsSync(logPath)) {
+        return null;
+    }
+
+    try {
+        const lines = readFileSync(logPath, "utf8")
+            .split(/\r?\n/u)
+            .map((line) => line.trimEnd())
+            .filter((line) => line.length > 0);
+        return lines.length > 0 ? lines.slice(-limit) : null;
+    } catch {
+        return null;
+    }
+}
+
+function formatDaemonStartupFailure(message) {
+    const logPath = `${getCompanionLogsDirectory()}/daemon.stderr.log`;
+    const recentLines = readRecentDaemonStderrLines();
+    if (recentLines === null) {
+        return `${message} Check logs at ${logPath}`;
+    }
+
+    return `${message}\nRecent daemon stderr:\n${recentLines.map((line) => `  ${line}`).join("\n")}\nFull logs: ${logPath}`;
+}
+
 async function requestJson(method, port, path) {
-    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
-        method,
-        headers: {
-            "content-type": "application/json",
-        },
-        signal: AbortSignal.timeout(2_000),
-    });
+    const url = `http://127.0.0.1:${port}${path}`;
+    let response;
+    try {
+        response = await fetch(url, {
+            method,
+            headers: {
+                "content-type": "application/json",
+            },
+            signal: AbortSignal.timeout(2_000),
+        });
+    } catch (error) {
+        throw new Error(`Companion request to ${url} failed: ${getErrorMessage(error)}`);
+    }
 
     if (!response.ok) {
         const body = await response.text();
@@ -98,7 +136,7 @@ async function waitForStatus(port) {
         }
     }
 
-    throw new Error(`Companion daemon did not become ready on port ${port}. ${String(lastError)}`);
+    throw new Error(`Companion daemon did not become ready on port ${port}. ${getErrorMessage(lastError)}`);
 }
 
 async function waitForRelayReady(port) {
@@ -188,7 +226,7 @@ function stopManagedDaemon(statusPayload, platform) {
     }
 
     try {
-        process.kill(statusPayload.status.pid, "SIGTERM");
+        terminateProcess(statusPayload.status.pid);
         return true;
     } catch {
         return unloaded;
@@ -233,10 +271,27 @@ function resolveCopilotBinary() {
             return "copilot";
         }
 
-        return path.resolve(path.dirname(packageJsonPath), binValue);
+        const resolvedPath = path.resolve(path.dirname(packageJsonPath), binValue);
+        if (path.basename(resolvedPath).toLowerCase() === "npm-loader.js") {
+            const directEntrypoint = path.join(path.dirname(resolvedPath), "index.js");
+            if (existsSync(directEntrypoint)) {
+                return directEntrypoint;
+            }
+        }
+
+        return resolvedPath;
     } catch {
         return "copilot";
     }
+}
+
+function normalizeManagedCopilotRuntimePath(resolvedPath) {
+    if (path.basename(resolvedPath).toLowerCase() !== "npm-loader.js") {
+        return resolvedPath;
+    }
+
+    const directEntrypoint = path.join(path.dirname(resolvedPath), "index.js");
+    return existsSync(directEntrypoint) ? directEntrypoint : resolvedPath;
 }
 
 function resolveConfiguredCopilotRuntime() {
@@ -245,21 +300,38 @@ function resolveConfiguredCopilotRuntime() {
         return null;
     }
 
-    const resolvedPath = path.resolve(configuredPath.trim());
+    const resolvedPath = normalizeManagedCopilotRuntimePath(path.resolve(configuredPath.trim()));
     if (!existsSync(resolvedPath)) {
         return null;
     }
 
     const extension = path.extname(resolvedPath).toLowerCase();
     if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+        const shouldUseWrapper = process.platform === "win32";
         return {
             command: process.execPath,
-            argsPrefix: [resolvedPath],
+            argsPrefix: shouldUseWrapper
+                ? [getCopilotCliWrapperPath(), resolvedPath]
+                : [resolvedPath],
             cliPath: process.execPath,
-            cliArgs: [resolvedPath],
+            cliArgs: shouldUseWrapper
+                ? [getCopilotCliWrapperPath(), resolvedPath]
+                : [resolvedPath],
             displayPath: resolvedPath,
             source: "configured",
             useShell: false,
+        };
+    }
+
+    if (process.platform === "win32" && (extension === ".cmd" || extension === ".bat")) {
+        return {
+            command: resolvedPath,
+            argsPrefix: [],
+            cliPath: process.execPath,
+            cliArgs: [getCopilotCliWrapperPath(), resolvedPath],
+            displayPath: resolvedPath,
+            source: "configured",
+            useShell: true,
         };
     }
 
@@ -282,14 +354,31 @@ function resolveBundledCopilotRuntime() {
 
     const extension = path.extname(bundledBinaryPath).toLowerCase();
     if (extension === ".js" || extension === ".mjs" || extension === ".cjs") {
+        const shouldUseWrapper = process.platform === "win32";
         return {
             command: process.execPath,
-            argsPrefix: [bundledBinaryPath],
+            argsPrefix: shouldUseWrapper
+                ? [getCopilotCliWrapperPath(), bundledBinaryPath]
+                : [bundledBinaryPath],
             cliPath: process.execPath,
-            cliArgs: [bundledBinaryPath],
+            cliArgs: shouldUseWrapper
+                ? [getCopilotCliWrapperPath(), bundledBinaryPath]
+                : [bundledBinaryPath],
             displayPath: bundledBinaryPath,
             source: "bundled",
             useShell: false,
+        };
+    }
+
+    if (process.platform === "win32" && (extension === ".cmd" || extension === ".bat")) {
+        return {
+            command: bundledBinaryPath,
+            argsPrefix: [],
+            cliPath: process.execPath,
+            cliArgs: [getCopilotCliWrapperPath(), bundledBinaryPath],
+            displayPath: bundledBinaryPath,
+            source: "bundled",
+            useShell: true,
         };
     }
 
@@ -302,6 +391,12 @@ function resolveBundledCopilotRuntime() {
         source: "bundled",
         useShell: false,
     };
+}
+
+function getCopilotSdkTransportOptions() {
+    return process.platform === "win32"
+        ? { useStdio: false }
+        : {};
 }
 
 function resolveCopilotRuntime() {
@@ -319,15 +414,32 @@ function resolveCopilotRuntime() {
 }
 
 function resolveFallbackSystemCopilotRuntime() {
-    const systemCopilotCommand = process.platform === "win32" ? "copilot.cmd" : "copilot";
+    let systemCopilotCommand = process.platform === "win32" ? "copilot.cmd" : "copilot";
+    try {
+        const lookupCommand = process.platform === "win32" ? "where.exe" : "which";
+        const resolvedOutput = spawnSync(lookupCommand, ["copilot"], {
+            encoding: "utf8",
+            stdio: ["ignore", "pipe", "ignore"],
+        }).stdout?.trim();
+        const resolvedPath = resolvedOutput
+            ?.split(/\r?\n/u)
+            .map((line) => line.trim())
+            .find((line) => line.length > 0);
+        if (resolvedPath !== undefined) {
+            systemCopilotCommand = resolvedPath;
+        }
+    } catch {}
+
     return {
         command: systemCopilotCommand,
         argsPrefix: [],
-        cliPath: systemCopilotCommand,
-        cliArgs: [],
+        cliPath: process.platform === "win32" ? process.execPath : systemCopilotCommand,
+        cliArgs: process.platform === "win32"
+            ? [getCopilotCliWrapperPath(), systemCopilotCommand]
+            : [],
         displayPath: systemCopilotCommand,
         source: "system",
-        useShell: process.platform === "win32",
+        useShell: process.platform === "win32" && /\.(cmd|bat)$/iu.test(systemCopilotCommand),
     };
 }
 
@@ -339,6 +451,15 @@ function quoteShellArgument(argument) {
     return `"${argument.replace(/"/g, '\\"')}"`;
 }
 
+function terminateProcess(pid) {
+    if (process.platform === "win32") {
+        process.kill(pid);
+        return;
+    }
+
+    process.kill(pid, "SIGTERM");
+}
+
 function spawnCopilotRuntime(runtime, commandArgs) {
     if (process.platform === "win32" && runtime.useShell) {
         const commandLine = [runtime.command, ...commandArgs].map(quoteShellArgument).join(" ");
@@ -346,12 +467,14 @@ function spawnCopilotRuntime(runtime, commandArgs) {
             stdio: "inherit",
             env: process.env,
             shell: true,
+            windowsHide: true,
         });
     }
 
     return spawn(runtime.command, commandArgs, {
         stdio: "inherit",
         env: process.env,
+        windowsHide: process.platform === "win32",
     });
 }
 
@@ -468,6 +591,7 @@ async function getCopilotAuthSnapshot(copilotRuntime) {
     const { CopilotClient } = await import("@github/copilot-sdk");
     const client = new CopilotClient({
         autoStart: false,
+        ...getCopilotSdkTransportOptions(),
         cliPath: copilotRuntime.cliPath,
         ...(copilotRuntime.cliArgs.length > 0 ? { cliArgs: copilotRuntime.cliArgs } : {}),
         logLevel: "error",
@@ -792,8 +916,7 @@ async function handleUp() {
             stopManagedDaemon(null, platform);
         }
 
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`${message} Check logs at ${getCompanionLogsDirectory()}/daemon.stderr.log`);
+        throw new Error(formatDaemonStartupFailure(getErrorMessage(error)));
     }
 }
 
@@ -829,7 +952,7 @@ function handleLogs() {
         ? spawn(
             "powershell.exe",
             ["-NoLogo", "-NoProfile", "-Command", `Get-Content -Path '${logPath.replace(/'/g, "''")}' -Tail 100 -Wait`],
-            { stdio: "inherit" }
+            { stdio: "inherit", windowsHide: true }
         )
         : spawn("tail", ["-n", "100", "-f", logPath], {
             stdio: "inherit",
@@ -864,7 +987,7 @@ async function handleDown() {
         if (isManagedStatusPayload(status)) {
             stopManagedDaemon(status, platform);
         } else if (typeof status?.status?.pid === "number") {
-            process.kill(status.status.pid, "SIGTERM");
+            terminateProcess(status.status.pid);
         }
     } catch {
         stopManagedDaemon(null, platform);
