@@ -1,6 +1,6 @@
 {
     "name": "@senoldogann/code-companion",
-    "version": "0.1.25",
+    "version": "0.1.32",
     "type": "module",
     "bin": {
         "code-companion": "bin/copilot-mobile.mjs"
@@ -55,8 +55,8 @@
         "pnpm": ">=9.0.0"
     },
     "dependencies": {
-        "@github/copilot": "^1.0.35",
-        "@github/copilot-sdk": "0.2.2",
+        "@github/copilot": "^1.0.36",
+        "@github/copilot-sdk": "0.3.0",
         "jsonwebtoken": "9.0.2",
         "qrcode": "1.5.4",
         "ws": "8.18.2",

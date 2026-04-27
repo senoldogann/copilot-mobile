@@ -303,7 +303,7 @@ type SessionRecord = {
     unsubscribes: Array<() => void>;
 };
 
-type SessionStateRef = {
+export type SessionStateRef = {
     agentMode: AgentMode;
     permissionLevel: PermissionLevel;
 };
@@ -544,14 +544,17 @@ function isAskModeMutation(toolName: string, toolArgs: unknown): boolean {
     return false;
 }
 
-function buildSessionHooks(stateRef: SessionStateRef): SessionHooks {
+export function buildSessionHooks(stateRef: SessionStateRef): SessionHooks {
     return {
         onPreToolUse: (input: PreToolUseHookInput) => {
-            if (stateRef.agentMode !== "ask") {
-                return undefined;
+            if (
+                stateRef.agentMode !== "ask"
+                && (stateRef.permissionLevel === "bypass" || stateRef.permissionLevel === "autopilot")
+            ) {
+                return { permissionDecision: "allow" };
             }
 
-            if (!isAskModeMutation(input.toolName, input.toolArgs)) {
+            if (stateRef.agentMode !== "ask" || !isAskModeMutation(input.toolName, input.toolArgs)) {
                 return undefined;
             }
 
@@ -561,6 +564,12 @@ function buildSessionHooks(stateRef: SessionStateRef): SessionHooks {
             };
         },
     };
+}
+
+export function mapPermissionApprovalToSDKResult(approved: boolean): PermissionRequestResult {
+    return approved
+        ? { kind: "approve-once" }
+        : { kind: "reject" };
 }
 
 async function syncCustomAgent(
@@ -661,11 +670,8 @@ async function applySDKSessionState(
 ): Promise<AdaptedSessionState> {
     await syncCustomAgent(sdkSession, stateRef.agentMode);
     const runtimeMode = deriveRuntimeMode(stateRef);
-    const result = await sdkSession.rpc.mode.set({ mode: runtimeMode });
-    const resolvedCandidate =
-        result !== null && typeof result === "object" && "mode" in result
-            ? result.mode
-            : (await sdkSession.rpc.mode.get()).mode;
+    await sdkSession.rpc.mode.set({ mode: runtimeMode });
+    const resolvedCandidate = await sdkSession.rpc.mode.get();
 
     return {
         agentMode: stateRef.agentMode,
@@ -685,7 +691,7 @@ async function readSDKSessionState(
     const agentMode: AgentMode =
         agentResult.agent?.name === ASK_AGENT_NAME
             ? "ask"
-            : modeResult.mode === "plan"
+            : modeResult === "plan"
                 ? "plan"
                 : "agent";
     const fallbackRuntimeMode = deriveRuntimeMode({ agentMode, permissionLevel });
@@ -693,7 +699,7 @@ async function readSDKSessionState(
     return {
         agentMode,
         permissionLevel,
-        runtimeMode: normalizeRuntimeMode(modeResult.mode, fallbackRuntimeMode),
+        runtimeMode: normalizeRuntimeMode(modeResult, fallbackRuntimeMode),
     };
 }
 
@@ -967,6 +973,11 @@ function normalizeToolArguments(
 
 const VALID_PERMISSION_KINDS = new Set<string>(["shell", "write", "read", "mcp", "custom-tool", "url", "memory", "hook"]);
 
+function readStringProperty(source: object, key: string): string | undefined {
+    const value = Object.entries(source).find(([entryKey]) => entryKey === key)?.[1];
+    return typeof value === "string" ? value : undefined;
+}
+
 // SDK permission request -> adapted permission request conversion
 function adaptPermissionRequest(req: SDKPermissionRequest): AdaptedPermissionRequest {
     const excludedKeys = new Set(["kind", "toolCallId", "toolName", "fileName", "fullCommandText", "commandText"]);
@@ -980,9 +991,9 @@ function adaptPermissionRequest(req: SDKPermissionRequest): AdaptedPermissionReq
         metadata,
     };
 
-    const toolName = req["toolName"] as string | undefined;
-    const fileName = req["fileName"] as string | undefined;
-    const commandText = (req["fullCommandText"] as string | undefined) ?? (req["commandText"] as string | undefined);
+    const toolName = readStringProperty(req, "toolName");
+    const fileName = readStringProperty(req, "fileName");
+    const commandText = readStringProperty(req, "fullCommandText") ?? readStringProperty(req, "commandText");
 
     if (toolName !== undefined) base.toolName = toolName;
     if (fileName !== undefined) base.fileName = fileName;
@@ -1351,7 +1362,7 @@ export function createCopilotAdapter(options: CreateCopilotAdapterOptions = {}):
     ): (request: SDKPermissionRequest, invocation: { sessionId: string }) => Promise<PermissionRequestResult> {
         return async (request) => {
             if (permissionProxy.handler === null) {
-                return { kind: "denied-interactively-by-user" as const };
+                return { kind: "user-not-available" as const };
             }
             const adapted = adaptPermissionRequest(request);
             let approved: boolean;
@@ -1363,9 +1374,7 @@ export function createCopilotAdapter(options: CreateCopilotAdapterOptions = {}):
                     `Permission request handler failed for kind=${adapted.kind} requestId=${adapted.id}: ${message}`
                 );
             }
-            return approved
-                ? { kind: "approved" as const }
-                : { kind: "denied-interactively-by-user" as const };
+            return mapPermissionApprovalToSDKResult(approved);
         };
     }
 

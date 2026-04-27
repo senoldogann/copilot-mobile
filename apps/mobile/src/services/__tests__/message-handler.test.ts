@@ -1,5 +1,6 @@
 import type { SessionHistoryItem } from "@copilot-mobile/shared";
 import type { ChatItem } from "../../stores/session-store-types";
+import { useSessionStore } from "../../stores/session-store";
 import { __testables } from "../message-handler";
 
 describe("message handler history merge", () => {
@@ -119,6 +120,17 @@ describe("message handler history merge", () => {
                 mimeType: "image/jpeg",
                 displayName: "screen.jpg",
             }],
+        });
+    });
+});
+
+describe("message handler session behavior preferences", () => {
+    it("captures local agent and permission settings before resume state can overwrite them", () => {
+        useSessionStore.setState({ agentMode: "agent", permissionLevel: "autopilot" });
+
+        expect(__testables.readSessionBehaviorPreferences()).toEqual({
+            agentMode: "agent",
+            permissionLevel: "autopilot",
         });
     });
 });

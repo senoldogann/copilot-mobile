@@ -2,7 +2,12 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { SessionMetadata } from "@github/copilot-sdk";
 import type { SessionInfo } from "@copilot-mobile/shared";
-import { adaptSessionInfoFromMetadata, mergeResumedSessionInfoFromMetadata } from "../../src/copilot/client.js";
+import {
+    adaptSessionInfoFromMetadata,
+    buildSessionHooks,
+    mapPermissionApprovalToSDKResult,
+    mergeResumedSessionInfoFromMetadata,
+} from "../../src/copilot/client.js";
 
 function createMetadata(
     overrides: Partial<SessionMetadata> = {}
@@ -58,5 +63,46 @@ describe("copilot client session metadata helpers", () => {
         assert.equal(liveInfo.title, "Live title");
         assert.equal(liveInfo.context?.sessionCwd, process.cwd());
         assert.equal(liveInfo.context?.workspaceRoot, process.cwd());
+    });
+});
+
+describe("copilot client session hooks", () => {
+    const mutatingShellInput = {
+        toolName: "bash",
+        toolArgs: { command: "echo ok" },
+    } as Parameters<NonNullable<ReturnType<typeof buildSessionHooks>["onPreToolUse"]>>[0];
+
+    it("pre-approves tool use when bypass permissions are active", async () => {
+        const hooks = buildSessionHooks({ agentMode: "agent", permissionLevel: "bypass" });
+
+        const decision = await hooks.onPreToolUse?.(mutatingShellInput);
+
+        assert.deepEqual(decision, { permissionDecision: "allow" });
+    });
+
+    it("pre-approves tool use when autopilot permissions are active", async () => {
+        const hooks = buildSessionHooks({ agentMode: "agent", permissionLevel: "autopilot" });
+
+        const decision = await hooks.onPreToolUse?.(mutatingShellInput);
+
+        assert.deepEqual(decision, { permissionDecision: "allow" });
+    });
+
+    it("keeps ask mode limited to read-only analysis", async () => {
+        const hooks = buildSessionHooks({ agentMode: "ask", permissionLevel: "bypass" });
+
+        const decision = await hooks.onPreToolUse?.(mutatingShellInput);
+
+        assert.deepEqual(decision, {
+            permissionDecision: "deny",
+            permissionDecisionReason: "Ask agent is limited to read-only analysis.",
+        });
+    });
+});
+
+describe("copilot client permission mapping", () => {
+    it("returns the user permission response shape expected by current Copilot CLI", () => {
+        assert.deepEqual(mapPermissionApprovalToSDKResult(true), { kind: "approve-once" });
+        assert.deepEqual(mapPermissionApprovalToSDKResult(false), { kind: "reject" });
     });
 });

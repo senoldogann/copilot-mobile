@@ -18,6 +18,7 @@ It works like this:
 - **Node.js 20+**
 - A **GitHub Copilot** account
 - The **Code Companion** mobile app
+- On Windows, **PowerShell 7+ (`pwsh`)** should be available for Copilot CLI shell execution
 
 ### Install it globally
 
@@ -26,6 +27,14 @@ npm install -g @senoldogann/code-companion
 ```
 
 You normally do **not** need to install GitHub Copilot CLI separately. `code-companion login` uses the bundled Copilot CLI login flow.
+
+If you are upgrading from an older global install, reinstall the latest package before restarting the companion:
+
+```bash
+npm install -g @senoldogann/code-companion@latest
+code-companion down
+code-companion up
+```
 
 After that, you can use the global command:
 
@@ -137,6 +146,20 @@ code-companion qr
 ```
 
 Then scan the new QR code.
+
+### Mobile commands fail with `unexpected user permission response`
+
+Update to `@senoldogann/code-companion@0.1.32` or newer. This version uses the current Copilot SDK permission response format required by recent Copilot CLI releases.
+
+```bash
+npm install -g @senoldogann/code-companion@latest
+code-companion down
+code-companion up
+```
+
+### Shell commands do not run from the phone
+
+Check that the mobile app is using an agent mode that can execute tools and that the permission level is set to **Bypass** or **Autopilot** when you want commands to run without prompts. On Windows, also make sure PowerShell 7+ is installed and available as `pwsh`.
 
 ### I changed to a different computer
 
