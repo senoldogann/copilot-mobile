@@ -353,6 +353,10 @@ class FakeSession implements AdaptedCopilotSession {
         this.handlers.onMessage?.(content);
     }
 
+    emitAssistantDelta(delta: string, index = 0): void {
+        this.handlers.onDelta?.(delta, index);
+    }
+
     requestPermission(request: AdaptedPermissionRequest): Promise<boolean> {
         const handler = this.handlers.onPermissionRequest;
         if (handler === undefined) {
@@ -1088,6 +1092,80 @@ describe("bridge reconnect and auth integration", () => {
                 { sessionId: staleSession.id, forceRefresh: false },
                 { sessionId: staleSession.id, forceRefresh: true },
             ]);
+        } finally {
+            await client.close();
+        }
+    });
+
+    it("keeps busy session subscriptions alive when the mobile app resumes foreground", async () => {
+        await server.shutdown();
+
+        const streamingSession = new FakeSession();
+        const resumeCalls: Array<{ sessionId: string; forceRefresh: boolean }> = [];
+
+        server = createBridgeServer(createFakeClient(streamingSession, {
+            async resumeSession(
+                requestedSessionId: string,
+                options?: { forceRefresh?: boolean }
+            ): Promise<AdaptedCopilotSession> {
+                resumeCalls.push({
+                    sessionId: requestedSessionId,
+                    forceRefresh: options?.forceRefresh === true,
+                });
+                return streamingSession;
+            },
+        }));
+        await server.start();
+
+        const token = generatePairingToken();
+        const client = await createWSClient(testPort);
+
+        try {
+            client.send(makeClientMessage("auth.pair", {
+                pairingToken: token,
+                transportMode: "direct",
+            }));
+            await client.waitForMessage("auth.authenticated");
+
+            client.send(makeClientMessage("session.resume", { sessionId: streamingSession.id }));
+            await client.waitForMessage("session.resumed");
+            await client.waitForMessage("session.history");
+
+            client.send(makeClientMessage("message.send", {
+                sessionId: streamingSession.id,
+                content: "continue while app backgrounds",
+            }));
+            await wait(25);
+
+            const busyState = [...client.messages]
+                .reverse()
+                .find((message) =>
+                    message.type === "session.state"
+                    && message.payload.sessionId === streamingSession.id
+                    && message.payload.busy === true
+                );
+            assert.ok(busyState);
+
+            const resumeCallCountBeforeForegroundResume = resumeCalls.length;
+            const unsubscribeCountBeforeForegroundResume = streamingSession.unsubscribeAllCallCount;
+            const resumedMessageCountBeforeForegroundResume = client.messages
+                .filter((message) => message.type === "session.resumed")
+                .length;
+
+            client.send(makeClientMessage("session.resume", { sessionId: streamingSession.id }));
+            await wait(50);
+
+            assert.equal(resumeCalls.length, resumeCallCountBeforeForegroundResume);
+            assert.equal(streamingSession.unsubscribeAllCallCount, unsubscribeCountBeforeForegroundResume);
+            assert.equal(
+                client.messages.filter((message) => message.type === "session.resumed").length,
+                resumedMessageCountBeforeForegroundResume + 1
+            );
+
+            streamingSession.emitAssistantDelta("still streaming after foreground resume");
+            const deltaMessage = await client.waitForMessage("assistant.message_delta");
+            assert.equal(deltaMessage.type, "assistant.message_delta");
+            assert.equal(deltaMessage.payload.delta, "still streaming after foreground resume");
         } finally {
             await client.close();
         }

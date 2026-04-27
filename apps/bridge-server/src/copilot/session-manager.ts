@@ -1036,27 +1036,36 @@ export function createSessionManager(
         async resumeSession(sessionId: string, deviceId: string): Promise<void> {
             try {
                 const previousSession = activeSessions.get(sessionId);
-                const session = await copilotClient.resumeSession(sessionId, {
-                    forceRefresh: previousSession !== undefined,
-                });
+                const previousState = sessionStates.get(sessionId);
+                const shouldReuseBusySession = previousSession !== undefined && previousState?.busy === true;
+                const session = shouldReuseBusySession
+                    ? previousSession
+                    : await copilotClient.resumeSession(sessionId, {
+                        forceRefresh: previousSession !== undefined,
+                    });
                 activeSessions.set(session.id, session);
                 completionNotifier.bindSessionToDevice(session.id, deviceId);
                 const resumedTitle = session.getInfo().title;
                 if (typeof resumedTitle === "string" && resumedTitle.trim().length > 0) {
                     completionNotifier.updateSessionTitle(session.id, resumedTitle);
                 }
-                if (previousSession !== undefined && previousSession !== session) {
+                if (!shouldReuseBusySession && previousSession !== undefined && previousSession !== session) {
                     previousSession.unsubscribeAll();
                 }
 
-                session.unsubscribeAll();
-                wireSessionEvents(session);
+                if (!shouldReuseBusySession) {
+                    session.unsubscribeAll();
+                    wireSessionEvents(session);
+                }
 
                 lastHostCapabilities = session.getCapabilities();
                 const resumedState = await session.getState(
                     sessionStates.get(session.id)?.permissionLevel ?? "default"
                 );
-                sessionStates.set(session.id, adaptSessionState(resumedState, session.id));
+                sessionStates.set(session.id, {
+                    ...adaptSessionState(resumedState, session.id),
+                    busy: previousState?.busy ?? false,
+                });
 
                 send({
                     ...makeBase(),

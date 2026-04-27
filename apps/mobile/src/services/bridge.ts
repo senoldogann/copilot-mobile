@@ -70,7 +70,7 @@ export type SessionBehaviorPreferences = {
 };
 
 let client: ReturnType<typeof createWSClient> | null = null;
-const STALE_DIRECT_CREDENTIAL_GRACE_MS = 3_000;
+const STALE_DIRECT_CREDENTIAL_GRACE_MS = 15_000;
 const NOTIFICATION_UNREGISTER_TIMEOUT_MS = 1_500;
 const DELETE_SESSION_BASE_TIMEOUT_MS = 6_000;
 const DELETE_SESSION_MAX_TIMEOUT_MS = 20_000;

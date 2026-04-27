@@ -34,10 +34,40 @@ function installMockWebSocket(socket: FakeWebSocket): void {
     ) as unknown as typeof WebSocket;
 }
 
+function buildAuthenticatedMessage(seq = 1): string {
+    return JSON.stringify({
+        id: "52c7894e-3fef-419c-a60d-b3195466d077",
+        timestamp: Date.now(),
+        seq,
+        protocolVersion: 2,
+        type: "auth.authenticated",
+        payload: {
+            authMethod: "pair",
+            deviceId: "device-1",
+            deviceCredential: "device-credential",
+            sessionToken: "session-token",
+            sessionTokenExpiresAt: Date.now() + 60_000,
+            transportMode: "direct",
+            certFingerprint: null,
+            replayedCount: 0,
+        },
+    });
+}
+
 describe("createWSClient", () => {
     const OriginalWebSocket = globalThis.WebSocket;
+    const createdClients: Array<ReturnType<typeof createWSClient>> = [];
+
+    function createTrackedWSClient(config: Parameters<typeof createWSClient>[0]): ReturnType<typeof createWSClient> {
+        const client = createWSClient(config);
+        createdClients.push(client);
+        return client;
+    }
 
     afterEach(() => {
+        while (createdClients.length > 0) {
+            createdClients.pop()?.disconnect();
+        }
         jest.useRealTimers();
         globalThis.WebSocket = OriginalWebSocket;
     });
@@ -51,7 +81,7 @@ describe("createWSClient", () => {
         const stateChanges: Array<string> = [];
         const reportedErrors: Array<string> = [];
 
-        const client = createWSClient({
+        const client = createTrackedWSClient({
             onMessage: () => undefined,
             onStateChange: (state) => {
                 stateChanges.push(state);
@@ -88,7 +118,7 @@ describe("createWSClient", () => {
         const socket = new FakeWebSocket();
         installMockWebSocket(socket);
 
-        const client = createWSClient({
+        const client = createTrackedWSClient({
             onMessage: () => undefined,
             onStateChange: () => undefined,
             onError: () => undefined,
@@ -156,7 +186,7 @@ describe("createWSClient", () => {
             CLOSED: FakeWebSocket.CLOSED,
         }) as unknown as typeof WebSocket;
 
-        const client = createWSClient({
+        const client = createTrackedWSClient({
             onMessage: () => undefined,
             onStateChange: () => undefined,
             onError: () => undefined,
@@ -208,5 +238,91 @@ describe("createWSClient", () => {
         };
         expect(resumeMessage.type).toBe("auth.resume");
         expect(resumeMessage.payload["sessionToken"]).toBeUndefined();
+    });
+
+    it("closes and schedules reconnect when the authenticated connection stops answering heartbeats", () => {
+        jest.useFakeTimers();
+
+        const socket = new FakeWebSocket();
+        installMockWebSocket(socket);
+
+        const stateChanges: Array<string> = [];
+        const reportedErrors: Array<string> = [];
+        const client = createTrackedWSClient({
+            onMessage: () => undefined,
+            onStateChange: (state) => {
+                stateChanges.push(state);
+            },
+            onError: (error) => {
+                reportedErrors.push(error);
+            },
+        });
+
+        client.connectWithQR({
+            version: 2,
+            token: "pairing-token",
+            url: "ws://127.0.0.1:29877",
+            certFingerprint: null,
+            transportMode: "direct",
+        });
+
+        socket.readyState = FakeWebSocket.OPEN;
+        socket.onopen?.();
+        socket.onmessage?.({ data: buildAuthenticatedMessage() });
+
+        expect(client.getState()).toBe("authenticated");
+        expect(socket.send).toHaveBeenCalledTimes(1);
+
+        jest.advanceTimersByTime(20_000);
+
+        expect(socket.send).toHaveBeenCalledTimes(2);
+        const heartbeatMessage = JSON.parse(String(socket.send.mock.calls[1]?.[0])) as {
+            type: string;
+        };
+        expect(heartbeatMessage.type).toBe("capabilities.request");
+
+        jest.advanceTimersByTime(10_000);
+
+        expect(client.getState()).toBe("disconnected");
+        expect(stateChanges).toContain("disconnected");
+        expect(reportedErrors).toContain("Connection health check timed out");
+        expect(socket.close).toHaveBeenCalled();
+    });
+
+    it("reports relay handshake send failures without waiting for authentication timeout", () => {
+        jest.useFakeTimers();
+
+        const socket = new FakeWebSocket();
+        socket.send.mockImplementation(() => {
+            throw new Error("send failed");
+        });
+        installMockWebSocket(socket);
+
+        const reportedErrors: Array<string> = [];
+        const client = createTrackedWSClient({
+            onMessage: () => undefined,
+            onStateChange: () => undefined,
+            onError: (error) => {
+                reportedErrors.push(error);
+            },
+        });
+
+        client.connectWithQR({
+            version: 2,
+            token: "pairing-token",
+            url: "wss://relay.example/connect/mobile/companion",
+            certFingerprint: null,
+            transportMode: "relay",
+            relayAccessToken: "relay-token",
+        });
+
+        socket.readyState = FakeWebSocket.OPEN;
+        socket.onopen?.();
+
+        expect(client.getState()).toBe("disconnected");
+        expect(reportedErrors).toContain("Failed to send relay connection handshake");
+
+        jest.advanceTimersByTime(12_000);
+        expect(reportedErrors).toEqual(["Failed to send relay connection handshake"]);
     });
 });

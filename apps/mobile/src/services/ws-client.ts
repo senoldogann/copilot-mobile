@@ -34,6 +34,8 @@ const PENDING_TIMEOUT_MS = 30_000;
 const MAX_PENDING_MESSAGES = 100;
 const AUTHENTICATION_TIMEOUT_MS = 12_000;
 const SOCKET_ERROR_RECOVERY_DELAY_MS = 250;
+const HEARTBEAT_INTERVAL_MS = 20_000;
+const HEARTBEAT_TIMEOUT_MS = 10_000;
 
 function createSeqGenerator(): () => number {
     let counter = 0;
@@ -85,6 +87,8 @@ export function createWSClient(config: WSClientConfig) {
     let pendingResumeMessage: ClientMessage | null = null;
     let authenticationTimer: ReturnType<typeof setTimeout> | null = null;
     let socketErrorRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
+    let heartbeatTimer: ReturnType<typeof setTimeout> | null = null;
+    let heartbeatAwaitingSince: number | null = null;
 
     function describeSocketClose(code: number, reason: string): string {
         if (reason.trim().length > 0) {
@@ -113,6 +117,7 @@ export function createWSClient(config: WSClientConfig) {
     }
 
     function cleanup(): void {
+        clearHeartbeatTimer();
         if (socketErrorRecoveryTimer !== null) {
             clearTimeout(socketErrorRecoveryTimer);
             socketErrorRecoveryTimer = null;
@@ -133,6 +138,14 @@ export function createWSClient(config: WSClientConfig) {
             ws.close();
             ws = null;
         }
+    }
+
+    function clearHeartbeatTimer(): void {
+        if (heartbeatTimer !== null) {
+            clearTimeout(heartbeatTimer);
+            heartbeatTimer = null;
+        }
+        heartbeatAwaitingSince = null;
     }
 
     function buildMessage(
@@ -156,7 +169,7 @@ export function createWSClient(config: WSClientConfig) {
 
         authenticationTimer = setTimeout(() => {
             authenticationTimer = null;
-            if (state === "authenticated") {
+            if (state === "authenticated" || ws === null) {
                 return;
             }
 
@@ -169,6 +182,53 @@ export function createWSClient(config: WSClientConfig) {
             }
             scheduleReconnect();
         }, AUTHENTICATION_TIMEOUT_MS);
+    }
+
+    function handleConnectionHealthTimeout(): void {
+        const errorMessage = "Connection health check timed out";
+        cleanup();
+        setState("disconnected");
+        if (reportConnectionErrors) {
+            config.onError(errorMessage);
+        }
+        scheduleReconnect();
+    }
+
+    function runHeartbeat(): void {
+        heartbeatTimer = null;
+
+        if (state !== "authenticated") {
+            heartbeatAwaitingSince = null;
+            return;
+        }
+
+        if (
+            heartbeatAwaitingSince !== null
+            && Date.now() - heartbeatAwaitingSince >= HEARTBEAT_TIMEOUT_MS
+        ) {
+            handleConnectionHealthTimeout();
+            return;
+        }
+
+        const heartbeatMessage = buildMessage("capabilities.request", {});
+        if (!sendRaw(heartbeatMessage)) {
+            handleConnectionHealthTimeout();
+            return;
+        }
+
+        heartbeatAwaitingSince = Date.now();
+        heartbeatTimer = setTimeout(runHeartbeat, HEARTBEAT_TIMEOUT_MS);
+    }
+
+    function armHeartbeat(): void {
+        if (state !== "authenticated") {
+            return;
+        }
+
+        if (heartbeatTimer !== null) {
+            clearTimeout(heartbeatTimer);
+        }
+        heartbeatTimer = setTimeout(runHeartbeat, HEARTBEAT_INTERVAL_MS);
     }
 
     function sendRaw(message: ClientMessage): boolean {
@@ -355,6 +415,10 @@ export function createWSClient(config: WSClientConfig) {
         }
 
         lastServerSeq = message.seq;
+        if (state === "authenticated") {
+            heartbeatAwaitingSince = null;
+            armHeartbeat();
+        }
 
         if (message.type === "error" && state !== "authenticated") {
             const errorMessage = `[${message.payload.code}] ${message.payload.message}`;
@@ -396,6 +460,8 @@ export function createWSClient(config: WSClientConfig) {
             reportConnectionErrors = true;
             setState("authenticated");
             reconnectAttempt = 0;
+            heartbeatAwaitingSince = null;
+            armHeartbeat();
             flushPending();
         }
 
@@ -433,19 +499,28 @@ export function createWSClient(config: WSClientConfig) {
 
         ws.onopen = () => {
             setState("connected");
-        if (transportMode === "relay" && relayAccessToken !== null && ws !== null) {
-                ws.send(JSON.stringify({
-                    type: "relay.connect",
-                    role: "mobile",
-                    accessToken: relayAccessToken,
-                }));
+            if (transportMode === "relay" && relayAccessToken !== null && ws !== null) {
+                try {
+                    ws.send(JSON.stringify({
+                        type: "relay.connect",
+                        role: "mobile",
+                        accessToken: relayAccessToken,
+                    }));
+                } catch {
+                    const errorMessage = "Failed to send relay connection handshake";
+                    cleanup();
+                    setState("disconnected");
+                    if (reportConnectionErrors) {
+                        config.onError(errorMessage);
+                    }
+                    scheduleReconnect();
+                    return;
+                }
             }
-            if (pendingPairMessage !== null) {
-                sendRaw(pendingPairMessage);
+            if (pendingPairMessage !== null && sendRaw(pendingPairMessage)) {
                 pendingPairMessage = null;
             }
-            if (pendingResumeMessage !== null) {
-                sendRaw(pendingResumeMessage);
+            if (pendingResumeMessage !== null && sendRaw(pendingResumeMessage)) {
                 pendingResumeMessage = null;
             }
             armAuthenticationTimeout();

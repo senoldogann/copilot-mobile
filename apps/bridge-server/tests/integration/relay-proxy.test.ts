@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { afterEach, describe, it } from "node:test";
 import { createServer as createHttpServer } from "node:http";
 import { once } from "node:events";
-import WebSocket, { WebSocketServer } from "ws";
+import WebSocket, { WebSocket as RelayWebSocket, WebSocketServer } from "ws";
 import { createRelayAccessToken } from "../../src/auth/relay-token.js";
 import { createRelayProxy } from "../../src/relay/proxy.js";
 
@@ -336,5 +336,76 @@ describe("relay proxy", () => {
         const [closeCode, closeReason] = await closeEventPromise;
         assert.equal(closeCode, 1013);
         assert.equal(String(closeReason), "Local bridge unavailable. Please retry.");
+    });
+
+    it("preserves buffered mobile messages when a local bridge send fails during flush", async () => {
+        process.env["COPILOT_MOBILE_RELAY_SECRET"] = "relay-test-secret-0123456789abcdef";
+        const relayServer = await createTestRelayServer();
+        cleanupCallbacks.push(() => relayServer.close());
+
+        const localBridge = await createLocalBridgeHarness();
+        cleanupCallbacks.push(() => localBridge.close());
+
+        const companionId = "companion-send-retry";
+        const relayProxy = createRelayProxy({
+            relayUrl: `${relayServer.url}/connect/companion/${companionId}`,
+            localBridgeUrl: localBridge.url,
+            companionId,
+            accessToken: createRelayAccessToken("companion", companionId),
+        });
+        relayProxy.start();
+        cleanupCallbacks.push(async () => {
+            relayProxy.shutdown();
+        });
+
+        const mobileSocket = new WebSocket(`${relayServer.url}/connect/mobile/${companionId}`);
+        cleanupCallbacks.push(async () => {
+            await new Promise<void>((resolve) => {
+                if (mobileSocket.readyState === WebSocket.CLOSED) {
+                    resolve();
+                    return;
+                }
+
+                mobileSocket.once("close", () => resolve());
+                mobileSocket.close();
+            });
+        });
+
+        await once(mobileSocket, "open");
+        mobileSocket.send(JSON.stringify({
+            type: "relay.connect",
+            role: "mobile",
+            accessToken: createRelayAccessToken("mobile", companionId),
+        }));
+
+        await waitForCondition(() => relayProxy.getStatus().connectedToLocalBridge);
+
+        const originalSend = RelayWebSocket.prototype.send;
+        let simulatedFailure = false;
+        RelayWebSocket.prototype.send = function patchedSend(
+            this: RelayWebSocket & { url?: string },
+            data: Parameters<RelayWebSocket["send"]>[0],
+            ...args: Array<unknown>
+        ): void {
+            if (!simulatedFailure && this.url?.startsWith(localBridge.url) === true) {
+                simulatedFailure = true;
+                throw new Error("simulated local bridge send failure");
+            }
+
+            return originalSend.call(
+                this,
+                data,
+                ...(args as Parameters<RelayWebSocket["send"]> extends [unknown, ...infer Rest] ? Rest : never)
+            );
+        } as RelayWebSocket["send"];
+
+        try {
+            const payload = JSON.stringify({ type: "retry-after-send-error" });
+            mobileSocket.send(payload);
+            await waitForCondition(() => localBridge.receivedMessages.includes(payload), 7_000);
+            assert.equal(simulatedFailure, true);
+        } finally {
+            RelayWebSocket.prototype.send = originalSend;
+        }
     });
 });
